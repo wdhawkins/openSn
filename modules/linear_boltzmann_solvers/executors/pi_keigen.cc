@@ -172,11 +172,14 @@ PowerIterationKEigen::SetLBSFissionSource(const std::vector<double>& input, cons
   if (not additive)
     Set(q_moments_local_, 0.0);
 
-  active_set_source_function_(front_gs_,
-                              q_moments_local_,
-                              input,
-                              lbs_solver_.DensitiesLocal(),
-                              APPLY_AGS_FISSION_SOURCES | APPLY_WGS_FISSION_SOURCES);
+  for (auto& groupset : groupsets_)
+  {
+    active_set_source_function_(groupset,
+                                q_moments_local_,
+                                input,
+                                lbs_solver_.DensitiesLocal(),
+                                APPLY_AGS_FISSION_SOURCES | APPLY_WGS_FISSION_SOURCES);
+  }
 }
 
 void
@@ -191,8 +194,11 @@ PowerIterationKEigen::SetLBSScatterSource(const std::vector<double>& input,
   if (suppress_wg_scat)
     source_flags |= SUPPRESS_WG_SCATTER;
 
-  active_set_source_function_(
-    front_gs_, q_moments_local_, input, lbs_solver_.DensitiesLocal(), source_flags);
+  for (auto& groupset : groupsets_)
+  {
+    active_set_source_function_(
+      groupset, q_moments_local_, input, lbs_solver_.DensitiesLocal(), source_flags);
+  }
 }
 
 void
