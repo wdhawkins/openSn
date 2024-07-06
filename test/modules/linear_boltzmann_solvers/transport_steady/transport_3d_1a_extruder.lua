@@ -68,7 +68,6 @@ lbs_block = {
       groups_from_to = { 0, 20 },
       angular_quadrature_handle = pquad0,
       angle_aggregation_num_subsets = 1,
-      groupset_num_subsets = 1,
       inner_linear_method = "gmres",
       l_abs_tol = 1.0e-6,
       l_max_its = 300,

@@ -44,8 +44,7 @@ public:
                       unsigned int face_num,
                       unsigned int fi,
                       unsigned int angle_num,
-                      int group_num,
-                      size_t gs_ss_begin) override;
+                      int group_num) override;
 
   void Setup(const MeshContinuum& grid, const AngularQuadrature& quadrature) override;
 };

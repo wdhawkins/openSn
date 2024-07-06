@@ -22,7 +22,8 @@ private:
 public:
   explicit VacuumBoundary(size_t num_groups,
                           CoordinateSystemType coord_type = CoordinateSystemType::CARTESIAN)
-    : SweepBoundary(BoundaryType::VACUUM, num_groups, coord_type), boundary_flux_(num_groups, 0.0)
+    : SweepBoundary(BoundaryType::VACUUM, num_groups, coord_type), 
+      boundary_flux_(num_groups, 0.0)
   {
   }
 
@@ -30,8 +31,7 @@ public:
                       unsigned int face_num,
                       unsigned int fi,
                       unsigned int angle_num,
-                      int group_num,
-                      size_t gs_ss_begin) override
+                      int group_num) override
   {
     return &boundary_flux_[group_num];
   }

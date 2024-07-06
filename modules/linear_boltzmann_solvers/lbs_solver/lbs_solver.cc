@@ -1196,7 +1196,6 @@ LBSSolver::InitializeGroupsets()
 
     groupset.BuildDiscMomOperator(options_.scattering_order, options_.geometry_type);
     groupset.BuildMomDiscOperator(options_.scattering_order, options_.geometry_type);
-    groupset.BuildSubsets();
   } // for groupset
 }
 
@@ -1503,8 +1502,6 @@ LBSSolver::InitializeBoundaries()
   }
 
   // Initialize default incident boundary
-  const size_t G = num_groups_;
-
   sweep_boundaries_.clear();
   for (uint64_t bid : globl_unique_bids_set)
   {
@@ -1512,7 +1509,7 @@ LBSSolver::InitializeBoundaries()
     const bool has_not_been_set = sweep_boundaries_.count(bid) == 0;
     if (has_no_preference and has_not_been_set)
     {
-      sweep_boundaries_[bid] = std::make_shared<VacuumBoundary>(G);
+      sweep_boundaries_[bid] = std::make_shared<VacuumBoundary>(num_groups_);
     } // defaulted
     else if (has_not_been_set)
     {
@@ -1520,15 +1517,15 @@ LBSSolver::InitializeBoundaries()
       const auto& mg_q = bndry_pref.isotropic_mg_source;
 
       if (bndry_pref.type == lbs::BoundaryType::VACUUM)
-        sweep_boundaries_[bid] = std::make_shared<VacuumBoundary>(G);
+        sweep_boundaries_[bid] = std::make_shared<VacuumBoundary>(num_groups_);
       else if (bndry_pref.type == lbs::BoundaryType::ISOTROPIC)
-        sweep_boundaries_[bid] = std::make_shared<IsotropicBoundary>(G, mg_q);
+        sweep_boundaries_[bid] = std::make_shared<IsotropicBoundary>(num_groups_, mg_q);
       else if (bndry_pref.type == BoundaryType::ARBITRARY)
       {
         // FIXME:
 #if 0
         sweep_boundaries_[bid] = std::make_shared<ArbitraryBoundary>(
-          G, std::make_unique<BoundaryFunctionToLua>(bndry_pref.source_function), bid);
+          num_groups_, std::make_unique<BoundaryFunctionToLua>(bndry_pref.source_function), bid);
 #endif
       }
       else if (bndry_pref.type == lbs::BoundaryType::REFLECTING)
@@ -1580,7 +1577,7 @@ LBSSolver::InitializeBoundaries()
         }
 
         sweep_boundaries_[bid] = std::make_shared<ReflectingBoundary>(
-          G, global_normal, MapGeometryTypeToCoordSys(options_.geometry_type));
+          num_groups_, global_normal, MapGeometryTypeToCoordSys(options_.geometry_type));
       }
     } // non-defaulted
   }   // for bndry id

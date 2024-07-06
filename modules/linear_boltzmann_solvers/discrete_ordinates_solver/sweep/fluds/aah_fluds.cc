@@ -78,7 +78,7 @@ AAH_FLUDS::NLOutgoingPsi(int outb_face_counter, int face_dof, int n)
 }
 
 double*
-AAH_FLUDS::UpwindPsi(int cell_so_index, int inc_face_counter, int face_dof, int g, int n)
+AAH_FLUDS::UpwindPsi(int cell_so_index, int inc_face_counter, int face_dof, int n)
 {
   // Face category
   int fc = common_data_.so_cell_inco_face_face_category[cell_so_index][inc_face_counter];
@@ -91,8 +91,7 @@ AAH_FLUDS::UpwindPsi(int cell_so_index, int inc_face_counter, int face_dof, int 
         common_data_.local_psi_stride[fc] * num_groups_ +
       common_data_.so_cell_inco_face_dof_indices[cell_so_index][inc_face_counter]
           .upwind_dof_mapping[face_dof] *
-        num_groups_ +
-      g;
+        num_groups_;
 
     return &local_psi_[fc][index];
   }
@@ -104,15 +103,14 @@ AAH_FLUDS::UpwindPsi(int cell_so_index, int inc_face_counter, int face_dof, int 
         common_data_.delayed_local_psi_stride * num_groups_ +
       common_data_.so_cell_inco_face_dof_indices[cell_so_index][inc_face_counter]
           .upwind_dof_mapping[face_dof] *
-        num_groups_ +
-      g;
+        num_groups_;
 
     return &delayed_local_psi_old_[index];
   }
 }
 
 double*
-AAH_FLUDS::NLUpwindPsi(int nonl_inc_face_counter, int face_dof, int g, int n)
+AAH_FLUDS::NLUpwindPsi(int nonl_inc_face_counter, int face_dof, int n)
 {
   int prelocI = common_data_.nonlocal_inc_face_prelocI_slot_dof[nonl_inc_face_counter].first;
 
@@ -125,7 +123,7 @@ AAH_FLUDS::NLUpwindPsi(int nonl_inc_face_counter, int face_dof, int g, int n)
                        .second.second[face_dof];
 
     int index = nonlocal_psi_Gn_blockstride * num_groups_ * n + slot * num_groups_ +
-                mapped_dof * num_groups_ + g;
+                mapped_dof * num_groups_;
 
     return &prelocI_outgoing_psi_[prelocI][index];
   }
@@ -141,7 +139,7 @@ AAH_FLUDS::NLUpwindPsi(int nonl_inc_face_counter, int face_dof, int g, int n)
                        .second.second[face_dof];
 
     int index = nonlocal_psi_Gn_blockstride * num_groups_ * n + slot * num_groups_ +
-                mapped_dof * num_groups_ + g;
+                mapped_dof * num_groups_;
 
     return &delayed_prelocI_outgoing_psi_old_[prelocI][index];
   }

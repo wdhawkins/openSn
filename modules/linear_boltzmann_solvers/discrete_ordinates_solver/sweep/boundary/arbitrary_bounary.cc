@@ -18,8 +18,7 @@ ArbitraryBoundary::PsiIncoming(uint64_t cell_local_id,
                                unsigned int face_num,
                                unsigned int fi,
                                unsigned int angle_num,
-                               int group_num,
-                               size_t gs_ss_begin)
+                               int group_num)
 {
   if (local_cell_data_.empty())
   {

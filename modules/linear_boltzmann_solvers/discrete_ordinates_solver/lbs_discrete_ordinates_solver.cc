@@ -690,7 +690,7 @@ DiscreteOrdinatesSolver::ComputeBalance()
                   for (const auto& group : groupset.groups_)
                   {
                     const int g = group.id_;
-                    const double psi = *bndry->PsiIncoming(cell.local_id_, f, fi, n, g, 0);
+                    const double psi = *bndry->PsiIncoming(cell.local_id_, f, fi, n, g);
                     local_in_flow -= mu * wt * psi * IntFi_shapeI;
                   } // for group
                 }   // for fi
@@ -1188,14 +1188,12 @@ DiscreteOrdinatesSolver::InitFluxDataStructures(LBSGroupset& groupset)
 
   const auto& unique_so_groupings = quadrature_sweep_info.first;
   const auto& dir_id_to_so_map = quadrature_sweep_info.second;
-
   const size_t gs_num_grps = groupset.groups_.size();
-  const size_t gs_num_ss = groupset.grp_subset_infos_.size();
 
   // Passing the sweep boundaries
   //                                            to the angle aggregation
   groupset.angle_agg_ = std::make_shared<AngleAggregation>(
-    sweep_boundaries_, num_groups_, gs_num_ss, groupset.quadrature_, grid_ptr_);
+    sweep_boundaries_, gs_num_grps, groupset.quadrature_, grid_ptr_);
 
   AngleSetGroup angle_set_group;
   size_t angle_set_id = 0;
@@ -1209,70 +1207,63 @@ DiscreteOrdinatesSolver::InitFluxDataStructures(LBSGroupset& groupset)
 
     // Compute direction subsets
     const auto dir_subsets = MakeSubSets(so_grouping.size(), groupset.master_num_ang_subsets_);
-
-    for (size_t gs_ss = 0; gs_ss < gs_num_ss; gs_ss++)
+    for (const auto& dir_ss_info : dir_subsets)
     {
-      const size_t gs_ss_size = groupset.grp_subset_infos_[gs_ss].ss_size;
-      for (const auto& dir_ss_info : dir_subsets)
+      const auto& dir_ss_begin = dir_ss_info.ss_begin;
+      const auto& dir_ss_end = dir_ss_info.ss_end;
+      const auto& dir_ss_size = dir_ss_info.ss_size;
+
+      std::vector<size_t> angle_indices(dir_ss_size, 0);
       {
-        const auto& dir_ss_begin = dir_ss_info.ss_begin;
-        const auto& dir_ss_end = dir_ss_info.ss_end;
-        const auto& dir_ss_size = dir_ss_info.ss_size;
+        size_t k = 0;
+        for (size_t n = dir_ss_begin; n <= dir_ss_end; ++n)
+          angle_indices[k++] = so_grouping[n];
+      }
 
-        std::vector<size_t> angle_indices(dir_ss_size, 0);
-        {
-          size_t k = 0;
-          for (size_t n = dir_ss_begin; n <= dir_ss_end; ++n)
-            angle_indices[k++] = so_grouping[n];
-        }
-
-        if (sweep_type_ == "AAH")
-        {
-          std::shared_ptr<FLUDS> fluds = std::make_shared<AAH_FLUDS>(
-            gs_ss_size,
+      if (sweep_type_ == "AAH")
+      {
+        std::shared_ptr<FLUDS> fluds = std::make_shared<AAH_FLUDS>(
+            groupset.groups_.size(),
             angle_indices.size(),
             dynamic_cast<const AAH_FLUDSCommonData&>(fluds_common_data));
 
-          auto angle_set = std::make_shared<AAH_AngleSet>(angle_set_id++,
-                                                          gs_ss_size,
-                                                          gs_ss,
-                                                          *sweep_ordering,
-                                                          fluds,
-                                                          angle_indices,
-                                                          sweep_boundaries_,
-                                                          options_.max_mpi_message_size,
-                                                          *grid_local_comm_set_);
+        auto angle_set = std::make_shared<AAH_AngleSet>(angle_set_id++,
+                                                        groupset.groups_.size(),
+                                                        *sweep_ordering,
+                                                        fluds,
+                                                        angle_indices,
+                                                        sweep_boundaries_,
+                                                        options_.max_mpi_message_size,
+                                                        *grid_local_comm_set_);
 
-          angle_set_group.AngleSets().push_back(angle_set);
-        }
-        else if (sweep_type_ == "CBC")
-        {
-          OpenSnLogicalErrorIf(not options_.save_angular_flux,
-                               "When using sweep_type \"CBC\" then "
-                               "\"save_angular_flux\" must be true.");
-          std::shared_ptr<FLUDS> fluds =
-            std::make_shared<CBC_FLUDS>(gs_ss_size,
-                                        angle_indices.size(),
-                                        dynamic_cast<const CBC_FLUDSCommonData&>(fluds_common_data),
-                                        psi_new_local_[groupset.id_],
-                                        groupset.psi_uk_man_,
-                                        *discretization_);
+        angle_set_group.AngleSets().push_back(angle_set);
+      }
+      else if (sweep_type_ == "CBC")
+      {
+        OpenSnLogicalErrorIf(not options_.save_angular_flux,
+                             "When using sweep_type \"CBC\" then "
+                             "\"save_angular_flux\" must be true.");
+        std::shared_ptr<FLUDS> fluds =
+          std::make_shared<CBC_FLUDS>(groupset.groups_.size(),
+                                      angle_indices.size(),
+                                      dynamic_cast<const CBC_FLUDSCommonData&>(fluds_common_data),
+                                      psi_new_local_[groupset.id_],
+                                      groupset.psi_uk_man_,
+                                      *discretization_);
 
-          auto angle_set = std::make_shared<CBC_AngleSet>(angle_set_id++,
-                                                          gs_ss_size,
-                                                          *sweep_ordering,
-                                                          fluds,
-                                                          angle_indices,
-                                                          sweep_boundaries_,
-                                                          gs_ss,
-                                                          *grid_local_comm_set_);
+        auto angle_set = std::make_shared<CBC_AngleSet>(angle_set_id++,
+                                                        groupset.groups_.size(),
+                                                        *sweep_ordering,
+                                                        fluds,
+                                                        angle_indices,
+                                                        sweep_boundaries_,
+                                                        *grid_local_comm_set_);
 
-          angle_set_group.AngleSets().push_back(angle_set);
-        }
-        else
-          OpenSnInvalidArgument("Unsupported sweeptype \"" + sweep_type_ + "\"");
-      } // for an_ss
-    }   // for gs_ss
+        angle_set_group.AngleSets().push_back(angle_set);
+      }
+      else
+        OpenSnInvalidArgument("Unsupported sweeptype \"" + sweep_type_ + "\"");
+    } // for an_ss
   }     // for so_grouping
 
   groupset.angle_agg_->angle_set_groups.push_back(std::move(angle_set_group));

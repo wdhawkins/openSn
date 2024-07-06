@@ -20,16 +20,18 @@ private:
   const BoundaryType type_;
   const CoordinateSystemType coord_type_;
   double evaluation_time_ = 0.0; ///< Time value passed to boundary functions
+  std::vector<double> zero_boundary_flux_;
 
 protected:
-  std::vector<double> zero_boundary_flux_;
   size_t num_groups_;
 
 public:
   explicit SweepBoundary(BoundaryType bndry_type,
                          size_t num_groups,
                          CoordinateSystemType coord_type)
-    : type_(bndry_type), coord_type_(coord_type), num_groups_(num_groups)
+    : type_(bndry_type),
+      coord_type_(coord_type),
+      num_groups_(num_groups)
   {
     zero_boundary_flux_.resize(num_groups_, 0.0);
   }
@@ -53,8 +55,7 @@ public:
                               unsigned int face_num,
                               unsigned int fi,
                               unsigned int angle_num,
-                              int group_num,
-                              size_t gs_ss_begin);
+                              int group_num);
 
   /**
    * Returns a pointer to the location of the outgoing flux.
@@ -62,12 +63,11 @@ public:
   virtual double* PsiOutgoing(uint64_t cell_local_id,
                               unsigned int face_num,
                               unsigned int fi,
-                              unsigned int angle_num,
-                              size_t gs_ss_begin);
+                              unsigned int angle_num);
 
-  virtual void UpdateAnglesReadyStatus(const std::vector<size_t>& angles, size_t gs_ss) {}
+  virtual void UpdateAnglesReadyStatus(const std::vector<size_t>& angles) {}
 
-  virtual bool CheckAnglesReadyStatus(const std::vector<size_t>& angles, size_t gs_ss)
+  virtual bool CheckAnglesReadyStatus(const std::vector<size_t>& angles)
   {
     return true;
   }

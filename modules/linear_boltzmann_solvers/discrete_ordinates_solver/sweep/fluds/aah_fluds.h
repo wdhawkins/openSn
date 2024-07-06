@@ -51,7 +51,7 @@ public:
    * the incoming face dof, this function computes the location
    * where to store this position's outgoing psi and returns a reference
    * to it.*/
-  double* UpwindPsi(int cell_so_index, int inc_face_counter, int face_dof, int g, int n);
+  double* UpwindPsi(int cell_so_index, int inc_face_counter, int face_dof, int n);
 
   /**Given a outbound face counter this method returns a pointer
    * to the location*/
@@ -60,7 +60,7 @@ public:
   /**Given a sweep ordering index, the incoming face counter,
    * the incoming face dof, this function computes the location
    * where to obtain the position's upwind psi.*/
-  double* NLUpwindPsi(int nonl_inc_face_counter, int face_dof, int g, int n);
+  double* NLUpwindPsi(int nonl_inc_face_counter, int face_dof, int n);
 
   size_t GetPrelocIFaceDOFCount(int prelocI) const;
   size_t GetDelayedPrelocIFaceDOFCount(int prelocI) const;

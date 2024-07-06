@@ -15,8 +15,7 @@ SweepBoundary::PsiIncoming(uint64_t cell_local_id,
                            unsigned int face_num,
                            unsigned int fi,
                            unsigned int angle_num,
-                           int group_num,
-                           size_t gs_ss_begin)
+                           int group_num)
 {
   log.LogAllError() << "PsiIncoming call made to boundary that has no such information.";
   Exit(EXIT_FAILURE);
@@ -27,8 +26,7 @@ double*
 SweepBoundary::PsiOutgoing(uint64_t cell_local_id,
                            unsigned int face_num,
                            unsigned int fi,
-                           unsigned int angle_num,
-                           size_t gs_ss_begin)
+                           unsigned int angle_num)
 {
   log.LogAllError() << "PsiOutgoing call made to boundary that has no such information.";
   Exit(EXIT_FAILURE);
