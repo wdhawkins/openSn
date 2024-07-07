@@ -363,9 +363,9 @@ LBSSolver::GetActiveSetSourceFunction() const
 }
 
 std::shared_ptr<AGSLinearSolver>
-LBSSolver::GetPrimaryAGSSolver()
+LBSSolver::GetAGSSolver()
 {
-  return primary_ags_solver_;
+  return ags_solver_;
 }
 
 std::vector<std::shared_ptr<LinearSolver>>&
@@ -462,6 +462,9 @@ LBSSolver::OptionsBlock()
     "verbose_inner_iterations", true, "Flag to control verbosity of inner iterations.");
   params.AddOptionalParameter(
     "verbose_outer_iterations", true, "Flag to control verbosity of across-groupset iterations.");
+  params.AddOptionalParameter(
+    "maximum_ags_iterations", 1, "Maximum number of across-groupset iterations.");
+  params.AddOptionalParameter("ags_tolerance", 1.0e-6, "Across-groupset iterations tolerance.");
   params.AddOptionalParameter(
     "verbose_ags_iterations", false, "Flag to control verbosity of across-groupset iterations.");
   params.AddOptionalParameter("power_field_function_on",
@@ -635,6 +638,12 @@ LBSSolver::SetOptions(const InputParameters& params)
 
     else if (spec.Name() == "verbose_inner_iterations")
       options_.verbose_inner_iterations = spec.GetValue<bool>();
+
+    else if (spec.Name() == "maximum_ags_iterations")
+      options_.maximum_ags_iterations = spec.GetValue<int>();
+
+    else if (spec.Name() == "ags_tolerance")
+      options_.ags_tolerance = spec.GetValue<double>();
 
     else if (spec.Name() == "verbose_ags_iterations")
       options_.verbose_ags_iterations = spec.GetValue<bool>();
@@ -1588,27 +1597,15 @@ LBSSolver::InitializeSolverSchemes()
 {
   CALI_CXX_MARK_SCOPE("LBSSolver::InitializeSolverSchemes");
 
-  log.Log() << "Initializing solver...";
+  log.Log() << "Initializing WGS and AGS solvers";
 
   InitializeWGSSolvers();
 
-  /*This default behavior covers the situation when no Across-GroupSet (AGS)
-   * solvers have been created for this solver.*/
-  ags_solvers_.clear();
-  // Default AGS scheme
-  if (options_.ags_scheme.empty())
-  {
-    auto ags_context = std::make_shared<AGSContext>(*this, wgs_solvers_);
-
-    auto ags_solver = std::make_shared<AGSLinearSolver>(
-      "krylov_richardson", ags_context, groupsets_.front().id_, groupsets_.back().id_);
-    ags_solver->ToleranceOptions().maximum_iterations = 1;
-    ags_solver->SetVerbosity(options_.verbose_ags_iterations);
-
-    ags_solvers_.push_back(ags_solver);
-
-    primary_ags_solver_ = ags_solvers_.front();
-  }
+  auto ags_context = std::make_shared<AGSContext>(*this, wgs_solvers_);
+  ags_solver_ = std::make_shared<AGSLinearSolver>(ags_context);
+  ags_solver_->SetMaximumIterations(options_.maximum_ags_iterations);
+  ags_solver_->SetTolerance(options_.ags_tolerance);
+  ags_solver_->SetVerbosity(options_.verbose_ags_iterations);
 }
 
 void
