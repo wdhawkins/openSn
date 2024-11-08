@@ -1,19 +1,39 @@
 // SPDX-FileCopyrightText: 2024 The OpenSn Authors <https://open-sn.github.io/opensn/>
 // SPDX-License-Identifier: MIT
 
-#include "framework/math/linear_solver/linear_solver.h"
+#include "framework/math/linear_solver/petsc_linear_solver.h"
 #include "framework/runtime.h"
 
 namespace opensn
 {
 
-LinearSolver::LinearSolver(const std::string& petsc_iterative_method,
-                           std::shared_ptr<LinearSolverContext> context_ptr)
-  : context_ptr_(context_ptr), petsc_iterative_method_(petsc_iterative_method)
+int
+LinearSolverMatrixAction(Mat matrix, Vec vector, Vec action)
+{
+  LinearSolverContext* context;
+  MatShellGetContext(matrix, &context);
+
+  context->MatrixAction(matrix, vector, action);
+
+  return 0;
+}
+
+PETScLinearSolver::PETScLinearSolver(const std::string& petsc_iterative_method,
+                                     std::shared_ptr<LinearSolverContext> context_ptr)
+  : LinearSolver(context_ptr),
+    A_(nullptr),
+    b_(nullptr),
+    x_(nullptr),
+    ksp_(nullptr),
+    num_local_dofs_(0),
+    num_global_dofs_(0),
+    petsc_iterative_method_(petsc_iterative_method),
+    system_set_(false),
+    suppress_kspsolve_(false)
 {
 }
 
-LinearSolver::~LinearSolver()
+PETScLinearSolver::~PETScLinearSolver()
 {
   VecDestroy(&x_);
   VecDestroy(&b_);
@@ -21,7 +41,7 @@ LinearSolver::~LinearSolver()
 }
 
 void
-LinearSolver::ApplyToleranceOptions()
+PETScLinearSolver::ApplyToleranceOptions()
 {
   KSPSetTolerances(ksp_,
                    tolerance_options.residual_relative,
@@ -31,90 +51,81 @@ LinearSolver::ApplyToleranceOptions()
 }
 
 void
-LinearSolver::PreSetupCallback()
+PETScLinearSolver::PreSetupCallback()
 {
 }
 
 void
-LinearSolver::SetOptions()
+PETScLinearSolver::SetOptions()
 {
 }
 
 void
-LinearSolver::SetSolverContext()
+PETScLinearSolver::SetSolverContext()
 {
   KSPSetApplicationContext(ksp_, &(*context_ptr_));
 }
 
 void
-LinearSolver::SetConvergenceTest()
+PETScLinearSolver::SetConvergenceTest()
 {
   KSPSetConvergenceTest(ksp_, &KSPConvergedDefault, nullptr, nullptr);
 }
 
 void
-LinearSolver::SetMonitor()
+PETScLinearSolver::SetMonitor()
 {
 }
 
 void
-LinearSolver::SetPreconditioner()
+PETScLinearSolver::SetPreconditioner()
 {
 }
 
 void
-LinearSolver::PostSetupCallback()
+PETScLinearSolver::PostSetupCallback()
 {
 }
 
 void
-LinearSolver::Setup()
+PETScLinearSolver::Setup()
 {
   if (IsSystemSet())
     return;
+
   PreSetupCallback();
-
   KSPCreate(opensn::mpi_comm, &ksp_);
-
   KSPSetType(ksp_, petsc_iterative_method_.c_str());
-
   ApplyToleranceOptions();
-
   if (petsc_iterative_method_ == "gmres")
   {
     KSPGMRESSetRestart(ksp_, tolerance_options.gmres_restart_interval);
     KSPGMRESSetBreakdownTolerance(ksp_, tolerance_options.gmres_breakdown_tolerance);
   }
-
   KSPSetInitialGuessNonzero(ksp_, PETSC_FALSE);
-
   SetOptions();
-
   SetSolverContext();
   SetConvergenceTest();
   SetMonitor();
-
   SetSystemSize();
   SetSystem();
-
   SetPreconditioner();
-
   PostSetupCallback();
   system_set_ = true;
 }
 
 void
-LinearSolver::PreSolveCallback()
+PETScLinearSolver::PreSolveCallback()
 {
 }
 
 void
-LinearSolver::PostSolveCallback()
+PETScLinearSolver::PostSolveCallback()
 {
 }
 
 void
-LinearSolver::Solve()
+PETScLinearSolver::Solve()
 {
   PreSolveCallback();
   SetInitialGuess();

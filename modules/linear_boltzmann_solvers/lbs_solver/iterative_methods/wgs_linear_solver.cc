@@ -5,7 +5,6 @@
 #include "modules/linear_boltzmann_solvers/lbs_solver/iterative_methods/wgs_convergence_test.h"
 #include "modules/linear_boltzmann_solvers/lbs_solver/lbs_solver.h"
 #include "framework/math/petsc_utils/petsc_utils.h"
-#include "framework/math/linear_solver/linear_matrix_action_Ax.h"
 #include "framework/logging/log.h"
 #include "framework/utils/timer.h"
 #include "framework/runtime.h"
@@ -18,8 +17,8 @@ namespace opensn
 {
 
 WGSLinearSolver::WGSLinearSolver(std::shared_ptr<WGSContext> gs_context_ptr)
-  : LinearSolver(IterativeMethodPETScName(gs_context_ptr->groupset.iterative_method),
-                 gs_context_ptr)
+  : PETScLinearSolver(IterativeMethodPETScName(gs_context_ptr->groupset.iterative_method),
+                      gs_context_ptr)
 {
   auto& groupset = gs_context_ptr->groupset;
   auto& solver_tol_options = this->ToleranceOptions();

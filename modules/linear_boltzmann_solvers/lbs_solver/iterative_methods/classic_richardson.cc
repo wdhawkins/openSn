@@ -17,7 +17,7 @@ namespace opensn
 {
 
 ClassicRichardson::ClassicRichardson(std::shared_ptr<WGSContext> gs_context_ptr)
-  : LinearSolver("ClassicRichardson", gs_context_ptr)
+  : LinearSolver(gs_context_ptr)
 {
 }
 
