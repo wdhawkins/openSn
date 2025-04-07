@@ -1,821 +1,470 @@
+#!/usr/bin/env python3
 """
-This is a utility script for the download and installation of OpenSn
-dependencies.
+OpenSn Dependency Installer
 
-NOTES:
-- If you see errors in building fblaslapack, try using a  different BLAS/LAPACK. For example, on
-  MacOSX, the Apple-supplied ones are known to work (so you would just remove the option
-  --download-fblaslapack=1)
-- If you have set CC, CXX and FC in your environment, make sure they are CC=mpicc, CXX=mpicxx, and
-  FC=mpifort.
-
-NOTES for building on MacOS:
-- you may need to `export MACOSX_DEPLOYMENT_TARGET=10.15` in your environment
+This script downloads and installs selected OpenSn dependencies.
+It checks for required MPI compiler executables (mpicc, mpicxx, mpifort)
+as well as curl and cmake (which are assumed to be installed).
 """
 
 import os
 import sys
 import argparse
-import shutil
 import subprocess
-import textwrap
-from typing import Optional, TextIO
+import shutil
+import json
+import logging
+from contextlib import contextmanager
 
-if sys.version_info.major < 3:
-    raise Exception("Python version detected to be " + str(sys.version_info.major) + "."
-                    + str(sys.version_info.minor) + " but is required to >= 3")
+@contextmanager
+def pushd(new_dir):
+    """Temporarily change directory."""
+    prev_dir = os.getcwd()
+    os.chdir(new_dir)
+    try:
+        yield
+    finally:
+        os.chdir(prev_dir)
 
-
-class TextColors:
-    RED = "\033[31m"
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
-
-
-error_beg = TextColors.RED
-error_end = TextColors.ENDC
-
-# Process commandline arguments
-arguments_help = textwrap.dedent('''\
-Run the dependency builder.
-''')
-
-parser = argparse.ArgumentParser(
-    description="This is a utility script for the download and installation of OpenSn "
-                + "dependencies.",
-    epilog=arguments_help
-)
-
-parser.add_argument(
-    "-d", "--directory",
-    type=str, required=True, default=None,
-    help="Directory into which the dependencies will be installed"
-)
-
-parser.add_argument(
-    "-j", "--jobs",
-    type=int, required=False, default=4,
-    help="Allow N compile jobs at once"
-)
-
-parser.add_argument(
-    "-v", "--verbose",
-    type=bool, required=False, default=False,
-    help="Controls verbose failure"
-)
-
-parser.add_argument(
-    "-dl", "--download_only",
-    type=bool, required=False, default=False,
-    help="Controls verbose failure"
-)
-
-# Define versions and download paths
-VERSION = 0
-URL = 1
-package_info = {
-    "boost": [
-        "1_86_0",
-        "https://archives.boost.io/release/1.86.0/source/boost_1_86_0.tar.gz"
-    ],
-    "lua": [
-        "5.4.6",
-        "https://www.lua.org/ftp/lua-5.4.6.tar.gz"
-    ],
-    "hdf5": [
-        "1.14.3",
-        "https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.14/hdf5-1.14.3/src/\
-CMake-hdf5-1.14.3.tar.gz"
-    ],
-    "petsc": [
-        "3.20.6",
-        "https://web.cels.anl.gov/projects/petsc/download/release-snapshots/petsc-3.20.6.tar.gz"
-    ],
-    "vtk": [
-        "9.3.0",
-        "https://www.vtk.org/files/release/9.3/VTK-9.3.0.tar.gz"
-    ],
-    "caliper": [
-        "2.10.0",
-        "https://github.com/LLNL/Caliper/archive/refs/tags/v2.10.0.tar.gz"
-    ]
-}
-
-
-# Runs a subprocess
-def ExecSub(command: str,
-            out_log: Optional[TextIO] = subprocess.PIPE,
-            err_log: Optional[TextIO] = subprocess.PIPE,
-            env_vars=None):
-    success = True
-
-    if argv.verbose:
-        print(f"command: {command}")
-
-    result = subprocess.Popen(command,
-                              stdout=out_log,
-                              stderr=err_log,
-                              shell=True,
-                              env=env_vars)
-    output, error = result.communicate()
-
+def run_command(cmd, cwd=None, env=None, logger=None, verbose=False):
+    """Run a shell command and raise an error if it fails."""
+    if verbose:
+        print(f"Running command: {cmd}")
+    if logger:
+        logger.info(f"Running command: {cmd}")
+    result = subprocess.run(cmd, shell=True, cwd=cwd, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if result.returncode != 0:
-        success = False
+        err_msg = result.stderr.decode("utf-8")
+        if logger:
+            logger.error(f"Command failed: {cmd}\nError: {err_msg}")
+        raise RuntimeError(f"Command failed: {cmd}\nError: {err_msg}")
+    return result.stdout.decode("utf-8")
 
-    outputstr = ""
-    if output is not None:
-        outputstr = output.decode('ascii')
+def check_executable(name):
+    """Verify that the given executable is available."""
+    if shutil.which(name) is None:
+        raise RuntimeError(f"Required executable '{name}' not found.")
 
-    return success, error.decode("utf8"), outputstr
-
-
-# Checks whether an executable exists
-def CheckExecutableExists(thingname: str, thing: str):
-    log_file.write(f"Checking for {thingname}:\n")
-    log_file.flush()
-    success, errorc, outstr = ExecSub(f"{thing} --version", out_log=log_file)
-    if not success:
-        log_file.write(errorc)
-        raise RuntimeError(f"Valid {thingname} not found")
-    else:
-        log_file.write(f"{thingname} found\n\n")
-
-
-# Downloads a package using curl
-def DownloadPackage(url, pkg, ver):
-    pkgdir = f"{install_dir}/downloads"
-    log_file.write(f"Downloading {pkg.upper()} {ver} to \"{pkgdir}\" "
-                   + f"with command: curl {url}")
-    download_cmd = "curl"
-    output_cmd = f"-L --output {pkg}-{ver}.tar.gz"
-
-    pkgdir_relative = os.path.relpath(pkgdir)
-
-    print(f"Downloading {pkg.upper()} {ver} to \"{pkgdir_relative}\" "
-          + f"with command:\n{download_cmd} {url} {output_cmd}", end="", flush=True)
-
-    already_there = False
-    if not os.path.exists(f"{install_dir}/downloads/{pkg}-{ver}.tar.gz"):
-        ExecSub(f"{download_cmd} {url} {output_cmd}", out_log=log_file)
-
-        if os.path.exists(f"{install_dir}/downloads/{pkg.upper()}-{ver}.tar.gz"):
-            item = f"{pkg.upper()}-{ver}.tar.gz"
-            shutil.move(f"{item}", f"{item.lower()}")
-    else:
-        already_there = True
-
-    if os.path.exists(f"{install_dir}/downloads/{pkg}-{ver}.tar.gz"):
-        there = "Already downloaded" if already_there else ""
-        print(f" {TextColors.OKGREEN}Success{TextColors.ENDC} "
-              + f"{TextColors.OKCYAN}{there}{TextColors.ENDC}")
-        log_file.write(f" Success {there}\n")
+def download_package(url, destination, logger, verbose=False):
+    """Download a package tarball using curl."""
+    cmd = f"curl -L --output {destination} {url}"
+    try:
+        run_command(cmd, logger=logger, verbose=verbose)
+        logger.info(f"Downloaded to {destination}")
         return True
-    else:
-        print(error_beg + " Failure" + error_end)
-        log_file.write(" Failure\n")
+    except Exception as ex:
+        logger.error(f"Download failed: {ex}")
         return False
 
+def get_mpi_env():
+    """Return an environment with MPI compilers set if not already defined."""
+    env = os.environ.copy()
+    env.setdefault("CC", shutil.which("mpicc"))
+    env.setdefault("CXX", shutil.which("mpicxx"))
+    env.setdefault("FC", shutil.which("mpifort"))
+    return env
 
-# Makes a directory if it does not exist yet
-def MakeDirectory(dirpath: str):
-    if not os.path.isdir(dirpath):
-        os.mkdir(dirpath)
+def prepare_source(pkg, version, install_dir, extracted_dir, logger, verbose):
+    """
+    Copy the tarball from the downloads directory to the src directory and extract it.
+    Returns the absolute path to the extracted directory.
+    """
+    src_dir = os.path.join(install_dir, "src")
+    downloads_dir = os.path.join(install_dir, "downloads")
+    tarball = os.path.join(downloads_dir, f"{pkg}-{version}.tar.gz")
+    dst_tarball = os.path.join(src_dir, f"{pkg}-{version}.tar.gz")
+    shutil.copy(tarball, dst_tarball)
+    with pushd(src_dir):
+        run_command(f"tar -zxf {pkg}-{version}.tar.gz", logger=logger, verbose=verbose)
+    extracted_path = os.path.join(src_dir, extracted_dir)
+    if not os.path.isdir(extracted_path):
+        raise RuntimeError(f"Expected source directory {extracted_path} not found.")
+    return extracted_path
 
+def delete_package(pkg, record, logger):
+    """
+    Delete the installed package.
+    """
+    install_path = record.get("install_path")
+    if install_path and os.path.isdir(install_path):
+        logger.info(f"Removing installation directory: {install_path}")
+        shutil.rmtree(install_path)
 
-# Makes the necessary system calls to extract a tar.gz file
-def ExtractPackage(pkg, ver):
-    print(f"Extracting package with command tar -zxf {pkg}-{ver}.tar.gz")
+def install_boost_package(pkg, version, install_dir, jobs, logger, verbose):
+    """Install Boost headers."""
+    pkg_install_dir = os.path.join(install_dir, f"{pkg}-{version}")
+    os.makedirs(pkg_install_dir, exist_ok=True)
+    extracted_path = prepare_source(pkg, version, install_dir, f"boost_{version}", logger, verbose)
+    with pushd(extracted_path):
+        include_dir = os.path.join(pkg_install_dir, "include")
+        os.makedirs(include_dir, exist_ok=True)
+        run_command(f"cp -r boost {include_dir}", logger=logger, verbose=verbose)
+    return pkg_install_dir
 
-    success, err, outstr = ExecSub(f"tar -zxf {pkg}-{ver}.tar.gz", log_file)
+def install_lua_package(pkg, version, install_dir, jobs, logger, verbose):
+    """Install Lua."""
+    pkg_install_dir = os.path.join(install_dir, f"{pkg}-{version}")
+    os.makedirs(pkg_install_dir, exist_ok=True)
+    extracted_path = prepare_source(pkg, version, install_dir, f"lua-{version}", logger, verbose)
+    with pushd(extracted_path):
+        env = get_mpi_env()
+        os_tag = "linux" if sys.platform != "darwin" else "macosx"
+        run_command(f"make {os_tag} MYCFLAGS=-fPIC MYLIBS=-lncurses -j{jobs}", env=env, logger=logger, verbose=verbose)
+        run_command(f"make install INSTALL_TOP={pkg_install_dir}", env=env, logger=logger, verbose=verbose)
+    return pkg_install_dir
 
-    if not success:
-        raise RuntimeError(err)
+def install_petsc_package(pkg, version, install_dir, jobs, logger, verbose):
+    """Install PETSc."""
+    pkg_install_dir = os.path.join(install_dir, f"{pkg}-{version}")
+    os.makedirs(pkg_install_dir, exist_ok=True)
+    extracted_path = prepare_source(pkg, version, install_dir, f"{pkg}-{version}", logger, verbose)
+    with pushd(extracted_path):
+        env = get_mpi_env()
+        config_cmd = (
+            f"./configure --prefix={pkg_install_dir} "
+            "--download-hypre=1 "
+            "--with-ssl=0 "
+            "--with-debugging=0 "
+            "--with-pic=1 "
+            "--with-shared-libraries=1 "
+            "--download-bison=1 "
+            "--download-fblaslapack=1 "
+            "--download-metis=1 "
+            "--download-parmetis=1 "
+            "--download-superlu_dist=1 "
+            "--download-ptscotch=1 "
+            "--with-cxx-dialect=C++11 "
+            "--with-64-bit-indices "
+            f"CC={env['CC']} CXX={env['CXX']} FC={env['FC']} "
+            'FFLAGS="-fallow-argument-mismatch" '
+            'FCFLAGS="-fallow-argument-mismatch" '
+            'F90FLAGS="-fallow-argument-mismatch" '
+            'F77FLAGS="-fallow-argument-mismatch" '
+            'COPTFLAGS="-O3" '
+            'CXXOPTFLAGS="-O3" '
+            'FOPTFLAGS="-O3 -fallow-argument-mismatch" '
+            f"PETSC_DIR={extracted_path}"
+        )
+        run_command(config_cmd, env=env, logger=logger, verbose=verbose)
+        run_command(f"make all -j{jobs}", env=env, logger=logger, verbose=verbose)
+        run_command("make install", env=env, logger=logger, verbose=verbose)
+    return pkg_install_dir
 
+def install_vtk_package(pkg, version, install_dir, jobs, logger, verbose):
+    """Install VTK."""
+    pkg_install_dir = os.path.join(install_dir, f"{pkg}-{version}")
+    os.makedirs(pkg_install_dir, exist_ok=True)
+    extracted_path = prepare_source(pkg, version, install_dir, f"VTK-{version}", logger, verbose)
+    build_dir = os.path.join(extracted_path, "build")
+    os.makedirs(build_dir, exist_ok=True)
+    env = get_mpi_env()
+    cmake_cmd = (
+        f"cmake -DCMAKE_INSTALL_PREFIX={pkg_install_dir} "
+        "-DBUILD_SHARED_LIBS=ON "
+        "-DVTK_USE_MPI=ON "
+        "-DVTK_GROUP_ENABLE_StandAlone=WANT "
+        "-DVTK_GROUP_ENABLE_Rendering=DONT_WANT "
+        "-DVTK_GROUP_ENABLE_Imaging=DONT_WANT "
+        "-DVTK_GROUP_ENABLE_Web=DONT_WANT "
+        "-DVTK_GROUP_ENABLE_Qt=DONT_WANT "
+        "-DVTK_MODULE_USE_EXTERNAL_VTK_hdf5=ON "
+        "-DCMAKE_BUILD_TYPE=Release ../"
+    )
+    with pushd(build_dir):
+        run_command(cmake_cmd, env=env, logger=logger, verbose=verbose)
+        run_command(f"make -j{jobs}", env=env, logger=logger, verbose=verbose)
+        run_command("make install", env=env, logger=logger, verbose=verbose)
+    return pkg_install_dir
 
-def InstallBoostPackage(pkg: str,
-                        ver: str,
-                        gold_file: str):
-    package_log_filename = f"{install_dir}/logs/{pkg}_log.txt"
-    pkg_install_dir = f"{install_dir}"
+def install_caliper_package(pkg, version, install_dir, jobs, logger, verbose):
+    """Install Caliper."""
+    pkg_install_dir = os.path.join(install_dir, f"{pkg}-{version}")
+    os.makedirs(pkg_install_dir, exist_ok=True)
+    extracted_path = prepare_source(pkg, version, install_dir, f"Caliper-{version}", logger, verbose)
+    build_dir = os.path.join(extracted_path, "build")
+    os.makedirs(build_dir, exist_ok=True)
+    env = get_mpi_env()
+    cmake_cmd = f"cmake -DCMAKE_INSTALL_PREFIX={pkg_install_dir} -DWITH_MPI=ON -DWITH_KOKKOS=OFF ../"
+    with pushd(build_dir):
+        run_command(cmake_cmd, env=env, logger=logger, verbose=verbose)
+        run_command(f"make -j{jobs}", env=env, logger=logger, verbose=verbose)
+        run_command("make install", env=env, logger=logger, verbose=verbose)
+    return pkg_install_dir
 
-    # Copy the downloaded tarball to the source directory
-    shutil.copy(f"{install_dir}/downloads/{pkg}-{ver}.tar.gz",
-                f"{install_dir}/src/{pkg}-{ver}.tar.gz")
+def install_hdf5_package(pkg, version, install_dir, jobs, logger, verbose):
+    """Install HDF5."""
+    pkg_install_dir = os.path.join(install_dir, f"{pkg}-{version}")
+    os.makedirs(pkg_install_dir, exist_ok=True)
+    extracted_path = prepare_source(pkg, version, install_dir, f"{pkg}-{version}", logger, verbose)
+    build_dir = os.path.join(extracted_path, "build")
+    os.makedirs(build_dir, exist_ok=True)
+    env = get_mpi_env()
+    cmake_cmd = f"cmake -DCMAKE_INSTALL_PREFIX={pkg_install_dir} .."
+    with pushd(build_dir):
+        run_command(cmake_cmd, env=env, logger=logger, verbose=verbose)
+        run_command(f"make -j{jobs}", env=env, logger=logger, verbose=verbose)
+        run_command("make install", env=env, logger=logger, verbose=verbose)
+    return pkg_install_dir
 
-    os.chdir(f"{install_dir}/src")
+def main():
+    parser = argparse.ArgumentParser(
+        description="OpenSn Dependency Installer",
+        epilog="Select packages using --packages (comma separated, or 'all')"
+    )
+    parser.add_argument("-d", "--directory", type=str, required=True,
+                        help="Installation directory for dependencies")
+    parser.add_argument("-j", "--jobs", type=int, default=4,
+                        help="Number of compile jobs (default: 4)")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="Enable verbose output")
+    parser.add_argument("--download-only", action="store_true",
+                        help="Only download packages and exit")
+    parser.add_argument("--packages", type=str, default="all",
+                        help="Comma-separated list of packages to install (default: all)")
+    parser.add_argument("--uninstall", action="store_true",
+                        help="Uninstall specified packages (must be used with --packages listing one or more packages)")
+    parser.add_argument("--upgrade", action="store_true",
+                        help="Upgrade installed packages if versions differ")
+    parser.add_argument("--list-installed", action="store_true",
+                        help="List installed packages from the state file and exit")
+    parser.add_argument("--list-available", action="store_true",
+                        help="List available packages and their versions and exit")
+    parser.add_argument("--clean", action="store_true",
+                        help="Clean downloads and src directories and exit")
+    args = parser.parse_args()
 
-    # Check if Boost headers are already installed
-    if not os.path.exists(f"{pkg_install_dir}/{gold_file}"):
-        ExtractPackage(pkg, ver)
+    print("Resolving installation directories")
+    install_dir = os.path.abspath(args.directory)
+    src_dir = os.path.join(install_dir, "src")
+    downloads_dir = os.path.join(install_dir, "downloads")
+    logs_dir = os.path.join(install_dir, "logs")
+    bin_dir = os.path.join(install_dir, "bin")
+    for d in [install_dir, src_dir, downloads_dir, logs_dir, bin_dir]:
+        os.makedirs(d, exist_ok=True)
 
-        package_log_file = open(package_log_filename, "w")
+    # Set up logger
+    log_file_path = os.path.join(logs_dir, "install.log")
+    logger = logging.getLogger('opensn_installer')
+    logger.setLevel(logging.DEBUG)
+    fh = logging.FileHandler(log_file_path)
+    fh.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    fh.setFormatter(formatter)
+    logger.addHandler(fh)
+    logger.info("Starting OpenSn dependency installation")
 
-        print(f"Installing {pkg.upper()} {ver} headers in \"{pkg_install_dir}/include/boost\"",
-              flush=True)
-        log_file.write(f"Installing {pkg.upper()} {ver} headers to\
-                       \"{pkg_install_dir}/include/boost\"")
-        log_file.write(f" See {package_log_filename}\n")
-        log_file.flush()
+    # Package info
+    packages_info = {
+        "boost": {
+            "version": "1_87_0",
+            "url": "https://archives.boost.io/release/1.87.0/source/boost_1_87_0.tar.gz",
+            "installer": install_boost_package
+        },
+        "lua": {
+            "version": "5.4.6",
+            "url": "https://www.lua.org/ftp/lua-5.4.6.tar.gz",
+            "installer": install_lua_package
+        },
+        "petsc": {
+            "version": "3.23.0",
+            "url": "https://web.cels.anl.gov/projects/petsc/download/release-snapshots/petsc-3.23.0.tar.gz",
+            "installer": install_petsc_package
+        },
+        "vtk": {
+            "version": "9.4.2",
+            "url": "https://www.vtk.org/files/release/9.4/VTK-9.4.2.tar.gz",
+            "installer": install_vtk_package
+        },
+        "caliper": {
+            "version": "2.10.0",
+            "url": "https://github.com/LLNL/Caliper/archive/refs/tags/v2.10.0.tar.gz",
+            "installer": install_caliper_package
+        },
+        "hdf5": {
+            "version": "1.14.6",
+            "url": "https://support.hdfgroup.org/releases/hdf5/v1_14/v1_14_6/downloads/hdf5-1.14.6.tar.gz",
+            "installer": install_hdf5_package
+        }
+    }
 
-        os.chdir(f"{pkg}_{ver}")
+    # Handle --clean option
+    if args.clean:
+        print("Cleaning downloads and src directories")
+        try:
+            shutil.rmtree(downloads_dir)
+            os.makedirs(downloads_dir, exist_ok=True)
+            shutil.rmtree(src_dir)
+            os.makedirs(src_dir, exist_ok=True)
+        except Exception as e:
+            print(f"Error during cleaning: {e}")
+        sys.exit(0)
 
-        # Set up the Boost include directory
-        boost_include_dir = os.path.join(pkg_install_dir, "include")
-        os.makedirs(boost_include_dir, exist_ok=True)
+    print("Checking required executables")
+    try:
+        check_executable("curl")
+        check_executable("cmake")
+        for exe in ["mpicc", "mpicxx", "mpifort"]:
+            check_executable(exe)
+    except RuntimeError as e:
+        print(f"{e}")
+        sys.exit(1)
 
-        # Copy header files to the Boost include directory
-        command = f"cp -r boost {boost_include_dir}"
-        success, err, outstr = ExecSub(command, out_log=package_log_file)
-        if not success:
-            print(command, err)
-            log_file.write(f"{command}\n{err}\n")
-            package_log_file.write(f"{command}\n{err}\n")
-            raise RuntimeError(f"Failed to install {pkg} headers")
+    # Handle --list-available option
+    if args.list_available:
+        print("Listing available packages")
+        try:
+            for pkg, info in packages_info.items():
+                print(f"  {pkg}: {info['version']}")
+        except Exception as e:
+            print(f"Error listing available packages: {e}")
+        sys.exit(0)
 
-        package_log_file.close()
+    # Read state file to track installed packages
+    state_file = os.path.join(install_dir, "installed_packages.json")
+    if os.path.exists(state_file):
+        with open(state_file, "r") as f:
+            installed_state = json.load(f)
     else:
-        print(f"{pkg} already installed")
+        installed_state = {}
 
-    os.chdir(install_dir)
+    # Handle --list-installed option
+    if args.list_installed:
+        if installed_state:
+            print("Installed packages:")
+            for pkg, record in installed_state.items():
+                print(f"  {pkg}: {record['version']} -> {record['install_path']}")
+        else:
+            print("No packages installed yet.")
+        sys.exit(0)
 
-    if os.path.exists(f"{pkg_install_dir}/{gold_file}"):
-        return True
+    # Handle uninstall
+    if args.uninstall:
+        if args.packages.lower() == "all":
+            print("When uninstalling, please specify one or more packages using --packages (cannot be 'all').")
+            sys.exit(1)
+        uninstall_packages = [p.strip() for p in args.packages.split(",") if p.strip()]
+        if not uninstall_packages:
+            print("No packages specified for uninstall.")
+            sys.exit(1)
+        for pkg in uninstall_packages:
+            if pkg not in installed_state:
+                print(f"{pkg} is not installed.")
+                continue
+            record = installed_state[pkg]
+            print(f"Removing {pkg} version {record['version']}")
+            logger.info(f"Uninstalling {pkg} version {record['version']}")
+            try:
+                delete_package(pkg, record, logger)
+                del installed_state[pkg]
+                print(f"{pkg} uninstalled")
+            except Exception as e:
+                logger.error(f"Error uninstalling {pkg}: {e}")
+                print(f"Failed to uninstall {pkg}: {e}. Please see the log file: {log_file_path}")
+        with open(state_file, "w") as f:
+            json.dump(installed_state, f, indent=2)
+        logger.info("Updated installation state after uninstallation.")
+        prefix_paths = [record["install_path"] for record in installed_state.values()]
+        cmake_prefix = ":".join(prefix_paths)
+        env_script = os.path.join(bin_dir, "set_opensn_env.sh")
+        with open(env_script, "w") as f:
+            f.write(f'export CMAKE_PREFIX_PATH="{cmake_prefix}"${{CMAKE_PREFIX_PATH:+:${{CMAKE_PREFIX_PATH}}}}\n')
+        os.chmod(env_script, 0o755)
+        sys.exit(0)
+
+    # Determine selected packages
+    if args.packages.lower() == "all":
+        selected_packages = list(packages_info.keys())
     else:
-        return False
-
-
-# Install Lua
-def InstallLuaPackage(pkg: str,
-                      ver: str,
-                      gold_file: str):
-    package_log_filename = f"{install_dir}/logs/{pkg}_log.txt"
-    pkg_install_dir = f"{install_dir}"
-
-    shutil.copy(f"{install_dir}/downloads/{pkg}-{ver}.tar.gz",
-                f"{install_dir}/src/{pkg}-{ver}.tar.gz")
-
-    os.chdir(f"{install_dir}/src")
-
-    # Check if it is installed already
-    if not os.path.exists(f"{pkg_install_dir}/{gold_file}"):
-        ExtractPackage(pkg, ver)
-
-        package_log_file = open(package_log_filename, "w")
-
-        print(f"Configuring {pkg.upper()} {ver} in \"{os.getcwd()}\"", flush=True)
-        log_file.write(f"Configuring {pkg.upper()} {ver} to \"{os.getcwd()}\"")
-        log_file.write(f" See {package_log_filename}\n")
-        log_file.flush()
-
-        env_vars = os.environ.copy()
-        if len(os.getenv("CC")) == 0:
-            env_vars["CC"] = shutil.which("mpicc")
-        if len(os.getenv("CXX")) == 0:
-            env_vars["CXX"] = shutil.which("mpicxx")
-        if len(os.getenv("FC")) == 0:
-            env_vars["FC"] = shutil.which("mpifort")
-
-        os_tag = "linux"
-        if "Darwin" in os.uname():
-            os_tag = "macosx"
-
-        os.chdir(f"{pkg}-{ver}")
-
-        command = f"make {os_tag} MYCFLAGS=-fPIC MYLIBS=-lncurses -j{argv.jobs}"
-        success, err, outstr = ExecSub(
-            command, out_log=package_log_file, env_vars=env_vars
-        )
-        if not success:
-            print(command, err)
-            log_file.write(f"{command}\n{err}\n")
-            package_log_file.write(f"{command}\n{err}\n")
-            raise RuntimeError(f"Failed to build {pkg}")
-
-        command = f"make install INSTALL_TOP={pkg_install_dir}"
-        success, err, outstr = ExecSub(
-            command, out_log=package_log_file, env_vars=env_vars
-        )
-        if not success:
-            print(command, err)
-            log_file.write(f"{command}\n{err}\n")
-            package_log_file.write(f"{command}\n{err}\n")
-            raise RuntimeError(f"Failed to install {pkg}")
-
-        package_log_file.close()
-    else:
-        print(f"{pkg} already installed")
-
-    os.chdir(install_dir)
-
-    if os.path.exists(f"{pkg_install_dir}/{gold_file}"):
-        return True
-    else:
-        return False
-
-
-# Install PETSc
-def InstallPETSc(pkg: str, ver: str, gold_file: str):
-    package_log_filename = f"{install_dir}/logs/{pkg}_log.txt"
-    pkg_install_dir = f"{install_dir}"
-
-    shutil.copy(f"{install_dir}/downloads/{pkg}-{ver}.tar.gz",
-                f"{install_dir}/src/{pkg}-{ver}.tar.gz")
-
-    os.chdir(f"{install_dir}/src")
-
-    # Check if it is installed already
-    if not os.path.exists(f"{pkg_install_dir}/{gold_file}"):
-        ExtractPackage(pkg, ver)
-
-        package_log_file = open(package_log_filename, "w")
-
-        print(f"Configuring {pkg.upper()} {ver} in \"{os.getcwd()}\"", flush=True)
-        log_file.write(f"Configuring {pkg.upper()} {ver} to \"{os.getcwd()}\"")
-        log_file.write(f" See {package_log_filename}\n")
-        log_file.flush()
-
-        env_vars = os.environ.copy()
-        if len(os.getenv("CC")) == 0:
-            env_vars["CC"] = shutil.which("mpicc")
-        if len(os.getenv("CXX")) == 0:
-            env_vars["CXX"] = shutil.which("mpicxx")
-        if len(os.getenv("FC")) == 0:
-            env_vars["FC"] = shutil.which("mpifort")
-
-        os.chdir(f"{pkg}-{ver}")
-        command = f"""./configure --prefix={pkg_install_dir} \\
---download-hypre=1 \\
---with-ssl=0 \\
---with-debugging=0 \\
---with-pic=1 \\
---with-shared-libraries=1 \\
---download-bison=1 \\
---download-fblaslapack=1 \\
---download-metis=1 \\
---download-parmetis=1 \\
---download-superlu_dist=1 \\
---download-ptscotch=1 \\
---with-cxx-dialect=C++11 \\
---with-64-bit-indices \\
-CC=$CC CXX=$CXX FC=$FC \\
-FFLAGS="-fallow-argument-mismatch" \\
-FCFLAGS="-fallow-argument-mismatch" \\
-F90FLAGS="-fallow-argument-mismatch" \\
-F77FLAGS="-fallow-argument-mismatch" \\
-COPTFLAGS="-O3" \\
-CXXOPTFLAGS="-O3" \\
-FOPTFLAGS="-O3 -fallow-argument-mismatch" \\
-PETSC_DIR={install_dir}/src/{pkg}-{ver}"""
-        success, err, outstr = ExecSub(
-            command, out_log=package_log_file, env_vars=env_vars
-        )
-        if not success:
-            print(command, err)
-            log_file.write(f"{command}\n{err}\n")
-            package_log_file.write(f"{command}\n{err}\n")
-            raise RuntimeError(
-                f"Failed to configure {pkg}. See {package_log_filename} for details.")
-
-        command = f"{make_command} all -j{argv.jobs}"
-        success, err, outstr = ExecSub(
-            command, out_log=package_log_file, env_vars=env_vars
-        )
-        if not success:
-            print(command, err)
-            log_file.write(f"{command}\n{err}\n")
-            package_log_file.write(f"{command}\n{err}\n")
-            raise RuntimeError(f"Failed to build {pkg}")
-
-        command = f"{make_command} install"
-        success, err, outstr = ExecSub(
-            command, out_log=package_log_file, env_vars=env_vars
-        )
-        if not success:
-            print(command, err)
-            log_file.write(f"{command}\n{err}\n")
-            package_log_file.write(f"{command}\n{err}\n")
-            raise RuntimeError(f"Failed to install {pkg}")
-
-        package_log_file.close()
-    else:
-        print(f"{pkg} already installed")
-
-    os.chdir(install_dir)
-
-    if os.path.exists(f"{pkg_install_dir}/{gold_file}"):
-        return True
-    else:
-        return False
-
-
-# Install VTK
-def InstallVTK(pkg: str, ver: str, gold_file: str):
-    package_log_filename = f"{install_dir}/logs/{pkg}_log.txt"
-    pkg_install_dir = f"{install_dir}"
-
-    shutil.copy(f"{install_dir}/downloads/{pkg}-{ver}.tar.gz",
-                f"{install_dir}/src/{pkg}-{ver}.tar.gz")
-
-    os.chdir(f"{install_dir}/src")
-
-    # Check if it is installed already
-    if not os.path.exists(f"{pkg_install_dir}/{gold_file}"):
-        ExtractPackage(pkg, ver)
-
-        package_log_file = open(package_log_filename, "w")
-
-        print(f"Configuring {pkg.upper()} {ver} in \"{os.getcwd()}\"", flush=True)
-        log_file.write(f"Configuring {pkg.upper()} {ver} to \"{os.getcwd()}\"")
-        log_file.write(f" See {package_log_filename}\n")
-        log_file.flush()
-
-        env_vars = os.environ.copy()
-        if len(os.getenv("CC")) == 0:
-            env_vars["CC"] = shutil.which("mpicc")
-        if len(os.getenv("CXX")) == 0:
-            env_vars["CXX"] = shutil.which("mpicxx")
-        if len(os.getenv("FC")) == 0:
-            env_vars["FC"] = shutil.which("mpifort")
-
-        build_dir = f"{install_dir}/src/{pkg.upper()}-{ver}/build"
-        MakeDirectory(build_dir)
-        os.chdir(build_dir)
-
-        command = f""" cmake -DCMAKE_INSTALL_PREFIX={pkg_install_dir} \\
--DBUILD_SHARED_LIBS=ON \\
--DVTK_USE_MPI=ON \\
--DVTK_GROUP_ENABLE_StandAlone=WANT \\
--DVTK_GROUP_ENABLE_Rendering=DONT_WANT \\
--DVTK_GROUP_ENABLE_Imaging=DONT_WANT \\
--DVTK_GROUP_ENABLE_Web=DONT_WANT \\
--DVTK_GROUP_ENABLE_Qt=DONT_WANT \\
--DVTK_MODULE_USE_EXTERNAL_VTK_hdf5=ON \\
--DCMAKE_BUILD_TYPE=Release \\
-../
-"""
-        success, err, outstr = ExecSub(
-            command, out_log=package_log_file, env_vars=env_vars
-        )
-        if not success:
-            print(command, err)
-            log_file.write(f"{command}\n{err}\n")
-            package_log_file.write(f"{command}\n{err}\n")
-            raise RuntimeError(f"Failed to configure {pkg}")
-
-        command = f"{make_command} -j{argv.jobs}"
-        success, err, outstr = ExecSub(
-            command, out_log=package_log_file, env_vars=env_vars
-        )
-        if not success:
-            print(command, err)
-            log_file.write(f"{command}\n{err}\n")
-            package_log_file.write(f"{command}\n{err}\n")
-            raise RuntimeError(f"Failed to build {pkg}")
-
-        command = f"{make_command} install"
-        success, err, outstr = ExecSub(
-            command, out_log=package_log_file, env_vars=env_vars
-        )
-        if not success:
-            print(command, err)
-            log_file.write(f"{command}\n{err}\n")
-            package_log_file.write(f"{command}\n{err}\n")
-            raise RuntimeError(f"Failed to install {pkg}")
-
-        package_log_file.close()
-    else:
-        print(f"{pkg} already installed")
-
-    os.chdir(install_dir)
-
-    if os.path.exists(f"{pkg_install_dir}/{gold_file}"):
-        return True
-    else:
-        return False
-
-
-# Install Caliper
-def InstallCaliper(pkg: str, ver: str, gold_file: str):
-    package_log_filename = f"{install_dir}/logs/{pkg}_log.txt"
-    pkg_install_dir = f"{install_dir}"
-
-    shutil.copy(f"{install_dir}/downloads/{pkg}-{ver}.tar.gz",
-                f"{install_dir}/src/caliper-{ver}.tar.gz")
-
-    os.chdir(f"{install_dir}/src")
-
-    # Check if it is installed already
-    if not os.path.exists(f"{pkg_install_dir}/{gold_file}"):
-        ExtractPackage(pkg, ver)
-
-        package_log_file = open(package_log_filename, "w")
-
-        print(f"Configuring {pkg.upper()} {ver} in \"{os.getcwd()}\"", flush=True)
-        log_file.write(f"Configuring {pkg.upper()} {ver} in \"{os.getcwd()}\"")
-        log_file.write(f" See {package_log_filename}\n")
-        log_file.flush()
-
-        env_vars = os.environ.copy()
-        if len(os.getenv("CC")) == 0:
-            env_vars["CC"] = shutil.which("mpicc")
-        if len(os.getenv("CXX")) == 0:
-            env_vars["CXX"] = shutil.which("mpicxx")
-        if len(os.getenv("FC")) == 0:
-            env_vars["FC"] = shutil.which("mpifort")
-
-        build_dir = f"{install_dir}/src/Caliper-{ver}/build"
-        MakeDirectory(build_dir)
-        os.chdir(build_dir)
-
-        command = f""" cmake -DCMAKE_INSTALL_PREFIX={pkg_install_dir} \\
--DWITH_MPI=ON \
--DWITH_KOKKOS=OFF \
-../
-"""
-        success, err, outstr = ExecSub(
-            command, out_log=package_log_file, env_vars=env_vars
-        )
-        if not success:
-            print(command, err)
-            log_file.write(f"{command}\n{err}\n")
-            package_log_file.write(f"{command}\n{err}\n")
-            raise RuntimeError(f"Failed to configure {pkg}")
-
-        command = f"{make_command} -j{argv.jobs}"
-        success, err, outstr = ExecSub(
-            command, out_log=package_log_file, env_vars=env_vars
-        )
-        if not success:
-            print(command, err)
-            log_file.write(f"{command}\n{err}\n")
-            package_log_file.write(f"{command}\n{err}\n")
-            raise RuntimeError(f"Failed to build {pkg}")
-
-        command = f"{make_command} install"
-        success, err, outstr = ExecSub(
-            command, out_log=package_log_file, env_vars=env_vars
-        )
-        if not success:
-            print(command, err)
-            log_file.write(f"{command}\n{err}\n")
-            package_log_file.write(f"{command}\n{err}\n")
-            raise RuntimeError(f"Failed to install {pkg}")
-
-        package_log_file.close()
-    else:
-        print(f"{pkg} already installed")
-
-    os.chdir(install_dir)
-
-    if os.path.exists(f"{pkg_install_dir}/{gold_file}"):
-        return True
-    else:
-        return False
-
-
-# Install HDF5
-def InstallHDF5(pkg: str, ver: str, gold_file: str):
-    package_log_filename = f"{install_dir}/logs/{pkg}_log.txt"
-    pkg_install_dir = f"{install_dir}"
-
-    shutil.copy(f"{install_dir}/downloads/{pkg}-{ver}.tar.gz",
-                f"{install_dir}/src/{pkg}-{ver}.tar.gz")
-
-    os.chdir(f"{install_dir}/src")
-
-    # Check if it is installed already
-    if not os.path.exists(f"{pkg_install_dir}/{gold_file}"):
-        ExtractPackage(pkg, ver)
-
-        package_log_file = open(package_log_filename, "w")
-
-        print(f"Configuring {pkg.upper()} {ver} in \"{os.getcwd()}\"", flush=True)
-        log_file.write(f"Configuring {pkg.upper()} {ver} in \"{os.getcwd()}\"")
-        log_file.write(f" See {package_log_filename}\n")
-        log_file.flush()
-
-        env_vars = os.environ.copy()
-        if len(os.getenv("CC")) == 0:
-            env_vars["CC"] = shutil.which("mpicc")
-        if len(os.getenv("CXX")) == 0:
-            env_vars["CXX"] = shutil.which("mpicxx")
-        if len(os.getenv("FC")) == 0:
-            env_vars["FC"] = shutil.which("mpifort")
-
-        build_dir = f"{install_dir}/src/CMake-{pkg}-{ver}/{pkg}-{ver}/build"
-        MakeDirectory(build_dir)
-        os.chdir(build_dir)
-
-        command = f""" cmake -DCMAKE_INSTALL_PREFIX={pkg_install_dir} .."""
-        success, err, outstr = ExecSub(
-            command, out_log=package_log_file, env_vars=env_vars
-        )
-        if not success:
-            print(command, err)
-            log_file.write(f"{command}\n{err}\n")
-            package_log_file.write(f"{command}\n{err}\n")
-            raise RuntimeError(f"Failed to configure {pkg}")
-
-        command = f"{make_command} -j{argv.jobs}"
-        success, err, outstr = ExecSub(
-            command, out_log=package_log_file, env_vars=env_vars
-        )
-        if not success:
-            print(command, err)
-            log_file.write(f"{command}\n{err}\n")
-            package_log_file.write(f"{command}\n{err}\n")
-            raise RuntimeError(f"Failed to build {pkg}")
-
-        command = f"{make_command} install"
-        success, err, outstr = ExecSub(
-            command, out_log=package_log_file, env_vars=env_vars
-        )
-        if not success:
-            print(command, err)
-            log_file.write(f"{command}\n{err}\n")
-            package_log_file.write(f"{command}\n{err}\n")
-            raise RuntimeError(f"Failed to install {pkg}")
-
-        package_log_file.close()
-    else:
-        print(f"{pkg} already installed")
-
-    os.chdir(install_dir)
-
-    if os.path.exists(f"{pkg_install_dir}/{gold_file}"):
-        return True
-    else:
-        return False
-
-
-try:
-    argv = parser.parse_args()  # argv = argument values
-
-    # Redefine make command for gnu
-    make_command = "make"
-    s, e, outstr = ExecSub(make_command + " --version")
-    if outstr.find("GNU Make") >= 0:
-        make_command = "make OMAKE_PRINTDIR=make"
-
-    # Check the test directory exists
-    if not os.path.isdir(argv.directory):
-        raise NotADirectoryError(argv.directory)
-
-    install_dir = os.path.abspath(argv.directory)
-
-    MakeDirectory(f"{install_dir}/src")
-    MakeDirectory(f"{install_dir}/logs")
-
-    print(f"Installation directory identified: {install_dir}")
-    print()
-    log_file = open(f"{install_dir}/logs/log.txt", 'w')
-    log_file.write("***** OpenSn dependency configurator script *****\n\n")
-
-    log_file.write("Packages in the dependency list:\n")
-    for pkg in package_info:
-        log_file.write(f"{pkg:9s}= {package_info[pkg][VERSION]}\n")
-    log_file.write("\n")
-
-    log_file.write("Download paths:\n")
-    for pkg in package_info:
-        log_file.write(f"{pkg:9s}= {package_info[pkg][URL]}\n")
-    log_file.write("\n")
-
-    # Check system environment
-
-    # Check for download utils
-    log_file.write("Checking for curl: ")
-    if shutil.which("curl") is None:
-        log_file.write("curl not found. ")
-        raise Exception("Missing Curl utility. Unable to download dependencies.")
-    else:
-        log_file.write("curl found\n")
-
-    # Check mpicc, mpicxx, mpifort
-    mpicc = os.getenv("CC") if len(os.getenv("CC")) > 0 else "mpicc"
-    mpicxx = os.getenv("CXX") if len(os.getenv("CXX")) > 0 else "mpicxx"
-    mpifort = os.getenv("FC") if len(os.getenv("FC")) > 0 else "mpifort"
-    CheckExecutableExists("mpicc", mpicc)
-    CheckExecutableExists("mpicxx", mpicxx)
-    CheckExecutableExists("mpifort", mpifort)
-
-    # Check cmake exists
-    CheckExecutableExists("cmake", "cmake")
-
-    # Creating directories
-    MakeDirectory(f"{install_dir}/downloads")
+        selected_packages = [p.strip() for p in args.packages.split(",") if p.strip() in packages_info]
+        if not selected_packages:
+            logger.error("No valid packages selected.")
+            print("No valid packages selected. Please see the log file:", log_file_path)
+            sys.exit(1)
+    logger.info(f"Selected packages: {', '.join(selected_packages)}")
 
     # Download packages
-    os.chdir(f"{install_dir}/downloads")
-    dl_errors = []
-    for pkg in package_info:
-        if not DownloadPackage(package_info[pkg][URL], pkg,
-                               package_info[pkg][VERSION]):
-            dl_errors.append(pkg)
-    os.chdir(f"{install_dir}")
-
-    if len(dl_errors) > 0:
-        log_file.write(
-            "\nFailed to download the following packages:\n")
-        for pkg in dl_errors:
-            log_file.write(pkg + " ")
-        log_file.write("\n")
-        print(error_beg + f"Failed to download {len(dl_errors)} package(s)\n"
-              + "Check that the url exists or that the platform you are on actually allows it. You "
-              + "could also try to manually download these packages from the URLs below:\n")
-        for pkg in dl_errors:
-            print(f"{pkg:9s}= {package_info[pkg][URL]}")
-        print(error_end)
-        exit(1)
-
-    if argv.download_only:
-        exit(0)
-
-    print()
-
-    #  Collective installation point
-    log_file.write("\nInstalling packages:\n")
-    log_file.flush()
-    install_errors = []
-
-    env_script_name = f"{install_dir}/bin/set_opensn_env.sh"
-
-    for pkg in package_info:
-        log_file.write(f"{pkg}\n")
-        log_file.flush()
-        ver = package_info[pkg][VERSION]
-        success = False
-        if pkg == 'boost':
-            success = InstallBoostPackage(pkg, ver, gold_file="include/boost")
-        elif pkg == 'lua':
-            success = InstallLuaPackage(pkg, ver, gold_file="lib/liblua.a")
-        elif pkg == 'petsc':
-            success = InstallPETSc(pkg, ver, gold_file="include/petsc")
-        elif pkg == 'vtk':
-            major, minor, patch = ver.split('.')
-            success = InstallVTK(pkg, ver, gold_file=f"include/vtk-{major}.{minor}")
-        elif pkg == 'caliper':
-            major, minor, patch = ver.split('.')
-            success = InstallCaliper(pkg, ver, gold_file="include/caliper/cali.h")
-        elif pkg == 'hdf5':
-            major, minor, patch = ver.split('.')
-            success = InstallHDF5(pkg, ver, gold_file="include/hdf5.h")
+    download_errors = False
+    for pkg in selected_packages:
+        info = packages_info[pkg]
+        tarball_path = os.path.join(downloads_dir, f"{pkg}-{info['version']}.tar.gz")
+        if pkg in installed_state and installed_state[pkg]["version"] == info["version"]:
+            print(f"{pkg} is already installed, skipping download")
+            continue
+        if not os.path.exists(tarball_path):
+            print(f"Downloading {pkg} version {info['version']}")
+            logger.info(f"Downloading {pkg} version {info['version']}")
+            if not download_package(info["url"], tarball_path, logger, args.verbose):
+                print(f"Failed to download {pkg}. Please see the log file: {log_file_path}")
+                logger.error(f"Failed to download {pkg}")
+                download_errors = True
         else:
-            print(f"No build rules for {pkg}")
+            logger.info(f"{pkg} tarball already exists. Skipping download.")
+            print(f"{pkg} tarball already exists. Skipping download.")
+    if download_errors:
+        sys.exit(1)
 
-        if not success:
+    if args.download_only:
+        logger.info("Download-only mode; exiting after downloads.")
+        sys.exit(0)
+
+    # Install
+    install_errors = []
+    for pkg in selected_packages:
+        info = packages_info[pkg]
+        if pkg in installed_state:
+            record = installed_state[pkg]
+            if record["version"] == info["version"]:
+                logger.info(f"{pkg} version {record['version']} already installed. Skipping.")
+                print(f"{pkg} version {record['version']} already installed.")
+                continue
+            else:
+                if args.upgrade:
+                    print(f"Upgrading {pkg} from {record['version']} to {info['version']}")
+                    logger.info(f"Upgrading {pkg} from {record['version']} to {info['version']}")
+                    try:
+                        delete_package(pkg, record, logger)
+                    except Exception as e:
+                        print(f"Error during upgrade cleanup for {pkg}: {e}")
+                        install_errors.append(pkg)
+                        continue
+                else:
+                    logger.info(f"{pkg} version mismatch: installed {record['version']} but expected {info['version']}.")
+                    print(f"{pkg} version mismatch: installed {record['version']} but expected {info['version']}. Please uninstall first if you want to reinstall.")
+                    continue
+        print(f"Installing {pkg} version {info['version']}")
+        try:
+            logger.info(f"Installing {pkg} version {info['version']}")
+            pkg_install_dir = info["installer"](pkg, info["version"], install_dir, args.jobs, logger, args.verbose)
+            installed_state[pkg] = {"version": info["version"], "install_path": pkg_install_dir}
+        except Exception as e:
+            logger.error(f"Error installing {pkg}: {e}")
             install_errors.append(pkg)
+            print(f"{pkg} encountered an error: {e}. Please see the log file: {log_file_path}")
 
-    if len(install_errors) > 0:
-        log_file.write(
-            "\nFailed to install the following packages:\n")
-        for pkg in install_errors:
-            log_file.write(pkg + " ")
-        log_file.write("\n")
-        print(error_beg + f"Failed to install {len(install_errors)} package(s)\n"
-                          "Check the package's associated log file, i.e., "
-                          "PACKAGE/package_log.txt for information as to why the install "
-                          "failed. You could also try to manually install these packages")
-        print(error_end)
-        exit(1)
+    with open(state_file, "w") as f:
+        json.dump(installed_state, f, indent=2)
+    logger.info("Updated installation state.")
 
-    # Create envvars file
-    env_script_file = open(env_script_name, "w")
+    if install_errors:
+        logger.error(f"Failed to install: {', '.join(install_errors)}")
+        print(f"Installation failed for: {', '.join(install_errors)}. Please see the log file: {log_file_path}")
+        sys.exit(1)
 
-    petsc_dir = f"{install_dir}"
-    vtk_dir = f"{install_dir}"
+    print("Creating environment setup script")
+    try:
+        prefix_paths = [record["install_path"] for record in installed_state.values()]
+        cmake_prefix = ":".join(prefix_paths)
+        env_script = os.path.join(bin_dir, "set_opensn_env.sh")
+        with open(env_script, "w") as f:
+            f.write(f'export CMAKE_PREFIX_PATH="{cmake_prefix}"${{CMAKE_PREFIX_PATH:+:${{CMAKE_PREFIX_PATH}}}}\n')
+        os.chmod(env_script, 0o755)
+    except Exception as e:
+        print(f"Error creating environment script: {e}")
 
-    env_script_file.write(
-        f'export CMAKE_PREFIX_PATH="{install_dir}"'
-        f'${{CMAKE_PREFIX_PATH:+:${{CMAKE_PREFIX_PATH}}}}\n')
+    print("\nOpenSn dependency installation complete.")
+    print("To update environment variables, run:")
+    print(f"    $ source {env_script}\n")
 
-    env_script_file.close()
-
-    ExecSub(f"chmod u+x {env_script_name}", log_file)
-    log_file.close()
-
-    print("\n########## OpenSn dependency install complete ##########")
-    print("\nWhen opening OpenSn in an IDE, the following environment variables need to be set:\n")
-
-    print(f'CMAKE_PREFIX_PATH="{install_dir}"${{CMAKE_PREFIX_PATH:+:${{CMAKE_PREFIX_PATH}}}}')
-    print()
-    print(TextColors.WARNING
-          + "When compiling OpenSn, in a terminal, the following environment variables need to be "
-          + "set:\n" + TextColors.ENDC)
-
-    print(
-        f'export CMAKE_PREFIX_PATH="{install_dir}"${{CMAKE_PREFIX_PATH:+:${{CMAKE_PREFIX_PATH}}}}')
-
-    print()
-    print("To set these terminal environment variables automatically, execute:")
-    print(f"    $ source {env_script_name}\n")
-
-except Exception as e:
-    print(f"{TextColors.RED}{e}{TextColors.ENDC}")
+if __name__ == '__main__':
+    main()
