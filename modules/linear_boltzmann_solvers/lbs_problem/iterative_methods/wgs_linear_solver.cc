@@ -154,7 +154,6 @@ void
 WGSLinearSolver::SetRHS()
 {
   CALI_CXX_MARK_SCOPE("WGSLinearSolver::SetRHS");
-
   auto gs_context_ptr = std::dynamic_pointer_cast<WGSContext>(context_ptr_);
 
   auto& groupset = gs_context_ptr->groupset;
@@ -183,7 +182,7 @@ WGSLinearSolver::SetRHS()
     LBSVecOps::SetGSPETScVecFromPrimarySTLvector(lbs_problem, groupset, b_, PhiSTLOption::PHI_NEW);
 
     // Compute RHS norm
-    VecNorm(b_, NORM_2, &context_ptr_->rhs_norm);
+    VecNorm(b_, NORM_2, &gs_context_ptr->rhs_norm);
 
     // Compute precondition RHS norm
     PC pc;
@@ -191,7 +190,7 @@ WGSLinearSolver::SetRHS()
     Vec temp_vec;
     VecDuplicate(b_, &temp_vec);
     PCApply(pc, b_, temp_vec);
-    VecNorm(temp_vec, NORM_2, &context_ptr_->rhs_preconditioned_norm);
+    VecNorm(temp_vec, NORM_2, &gs_context_ptr->rhs_preconditioned_norm);
     VecDestroy(&temp_vec);
   }
   // If we have a single richardson iteration then the user probably wants
@@ -211,7 +210,7 @@ WGSLinearSolver::SetRHS()
     LBSVecOps::SetGSPETScVecFromPrimarySTLvector(lbs_problem, groupset, x_, PhiSTLOption::PHI_NEW);
 
     // Compute RHS norm
-    VecNorm(x_, NORM_2, &context_ptr_->rhs_norm);
+    VecNorm(x_, NORM_2, &gs_context_ptr->rhs_norm);
 
     // Compute precondition RHS norm
     PC pc;
@@ -219,7 +218,7 @@ WGSLinearSolver::SetRHS()
     Vec temp_vec;
     VecDuplicate(x_, &temp_vec);
     PCApply(pc, x_, temp_vec);
-    VecNorm(temp_vec, NORM_2, &context_ptr_->rhs_preconditioned_norm);
+    VecNorm(temp_vec, NORM_2, &gs_context_ptr->rhs_preconditioned_norm);
     VecDestroy(&temp_vec);
 
     SetKSPSolveSuppressionFlag(true);

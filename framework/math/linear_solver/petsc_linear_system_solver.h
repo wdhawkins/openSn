@@ -27,7 +27,7 @@ public:
   } tolerance_options;
 
   PETScLinearSolver(IterativeMethod iterative_method,
-                    std::shared_ptr<LinearSolverContext> context_ptr);
+                    std::shared_ptr<LinearSystemContext> context_ptr);
 
   virtual ~PETScLinearSolver();
 

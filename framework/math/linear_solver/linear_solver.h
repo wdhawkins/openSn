@@ -21,6 +21,7 @@ public:
     PETSC_RICHARDSON = 3,   ///< PETSc Richardson iteration
     PETSC_GMRES = 2,        ///< PETSc GMRES iterative algorithm
     PETSC_BICGSTAB = 4,     ///< PETSc BiCGStab iterative algorithm
+    SLEPC_SOLVER = 5,
   };
 
   LinearSolver(IterativeMethod iterative_method, std::shared_ptr<LinearSolverContext> context_ptr)

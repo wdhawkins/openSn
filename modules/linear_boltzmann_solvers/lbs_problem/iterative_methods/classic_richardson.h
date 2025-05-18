@@ -24,13 +24,14 @@ public:
    * Constructor.
    * \param gs_context_ptr Context Pointer to abstract context.
    */
-  explicit ClassicRichardson(const std::shared_ptr<WGSContext>& gs_context_ptr);
+  explicit ClassicRichardson(const std::shared_ptr<WGSContext>& gs_context_ptr, bool verbose);
 
   ~ClassicRichardson() override;
 
   void Solve() override;
 
 private:
+  bool verbose_;
   std::vector<double> saved_q_moments_local_;
   std::vector<double> psi_new_, psi_old_;
 };

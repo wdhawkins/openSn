@@ -8,6 +8,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_curvilinear_problem/discrete_ordinates_curvilinear_problem.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/discrete_ordinates_problem.h"
 #include "modules/linear_boltzmann_solvers/solvers/steady_state_solver.h"
+#include "modules/linear_boltzmann_solvers/solvers/linear_keigen_solver.h"
 #include "modules/linear_boltzmann_solvers/solvers/nl_keigen_solver.h"
 #include "modules/linear_boltzmann_solvers/solvers/pi_keigen_solver.h"
 #include "modules/linear_boltzmann_solvers/solvers/pi_keigen_scdsa_solver.h"
@@ -549,6 +550,48 @@ WrapSteadyState(py::module& slv)
   // clang-format on
 }
 
+// Wrap linear k-eigen solver
+void
+WrapLinearKEigen(py::module& slv)
+{
+  // clang-format off
+  // Linear k-eigen solver
+  auto linear_k_eigen_solver = py::class_<LinearKEigenSolver, std::shared_ptr<LinearKEigenSolver>,
+                                              Solver>(
+    slv,
+    "LinearKEigenSolver",
+    R"(
+    Linear k-eigenvalue solver.
+
+    Wrapper of :cpp:class:`opensn::LinearKEigenSolver`.
+    )"
+  );
+  linear_k_eigen_solver.def(
+    py::init(
+      [](py::kwargs& params)
+      {
+        return LinearKEigenSolver::Create(kwargs_to_param_block(params));
+      }
+        ),
+    R"(
+    Construct a linear k-eigenvalue solver.
+
+    Parameters
+    ----------
+    lbs_problem: pyopensn.solver.LBSProblem
+        Existing LBSProblem instance.
+    )"
+  );
+  linear_k_eigen_solver.def(
+    "GetEigenvalue",
+    &LinearKEigenSolver::GetEigenvalue,
+    R"(
+    Return the current k‑eigenvalue.
+    )"
+  );
+  // clang-format on
+}
+
 // Wrap non-linear k-eigen solver
 void
 WrapNLKEigen(py::module& slv)
@@ -793,6 +836,7 @@ py_solver(py::module& pyopensn)
   WrapSolver(slv);
   WrapLBS(slv);
   WrapSteadyState(slv);
+  WrapLinearKEigen(slv);
   WrapNLKEigen(slv);
   WrapPIteration(slv);
   WrapPRK(slv);
