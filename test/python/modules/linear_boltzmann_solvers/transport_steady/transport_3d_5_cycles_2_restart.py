@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+#!/ usr / bin / env python3
+#- * - coding : utf - 8 - * -
 
 """
 3D PWLD unstructure mesh Transport test with vacuum boundary conditions
@@ -29,7 +29,7 @@ if __name__ == "__main__":
     if size != num_procs:
         sys.exit(f"Incorrect number of processors. Expected {num_procs} but got {size}.")
 
-    # Setup mesh
+#Setup mesh
     meshgen = FromFileMeshGenerator(
         filename="../../../../assets/mesh/Sphere.case",
         partitioner=KBAGraphPartitioner(
@@ -42,21 +42,21 @@ if __name__ == "__main__":
     )
     grid = meshgen.Execute()
 
-    # Define energy groups and load cross-section data
+#Define energy groups and load cross - section data
     num_groups = 5
     xs_graphite = MultiGroupXS()
     xs_graphite.LoadFromOpenSn("xs_graphite_pure.xs")
 
-    # Create volumetric source
+#Create volumetric source
     strength = [0.0 for _ in range(num_groups)]
     mg_src0 = VolumetricSource(block_ids=[1], group_strength=strength)
     strength[0] = 1.0
     mg_src1 = VolumetricSource(block_ids=[0], group_strength=strength)
 
-    # Setup the angular quadrature
+#Setup the angular quadrature
     pquad = GLCProductQuadrature3DXYZ(n_polar=4, n_azimuthal=8, scattering_order=0)
 
-    # Create and configure the discrete ordinates solver
+#Create and configure the discrete ordinates solver
     phys = DiscreteOrdinatesProblem(
         mesh=grid,
         num_groups=num_groups,
@@ -77,9 +77,9 @@ if __name__ == "__main__":
         ],
         scattering_order=0,
         options={
-            # "restart_writes_enabled": True,
-            # "write_delayed_psi_to_restart": True,
-            # "write_restart_path": "transport_3d_5_cycles_2_restart/transport_3d_5_cycles_2",
+#"restart_writes_enabled" : True,
+#"write_delayed_psi_to_restart" : True,
+#"write_restart_path" : "transport_3d_5_cycles_2_restart/transport_3d_5_cycles_2",
             "read_restart_path": "transport_3d_5_cycles_2_restart/transport_3d_5_cycles_2",
             "volumetric_sources": [mg_src0, mg_src1],
         }
@@ -88,10 +88,10 @@ if __name__ == "__main__":
     ss_solver.Initialize()
     ss_solver.Execute()
 
-    # Field functions
+#Field functions
     fflist = phys.GetScalarFieldFunctionList(only_scalar_flux=False)
 
-    # Volume integration
+#Volume integration
     vol0 = RPPLogicalVolume(infx=True, infy=True, infz=True)
     ffi1 = FieldFunctionInterpolationVolume()
     curffi = ffi1
@@ -104,7 +104,7 @@ if __name__ == "__main__":
     if rank == 0:
         print(f"Max-value1={maxval:.5e}")
 
-    # Volume integration
+#Volume integration
     ffi1 = FieldFunctionInterpolationVolume()
     curffi = ffi1
     curffi.SetOperationType("max")
