@@ -138,6 +138,9 @@ public:
   /// Returns a reference to the map of material ids to XSs.
   const BlockID2XSMap& GetBlockID2XSMap() const;
 
+  /// Replaces the map of block ids to XSs and refreshes material data.
+  void SetBlockID2XSMap(BlockID2XSMap xs_map);
+
   /// Obtains a reference to the grid.
   std::shared_ptr<MeshContinuum> GetGrid() const;
 
