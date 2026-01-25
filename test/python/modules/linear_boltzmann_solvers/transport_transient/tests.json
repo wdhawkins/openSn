@@ -1,0 +1,131 @@
+[
+  {
+    "file": "TransientKEigen3D_PromptStepXS.py",
+    "comment": "3D prompt-only step XS swap (ratio + alpha)",
+    "num_procs": 1,
+    "checks": [
+      {"type": "FloatCompare", "key": "FR_RATIO_ACTUAL", "wordnum": 1, "gold": 1.2, "abs_tol": 1.0e-6},
+      {"type": "FloatCompare", "key": "TRANSIENT_OK", "wordnum": 1, "gold": 1.0, "abs_tol": 1.0e-12}
+    ]
+  },
+  {
+    "file": "TransientKEigen3D_PromptAnalytic.py",
+    "comment": "3D prompt-only analytic exponential check",
+    "num_procs": 1,
+    "checks": [
+      {"type": "FloatCompare", "key": "ANALYTIC_PASS", "wordnum": 1, "gold": 1.0, "abs_tol": 1.0e-12}
+    ]
+  },
+  {
+    "file": "TransientKEigen3D_DelayedStepNuSigmaF.py",
+    "comment": "3D delayed step nuSigmaF (ratio + delayed alpha)",
+    "num_procs": 1,
+    "checks": [
+      {"type": "FloatCompare", "key": "FR_RATIO_ACTUAL", "wordnum": 1, "gold": 1.2, "abs_tol": 1.0e-6},
+      {"type": "FloatCompare", "key": "TRANSIENT_OK", "wordnum": 1, "gold": 1.0, "abs_tol": 1.0e-12}
+    ]
+  },
+  {
+    "file": "TransientKEigen3D_DelayedAnalytic.py",
+    "comment": "3D delayed analytic point-kinetics check",
+    "num_procs": 1,
+    "checks": [
+      {"type": "FloatCompare", "key": "ANALYTIC_PASS", "wordnum": 1, "gold": 1.0, "abs_tol": 1.0e-12}
+    ]
+  },
+  {
+    "file": "TransientKEigen3D_6G_DelayedStepNuSigmaF.py",
+    "comment": "3D 6g, 2-precursor delayed step nuSigmaF (ratio)",
+    "num_procs": 1,
+    "checks": [
+      {"type": "FloatCompare", "key": "FR_RATIO_ACTUAL", "wordnum": 1, "gold": 1.2, "abs_tol": 1.0e-6},
+      {"type": "FloatCompare", "key": "TRANSIENT_OK", "wordnum": 1, "gold": 1.0, "abs_tol": 1.0e-12}
+    ]
+  },
+  {
+    "file": "TransientKEigen3D_2G_PromptStepXS.py",
+    "comment": "3D 2g prompt-only step XS swap (ratio)",
+    "num_procs": 1,
+    "checks": [
+      {"type": "FloatCompare", "key": "FR_RATIO_ACTUAL", "wordnum": 1, "gold": 1.2, "abs_tol": 1.0e-6},
+      {"type": "FloatCompare", "key": "TRANSIENT_OK", "wordnum": 1, "gold": 1.0, "abs_tol": 1.0e-12}
+    ]
+  },
+  {
+    "file": "TransientKEigen2D_2G_PromptCombineVelocities.py",
+    "comment": "2D 2g prompt combine XS with group-wise velocities",
+    "num_procs": 1,
+    "checks": [
+      {"type": "FloatCompare", "key": "FR_RATIO_ACTUAL", "wordnum": 1, "gold": 2.2, "abs_tol": 1.0e-6},
+      {"type": "FloatCompare", "key": "TRANSIENT_OK", "wordnum": 1, "gold": 1.0, "abs_tol": 1.0e-12}
+    ]
+  },
+  {
+    "file": "TransientKEigen2D_PromptRampXS.py",
+    "comment": "2D prompt-only ramp XS (ratio)",
+    "num_procs": 1,
+    "checks": [
+      {"type": "FloatCompare", "key": "TRANSIENT_OK", "wordnum": 1, "gold": 1.0, "abs_tol": 1.0e-12}
+    ]
+  },
+  {
+    "file": "TransientKEigen3D_DelayedRampXS.py",
+    "comment": "3D delayed ramp XS with point-kinetics reference",
+    "num_procs": 1,
+    "checks": [
+      {"type": "FloatCompare", "key": "TRANSIENT_OK", "wordnum": 1, "gold": 1.0, "abs_tol": 1.0e-12}
+    ]
+  },
+  {
+    "file": "TransientKEigen3D_DelayedStiffDtSensitivity.py",
+    "comment": "3D delayed stiff precursor dt sensitivity check",
+    "num_procs": 1,
+    "checks": [
+      {"type": "FloatCompare", "key": "TRANSIENT_OK", "wordnum": 1, "gold": 1.0, "abs_tol": 1.0e-12}
+    ]
+  },
+  {
+    "file": "TransientKEigen2D_2G_DelayedStepDensity.py",
+    "comment": "2D 2g delayed density step (ratio)",
+    "num_procs": 1,
+    "checks": [
+      {"type": "FloatCompare", "key": "FR_RATIO_ACTUAL", "wordnum": 1, "gold": 1.2, "abs_tol": 1.0e-6},
+      {"type": "FloatCompare", "key": "TRANSIENT_OK", "wordnum": 1, "gold": 1.0, "abs_tol": 1.0e-12}
+    ]
+  },
+  {
+    "file": "TransientKEigen1D_PromptStepDensity.py",
+    "comment": "1D prompt-only density step (ratio + alpha)",
+    "num_procs": 1,
+    "checks": [
+      {"type": "FloatCompare", "key": "FR_RATIO_ACTUAL", "wordnum": 1, "gold": 1.2, "abs_tol": 1.0e-6}
+    ]
+  },
+  {
+    "file": "TransientKEigen1D_DelayedStepXS.py",
+    "comment": "1D delayed step XS (ratio)",
+    "num_procs": 1,
+    "checks": [
+      {"type": "FloatCompare", "key": "FR_RATIO_ACTUAL", "wordnum": 1, "gold": 1.2, "abs_tol": 1.0e-6},
+      {"type": "FloatCompare", "key": "TRANSIENT_OK", "wordnum": 1, "gold": 1.0, "abs_tol": 1.0e-12}
+    ]
+  },
+  {
+    "file": "TransientKEigen3D_PromptMidStepSwap.py",
+    "comment": "3D prompt mid-step XS swap time bookkeeping",
+    "num_procs": 1,
+    "checks": [
+      {"type": "FloatCompare", "key": "TIME_AT_SWAP", "wordnum": 1, "gold": 7.0e-2, "abs_tol": 1.0e-10},
+      {"type": "FloatCompare", "key": "FR_RATIO_AT_SWAP", "wordnum": 1, "gold": 1.2, "abs_tol": 1.0e-6},
+      {"type": "FloatCompare", "key": "TRANSIENT_OK", "wordnum": 1, "gold": 1.0, "abs_tol": 1.0e-12}
+    ]
+  },
+  {
+    "file": "TransientKEigen3D_PromptBCLeakage.py",
+    "comment": "3D prompt leakage vs reflecting boundary sanity",
+    "num_procs": 1,
+    "checks": [
+      {"type": "FloatCompare", "key": "TRANSIENT_OK", "wordnum": 1, "gold": 1.0, "abs_tol": 1.0e-12}
+    ]
+  }
+]
