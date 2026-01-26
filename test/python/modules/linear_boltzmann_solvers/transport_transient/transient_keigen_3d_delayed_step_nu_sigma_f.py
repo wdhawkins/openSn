@@ -2,20 +2,22 @@
 # -*- coding: utf-8 -*-
 
 """
-1D prompt-only transient: density (XS) step change.
+3D delayed transient k-eigen: step nuSigmaF (ratio + bounded response).
 
 Test intent
-- Minimal 1D case to ensure transient stepping works with 1D BC conventions (zmin/zmax).
+- Ensure delayed-neutron coupling is stable for a step in nu*Sigma_f and that the prompt fission source
+  scales correctly at t=0.
 
 Physics
-- 1-group prompt-only. A density step scales macroscopic fission terms; with reflecting BCs, the immediate
-  FR ratio should match the scaling.
+- 1-group, 1 precursor. A step in nu*Sigma_f changes reactivity and the prompt source instantly; delayed
+  source responds through precursor evolution. We do not assert a closed-form solution here, only stability.
 
 Gold values
-- FR_RATIO_ACTUAL = 1.2 from scaling Sigma_f by 1.2.
+- FR_RATIO_ACTUAL = 1.2 from Sigma_f ratio 0.180/0.150 = 1.2 (nu is unchanged, so nu*Sigma_f scales identically).
 
 What we check and why
-- FR_RATIO_ACTUAL == 1.2 validates the step scaling in the 1D solver path.
+- FR_RATIO_ACTUAL == 1.2 validates the instantaneous prompt source scaling.
+- TRANSIENT_OK enforces positive, bounded growth over first two steps (no NaNs/instability).
 """
 
 import math
@@ -26,25 +28,25 @@ def xs_path(name):
     return os.path.join(os.path.dirname(__file__), name)
 
 
-def build_mesh_1d(n, length):
+def build_mesh_3d(n, length):
     dx = length / n
     nodes = [i * dx for i in range(n + 1)]
-    meshgen = OrthogonalMeshGenerator(node_sets=[nodes])
+    meshgen = OrthogonalMeshGenerator(node_sets=[nodes, nodes, nodes])
     grid = meshgen.Execute()
     grid.SetUniformBlockID(0)
     return grid
 
 
 if __name__ == "__main__":
-    grid = build_mesh_1d(n=40, length=8.0)
+    grid = build_mesh_3d(n=4, length=8.0)
 
     xs_crit = MultiGroupXS()
-    xs_crit.LoadFromOpenSn(xs_path("xs1g_prompt_crit.cxs"))
+    xs_crit.LoadFromOpenSn(xs_path("xs1g_delayed_crit_1p.cxs"))
 
-    xs_dense = MultiGroupXS()
-    xs_dense.LoadFromOpenSn(xs_path("xs1g_prompt_density_up.cxs"))
+    xs_super = MultiGroupXS()
+    xs_super.LoadFromOpenSn(xs_path("xs1g_delayed_super_1p.cxs"))
 
-    pquad = GLProductQuadrature1DSlab(n_polar=4, scattering_order=0)
+    pquad = GLCProductQuadrature3DXYZ(n_polar=2, n_azimuthal=4, scattering_order=0)
 
     num_groups = 1
     phys = DiscreteOrdinatesProblem(
@@ -62,16 +64,19 @@ if __name__ == "__main__":
         ],
         xs_map=[{"block_ids": [0], "xs": xs_crit}],
         boundary_conditions=[
+            {"name": "xmin", "type": "reflecting"},
+            {"name": "xmax", "type": "reflecting"},
+            {"name": "ymin", "type": "reflecting"},
+            {"name": "ymax", "type": "reflecting"},
             {"name": "zmin", "type": "reflecting"},
             {"name": "zmax", "type": "reflecting"},
         ],
         options={
-            "use_precursors": False,
+            "use_precursors": True,
             "verbose_inner_iterations": False,
             "verbose_outer_iterations": False,
             "verbose_ags_iterations": False,
         },
-        time_dependent=True,
     )
 
     solver = TransientKEigenSolver(problem=phys)
@@ -79,11 +84,8 @@ if __name__ == "__main__":
 
     fr_old = phys.ComputeFissionRate("new")
 
-    phys.SetXSMap(xs_map=[{"block_ids": [0], "xs": xs_dense}])
+    phys.SetXSMap(xs_map=[{"block_ids": [0], "xs": xs_super}])
     fr_new = phys.ComputeFissionRate("new")
-
-    ratio_expected = 1.2
-    ratio_actual = fr_new / fr_old
 
     dt = 1.0e-2
     solver.SetTimeStep(dt)
@@ -99,8 +101,7 @@ if __name__ == "__main__":
 
     growth1 = fr1 / fr_new
     growth2 = fr2 / fr1
-    transient_ok = 1 if (growth1 > 1.0 and growth2 > 1.0) else 0
+    transient_ok = 1 if (growth1 > 1.0 and growth2 > 1.0 and growth2 < 5.0) else 0
 
-    print(f"FR_RATIO_EXPECTED {ratio_expected:.12e}")
-    print(f"FR_RATIO_ACTUAL {ratio_actual:.12e}")
+    print(f"FR_RATIO_ACTUAL {fr_new / fr_old:.12e}")
     print(f"TRANSIENT_OK {transient_ok}")

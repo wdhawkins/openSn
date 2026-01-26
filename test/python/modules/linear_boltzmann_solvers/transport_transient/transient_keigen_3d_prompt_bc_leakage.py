@@ -69,7 +69,6 @@ def run_case(bc_type, xs_crit, xs_super):
             "verbose_outer_iterations": False,
             "verbose_ags_iterations": False,
         },
-        time_dependent=True,
     )
 
     solver = TransientKEigenSolver(problem=phys)

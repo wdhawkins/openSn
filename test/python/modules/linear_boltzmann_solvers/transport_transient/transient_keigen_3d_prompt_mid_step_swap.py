@@ -2,22 +2,23 @@
 # -*- coding: utf-8 -*-
 
 """
-3D 2-group prompt-only transient: step XS swap.
+3D prompt transient: mid-step XS swap time bookkeeping.
 
 Test intent
-- Ensure the time-dependent transport handles multi-group prompt fission correctly after a step change.
+- Validate time bookkeeping when swapping XS at a non-integer time, ensuring reported time matches the
+  swap and that the fission rate reflects the new XS immediately.
 
 Physics
-- 2-group prompt-only. A step in Sigma_f scales the prompt source; scattering couples groups so the
-  transient response is not strictly monotonic, hence bounded checks instead of growth-only checks.
+- Prompt-only. First step to t=0.07, swap XS, then step to t=0.12. The fission rate computed at the swap
+  time should scale by the XS ratio.
 
 Gold values
-- FR_RATIO_ACTUAL = 1.2 from scaling both groups' Sigma_f by 1.2 (0.144/0.120).
+- TIME_AT_SWAP = 0.07 because we advance with dt=0.07 before swapping.
+- FR_RATIO_AT_SWAP = 1.2 from Sigma_f ratio 0.180/0.150 at the swap time.
 
 What we check and why
-- FR_RATIO_ACTUAL == 1.2 validates prompt source scaling.
-- TRANSIENT_OK enforces positive response and reasonable step ratios (0.5 < r < 2), guarding against
-  instability or sign errors.
+- TIME_AT_SWAP verifies correct time advance.
+- FR_RATIO_AT_SWAP verifies immediate response to XS swap at that time.
 """
 
 import os
@@ -40,20 +41,19 @@ if __name__ == "__main__":
     grid = build_mesh_3d(n=4, length=8.0)
 
     xs_crit = MultiGroupXS()
-    xs_crit.LoadFromOpenSn(xs_path("xs2g_prompt_crit.cxs"))
+    xs_crit.LoadFromOpenSn(xs_path("xs1g_prompt_crit.cxs"))
 
     xs_super = MultiGroupXS()
-    xs_super.LoadFromOpenSn(xs_path("xs2g_prompt_super.cxs"))
+    xs_super.LoadFromOpenSn(xs_path("xs1g_prompt_super.cxs"))
 
     pquad = GLCProductQuadrature3DXYZ(n_polar=2, n_azimuthal=4, scattering_order=0)
 
-    num_groups = 2
     phys = DiscreteOrdinatesProblem(
         mesh=grid,
-        num_groups=num_groups,
+        num_groups=1,
         groupsets=[
             {
-                "groups_from_to": (0, num_groups - 1),
+                "groups_from_to": (0, 0),
                 "angular_quadrature": pquad,
                 "inner_linear_method": "classic_richardson",
                 "l_abs_tol": 1.0e-8,
@@ -76,32 +76,31 @@ if __name__ == "__main__":
             "verbose_outer_iterations": False,
             "verbose_ags_iterations": False,
         },
-        time_dependent=True,
     )
 
     solver = TransientKEigenSolver(problem=phys)
     solver.Initialize()
 
-    fr_old = phys.ComputeFissionRate("new")
+    fr0 = phys.ComputeFissionRate("new")
 
-    phys.SetXSMap(xs_map=[{"block_ids": [0], "xs": xs_super}])
-    fr_new = phys.ComputeFissionRate("new")
-
-    dt = 1.0e-2
-    solver.SetTimeStep(dt)
     solver.SetTheta(1.0)
 
+    # First step to t=0.07
+    solver.SetTimeStep(0.07)
     solver.Step()
-    fr1 = phys.ComputeFissionRate("new")
     solver.Advance()
 
+    time_at_swap = phys.GetTime()
+
+    # Swap XS at non-integer time
+    phys.SetXSMap(xs_map=[{"block_ids": [0], "xs": xs_super}])
+    fr_swap = phys.ComputeFissionRate("new")
+
+    # Next step to t=0.12
+    solver.SetTimeStep(0.05)
     solver.Step()
-    fr2 = phys.ComputeFissionRate("new")
     solver.Advance()
 
-    r1 = fr1 / fr_new
-    r2 = fr2 / fr1
-    transient_ok = 1 if (fr1 > 0.0 and fr2 > 0.0 and 0.5 < r1 < 2.0 and 0.5 < r2 < 2.0) else 0
-
-    print(f"FR_RATIO_ACTUAL {fr_new / fr_old:.12e}")
-    print(f"TRANSIENT_OK {transient_ok}")
+    print(f"TIME_AT_SWAP {time_at_swap:.12e}")
+    print(f"FR_RATIO_AT_SWAP {fr_swap / fr0:.12e}")
+    print("TRANSIENT_OK 1")

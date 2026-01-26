@@ -73,9 +73,6 @@ TransientKEigenSolver::TransientKEigenSolver(const InputParameters& params)
     precursor_new_local_(do_problem_->GetPrecursorsNewLocal()),
     psi_new_local_(do_problem_->GetPsiNewLocal())
 {
-  if (not do_problem_->IsTimeDependent())
-    throw std::runtime_error(GetName() + ": Problem is not time dependent.");
-
   dt_ = params.GetParamValue<double>("dt");
   theta_ = params.GetParamValue<double>("theta");
   stop_time_ = params.GetParamValue<double>("stop_time");
@@ -91,17 +88,21 @@ TransientKEigenSolver::Initialize()
   log.Log() << "Initializing " << GetName() << ".";
   do_problem_->GetOptions().save_angular_flux = true;
   do_problem_->SetTime(current_time_);
-  // Use a near-infinite dt to approximate steady-state behavior during k-eigen initialization
-  const double dt_backup = dt_;
-  const double dt_steady = 1.0e30;
-  dt_ = dt_steady;
   do_problem_->SetTimeStep(dt_);
   do_problem_->SetTheta(theta_);
+  do_problem_->SetSweepChunkMode(DiscreteOrdinatesProblem::SweepChunkMode::SteadyState);
   PowerIterationKEigenSolver::Initialize();
   PowerIterationKEigenSolver::Execute();
-  // Restore transient dt after steady-state initialization
-  dt_ = dt_backup;
-  do_problem_->SetTimeStep(dt_);
+  do_problem_->EnableTimeDependentMode();
+
+  // Rebuild sweep chunks for transient mode since WGS/AGS contexts were created in steady-state mode.
+  for (auto& wgs_solver : do_problem_->GetWGSSolvers())
+  {
+    auto context = wgs_solver->GetContext();
+    auto sweep_context = std::dynamic_pointer_cast<SweepWGSContext>(context);
+    if (sweep_context)
+      sweep_context->ResetSweepChunk(do_problem_->CreateSweepChunk(sweep_context->groupset));
+  }
 
   // Configure fission sources for transient solve after power iteration.
   // For transients we treat fission as an explicit source (RHS), not on the LHS.

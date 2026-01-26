@@ -2,25 +2,24 @@
 # -*- coding: utf-8 -*-
 
 """
-3D delayed transient k-eigen: step nuSigmaF (ratio + bounded response).
+3D 2-group prompt-only transient: step XS swap.
 
 Test intent
-- Ensure delayed-neutron coupling is stable for a step in nu*Sigma_f and that the prompt fission source
-  scales correctly at t=0.
+- Ensure the time-dependent transport handles multi-group prompt fission correctly after a step change.
 
 Physics
-- 1-group, 1 precursor. A step in nu*Sigma_f changes reactivity and the prompt source instantly; delayed
-  source responds through precursor evolution. We do not assert a closed-form solution here, only stability.
+- 2-group prompt-only. A step in Sigma_f scales the prompt source; scattering couples groups so the
+  transient response is not strictly monotonic, hence bounded checks instead of growth-only checks.
 
 Gold values
-- FR_RATIO_ACTUAL = 1.2 from Sigma_f ratio 0.180/0.150 = 1.2 (nu is unchanged, so nu*Sigma_f scales identically).
+- FR_RATIO_ACTUAL = 1.2 from scaling both groups' Sigma_f by 1.2 (0.144/0.120).
 
 What we check and why
-- FR_RATIO_ACTUAL == 1.2 validates the instantaneous prompt source scaling.
-- TRANSIENT_OK enforces positive, bounded growth over first two steps (no NaNs/instability).
+- FR_RATIO_ACTUAL == 1.2 validates prompt source scaling.
+- TRANSIENT_OK enforces positive response and reasonable step ratios (0.5 < r < 2), guarding against
+  instability or sign errors.
 """
 
-import math
 import os
 
 
@@ -41,14 +40,14 @@ if __name__ == "__main__":
     grid = build_mesh_3d(n=4, length=8.0)
 
     xs_crit = MultiGroupXS()
-    xs_crit.LoadFromOpenSn(xs_path("xs1g_delayed_crit_1p.cxs"))
+    xs_crit.LoadFromOpenSn(xs_path("xs2g_prompt_crit.cxs"))
 
     xs_super = MultiGroupXS()
-    xs_super.LoadFromOpenSn(xs_path("xs1g_delayed_super_1p.cxs"))
+    xs_super.LoadFromOpenSn(xs_path("xs2g_prompt_super.cxs"))
 
     pquad = GLCProductQuadrature3DXYZ(n_polar=2, n_azimuthal=4, scattering_order=0)
 
-    num_groups = 1
+    num_groups = 2
     phys = DiscreteOrdinatesProblem(
         mesh=grid,
         num_groups=num_groups,
@@ -72,12 +71,11 @@ if __name__ == "__main__":
             {"name": "zmax", "type": "reflecting"},
         ],
         options={
-            "use_precursors": True,
+            "use_precursors": False,
             "verbose_inner_iterations": False,
             "verbose_outer_iterations": False,
             "verbose_ags_iterations": False,
         },
-        time_dependent=True,
     )
 
     solver = TransientKEigenSolver(problem=phys)
@@ -100,9 +98,9 @@ if __name__ == "__main__":
     fr2 = phys.ComputeFissionRate("new")
     solver.Advance()
 
-    growth1 = fr1 / fr_new
-    growth2 = fr2 / fr1
-    transient_ok = 1 if (growth1 > 1.0 and growth2 > 1.0 and growth2 < 5.0) else 0
+    r1 = fr1 / fr_new
+    r2 = fr2 / fr1
+    transient_ok = 1 if (fr1 > 0.0 and fr2 > 0.0 and 0.5 < r1 < 2.0 and 0.5 < r2 < 2.0) else 0
 
     print(f"FR_RATIO_ACTUAL {fr_new / fr_old:.12e}")
     print(f"TRANSIENT_OK {transient_ok}")

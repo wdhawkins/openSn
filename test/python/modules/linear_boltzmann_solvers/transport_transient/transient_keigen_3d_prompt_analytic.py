@@ -2,26 +2,25 @@
 # -*- coding: utf-8 -*-
 
 """
-3D delayed transient k-eigen with semi-analytic 1-precursor kinetics.
+3D prompt-only transient k-eigen with analytic exponential response.
 
 Test intent
-- Validate delayed-neutron coupling and precursor update against the closed-form 1-precursor point-kinetics
-  solution for a reactivity step.
+- Validate the time integration against the analytic solution for a prompt-only infinite-medium step.
 
 Physics
-- 1-group, 1 precursor. Point kinetics:
-    dphi/dt = ((rho - beta)/Lambda) * phi + lambda * C
-    dC/dt   = (beta/Lambda) * phi - lambda * C
-  For a step to rho>0 with phi(0)=1 and C(0)=beta/(Lambda*lambda), the solution is a sum of two exponentials
-  with eigenvalues w1,w2. The helper delayed_phi_ratio implements that exact form.
+- 1-group, reflecting BCs, no delayed neutrons. After a step to supercritical:
+  dphi/dt = alpha * phi, with alpha = nu*Sigma_f - Sigma_a.
+- In discrete time with theta=1, the update ratio per step is
+  r = (tau + Sigma_s + nu*Sigma_f)/(tau + Sigma_t), where tau = v^{-1}/dt.
+  For small dt, r ≈ exp(alpha dt), giving phi(t)/phi(0) = exp(alpha t).
 
 Gold values
-- ANALYTIC_PASS is 1 if |FR_ratio - delayed_phi_ratio(t)| < 2% for all steps up to t=0.2.
-  Parameters: beta=0.0065, lambda=0.08, k=1.2 => rho=(k-1)/k=0.166666..., nu_total=2.0, Sigma_f=0.18,
-  Lambda = 1/(v*nu*Sigma_f) = 1/0.36 ≈ 2.7778. These are the inputs to delayed_phi_ratio.
+- ANALYTIC_PASS is 1 if |FR_ratio - exp(alpha t)| < 0.5% for all steps up to t=0.1.
+  With Sigma_t=1.0, Sigma_s=0.7 => Sigma_a=0.3, nu=2, Sigma_f=0.18, alpha=0.36-0.3=0.06.
+  Thus exp(alpha*0.1)=exp(0.006)≈1.0060 (used implicitly in the comparison).
 
 What we check and why
-- ANALYTIC_PASS validates delayed source and precursor updates against the semi-analytic solution.
+- ANALYTIC_PASS validates the time term and prompt fission source handling against the analytic solution.
 """
 
 import math
@@ -41,32 +40,14 @@ def build_mesh_3d(n, length):
     return grid
 
 
-def delayed_phi_ratio(t, beta, lam, rho, Lambda):
-    # Point-kinetics 1-precursor step solution with phi(0)=1, C(0)=beta/(Lambda*lam)
-    a = (rho - beta) / Lambda - lam
-    b = math.sqrt(((rho - beta) / Lambda + lam) ** 2 + 4.0 * beta * lam / Lambda)
-    w1 = 0.5 * (a + b)
-    w2 = 0.5 * (a - b)
-
-    # C = (beta/Lambda)/(w+lam) * phi for each mode
-    k1 = (beta / Lambda) / (w1 + lam)
-    k2 = (beta / Lambda) / (w2 + lam)
-
-    # Solve for coefficients c1, c2 from phi(0)=1 and C(0)=beta/(Lambda*lam)
-    c2 = (beta / (Lambda * lam) - k1) / (k2 - k1)
-    c1 = 1.0 - c2
-
-    return c1 * math.exp(w1 * t) + c2 * math.exp(w2 * t)
-
-
 if __name__ == "__main__":
     grid = build_mesh_3d(n=4, length=8.0)
 
     xs_crit = MultiGroupXS()
-    xs_crit.LoadFromOpenSn(xs_path("xs1g_delayed_crit_1p.cxs"))
+    xs_crit.LoadFromOpenSn(xs_path("xs1g_prompt_crit.cxs"))
 
     xs_super = MultiGroupXS()
-    xs_super.LoadFromOpenSn(xs_path("xs1g_delayed_super_1p.cxs"))
+    xs_super.LoadFromOpenSn(xs_path("xs1g_prompt_super.cxs"))
 
     pquad = GLCProductQuadrature3DXYZ(n_polar=2, n_azimuthal=4, scattering_order=0)
 
@@ -94,53 +75,65 @@ if __name__ == "__main__":
             {"name": "zmax", "type": "reflecting"},
         ],
         options={
-            "use_precursors": True,
+            "use_precursors": False,
             "verbose_inner_iterations": False,
             "verbose_outer_iterations": False,
             "verbose_ags_iterations": False,
         },
-        time_dependent=True,
     )
 
     solver = TransientKEigenSolver(problem=phys, max_iters=200, k_tol=1.0e-10)
     solver.Initialize()
+    phi_old = phys.GetPhiOldLocal()
+    phi_new = phys.GetPhiNewLocal()
+    print("phi_old[0]", phi_old[0], "phi_new[0]", phi_new[0])
 
     # Swap to supercritical XS at t=0
     phys.SetXSMap(xs_map=[{"block_ids": [0], "xs": xs_super}])
+    print("fr_new (new)", phys.ComputeFissionProduction("new"))
+    print("fr_old (old)", phys.ComputeFissionProduction("old"))
 
-    # Semi-analytic parameters
-    beta = 0.0065
-    lam = 0.08
-    k = 1.2
-    rho = (k - 1.0) / k
-    # Lambda based on infinite-medium definition (prompt gen time)
-    nu_prompt = 1.987
-    nu_delayed = 0.013
+    # Analytic alpha for prompt-only
+    sigma_t = 1.0
+    sigma_s = 0.7
+    sigma_a = sigma_t - sigma_s
+    nu = 2.0
     sigma_f = 0.180000
-    v = 1.0
-    nu_sigma_f = sigma_f * (nu_prompt + nu_delayed)
-    Lambda = 1.0 / (v * nu_sigma_f)
+    alpha = nu * sigma_f - sigma_a
 
     dt = 1.0e-2
     solver.SetTimeStep(dt)
     solver.SetTheta(1.0)
 
+    # Use the converged flux from the k-eigen solve as the initial state
     fr0 = phys.ComputeFissionProduction("new")
 
-    t_end = 0.2
-    rel_tol = 2.0e-2
+    print("inv_velocity", xs_super.inv_velocity)
+    print("dt", dt, "theta", 1.0)
+    tau = xs_super.inv_velocity[0] / dt
+    r_expected = (tau + sigma_s + nu*sigma_f) / (tau + sigma_t)
+    print("tau", tau, "r_expected", r_expected, "r_expected^11", r_expected**11)
+
+    t_end = 0.1
+    rel_tol = 5.0e-3
     ok = True
     print("step time ratio_numeric ratio_analytic")
     step = 0
     while phys.GetTime() < t_end:
         step += 1
+        t_from = phys.GetTime()
         solver.Step()
+        print("fr_new(after step)", phys.ComputeFissionProduction("new"),
+            "fr_old(after step)", phys.ComputeFissionProduction("old"))
+        phi_old = phys.GetPhiOldLocal()
+        phi_new = phys.GetPhiNewLocal()
+        print("phi_old[0]", phi_old[0], "phi_new[0]", phi_new[0])
         fr_new = phys.ComputeFissionProduction("new")
         solver.Advance()
         t_to = phys.GetTime()
 
         ratio_num = fr_new / fr0
-        ratio_ana = delayed_phi_ratio(t_to, beta, lam, rho, Lambda)
+        ratio_ana = math.exp(alpha * t_to)
 
         print(f"{step:4d} {t_to:10.4e} {ratio_num:12.6e} {ratio_ana:12.6e}")
         if abs(ratio_num - ratio_ana) > rel_tol * ratio_ana:

@@ -108,7 +108,6 @@ if __name__ == "__main__":
             "verbose_outer_iterations": False,
             "verbose_ags_iterations": False,
         },
-        time_dependent=True,
     )
 
     solver = TransientKEigenSolver(problem=phys, max_iters=200, k_tol=1.0e-10)

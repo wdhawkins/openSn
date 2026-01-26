@@ -72,7 +72,6 @@ def run_transient(dt, t_end, xs_crit, xs_super):
             "verbose_outer_iterations": False,
             "verbose_ags_iterations": False,
         },
-        time_dependent=True,
     )
 
     solver = TransientKEigenSolver(problem=phys)
