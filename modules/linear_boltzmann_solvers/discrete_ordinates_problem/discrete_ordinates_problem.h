@@ -8,6 +8,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep_chunks/sweep_chunk.h"
 #include "framework/parameters/parameter_block.h"
 #include <memory>
+#include <optional>
 
 namespace opensn
 {
@@ -22,6 +23,18 @@ protected:
   using SweepOrderGroupingInfo = std::pair<UniqueSOGroupings, DirIDToSOMap>;
 
 public:
+  enum class SweepChunkMode
+  {
+    Default = 0,
+    SteadyState = 1,
+    TimeDependent = 2
+  };
+
+  void SetSweepChunkMode(SweepChunkMode mode);
+  void ResetSweepChunkMode() { sweep_chunk_mode_.reset(); }
+  std::shared_ptr<SweepChunk> CreateSweepChunk(LBSGroupset& groupset) { return SetSweepChunk(groupset); }
+  void EnableTimeDependentMode();
+
   /// Static registration based constructor.
   explicit DiscreteOrdinatesProblem(const InputParameters& params);
   ~DiscreteOrdinatesProblem() override;
@@ -132,6 +145,9 @@ protected:
 
   std::vector<std::vector<double>> psi_new_local_;
   std::vector<std::vector<double>> psi_old_local_;
+  std::optional<SweepChunkMode> sweep_chunk_mode_;
+
+  void EnsureOldAngularFluxStorage();
 
 private:
   void CreateFLUDSCommonDataForDevice();
