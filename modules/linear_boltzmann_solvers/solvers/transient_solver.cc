@@ -10,6 +10,7 @@
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_compute.h"
 #include "framework/logging/log.h"
 #include <numeric>
+#include <iomanip>
 
 namespace opensn
 {
@@ -93,6 +94,21 @@ TransientKEigenSolver::Initialize()
   do_problem_->SetSweepChunkMode(DiscreteOrdinatesProblem::SweepChunkMode::SteadyState);
   PowerIterationKEigenSolver::Initialize();
   PowerIterationKEigenSolver::Execute();
+
+  // NOTE: This final sweep rebuilds angular flux from the converged scalar flux.
+  // It can modify outflow tallies, so any balance calculations must be done before this block.
+  {
+    phi_old_local_ = phi_new_local_;
+    for (auto& wgs_solver : do_problem_->GetWGSSolvers())
+    {
+      auto context = wgs_solver->GetContext();
+      auto sweep_context = std::dynamic_pointer_cast<SweepWGSContext>(context);
+      if (not sweep_context)
+        continue;
+
+      sweep_context->RebuildAngularFluxFromConvergedPhi(false);
+    }
+  }
   do_problem_->EnableTimeDependentMode();
 
   // Rebuild sweep chunks for transient mode since WGS/AGS contexts were created in steady-state mode.
@@ -121,9 +137,8 @@ TransientKEigenSolver::Initialize()
   if (verbose_)
   {
     const double FR = ComputeFissionRate(*do_problem_, phi_new_local_);
-    char buff[200];
-    snprintf(buff,200, " Initial Fission Rate FR=%12.6g", FR);
-    log.Log() << GetName() << buff;
+    log.Log() << GetName() << " Initial Fission Rate FR=" << std::setprecision(6)
+              << std::scientific << FR;
   }
 
   // Build a consistent angular flux field for psi_old using an isotropic reconstruction
@@ -202,7 +217,13 @@ TransientKEigenSolver::Initialize()
 
   using namespace std::placeholders;
   active_set_source_function_ =
-    std::bind(&SourceFunction::operator(), src_function, _1, _2, _3, _4);
+    [src_function](auto&& p1, auto&& p2, auto&& p3, auto&& p4)
+    {
+      (*src_function)(std::forward<decltype(p1)>(p1),
+                      std::forward<decltype(p2)>(p2),
+                      std::forward<decltype(p3)>(p3),
+                      std::forward<decltype(p4)>(p4));
+    };
 }
 
 void
@@ -332,9 +353,9 @@ TransientKEigenSolver::Step()
   // Print end of timestep
   if (verbose_)
   {
-    char buff[200];
-    snprintf(buff, 200, " dt=%.1e time=%10.4f FR=%12.6g", dt_, current_time_ + dt_, FR_new);
-    log.Log() << GetName() << buff;
+    log.Log() << GetName() << " dt=" << std::scientific << std::setprecision(1) << dt_
+              << " time=" << std::fixed << std::setprecision(4) << (current_time_ + dt_)
+              << " FR=" << std::scientific << std::setprecision(6) << FR_new;
   }
 }
 
