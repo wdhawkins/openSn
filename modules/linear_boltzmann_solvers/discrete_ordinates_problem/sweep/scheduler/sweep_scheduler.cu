@@ -5,11 +5,8 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/angle_set/aahd_angle_set.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep_chunks/aahd_sweep_chunk.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/discrete_ordinates_problem.h"
-#include "framework/logging/log.h"
-#include "framework/runtime.h"
 #include "caliper/cali.h"
 #include <algorithm>
-#include <atomic>
 #include <thread>
 #include <vector>
 
@@ -30,10 +27,6 @@ SweepScheduler::ScheduleAlgoAAO(SweepChunk& sweep_chunk)
     std::any_of(angle_agg_.GetSimBoundaries().begin(),
                 angle_agg_.GetSimBoundaries().end(),
                 [](const auto& bndry_pair) { return bndry_pair.second->IsReflecting(); });
-  static std::atomic<bool> logged_mode{false};
-  if (not logged_mode.exchange(true) and mpi_comm.rank() == 0)
-    log.Log() << "AAHD AAO mode: "
-              << (has_reflecting_bc ? "reflecting-main-compatible" : "nonreflecting-optimized");
 
   if (has_reflecting_bc)
   {

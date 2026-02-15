@@ -226,58 +226,31 @@ AAHDSweepChunk::Sweep(AngleSet& angle_set)
   // retrieve SPDS levels
   const auto& spds = static_cast<const AAH_SPDS&>(aahd_angle_set.GetSPDS());
   const auto& levelized_spls = spds.GetLevelizedLocalSubgrid();
-  const bool reflecting_mode = fluds.IsReflectingCompatibleMode();
   // loop over each level based on saturation status
   unsigned int block_size_x = groupset_.GetNumGroups(),
                block_size_y = aahd_angle_set.GetNumAngles();
-  if (reflecting_mode)
+  if (block_size_x * block_size_y <= gpu_kernel::threshold)
   {
-    if (block_size_x * block_size_y <= gpu_kernel::threshold)
+    const std::size_t shared_memory_size =
+      block_size_y * sizeof(gpu_kernel::DirectionCacheEntry) + sizeof(std::uint32_t);
+    for (std::uint32_t level = 0; level < levelized_spls.size(); ++level)
     {
-      for (std::uint32_t level = 0; level < levelized_spls.size(); ++level)
-      {
-        std::size_t level_size = levelized_spls[level].size();
-        const std::uint32_t* level_data = spds.GetDeviceLevelVector(level);
-        ::dim3 block_size{block_size_x, block_size_y};
-        gpu_kernel::UnsaturatedKernelMain<<<level_size, block_size, 0, stream>>>(
+      std::size_t level_size = levelized_spls[level].size();
+      const std::uint32_t* level_data = spds.GetDeviceLevelVector(level);
+      ::dim3 block_size{block_size_x, block_size_y};
+      gpu_kernel::
+        UnsaturatedKernelOptimized<<<level_size, block_size, shared_memory_size, stream>>>(
           args, level_data, saved_psi);
-      }
-    }
-    else
-    {
-      for (std::uint32_t level = 0; level < levelized_spls.size(); ++level)
-      {
-        std::size_t level_size = levelized_spls[level].size();
-        const std::uint32_t* level_data = spds.GetDeviceLevelVector(level);
-        gpu_kernel::SaturatedKernel<<<level_size, gpu_kernel::threshold, 0, stream>>>(
-          args, level_data, saved_psi);
-      }
     }
   }
   else
   {
-    if (block_size_x * block_size_y <= gpu_kernel::threshold)
+    for (std::uint32_t level = 0; level < levelized_spls.size(); ++level)
     {
-      const std::size_t shared_memory_size =
-        block_size_y * sizeof(gpu_kernel::DirectionCacheEntry) + sizeof(std::uint32_t);
-      for (std::uint32_t level = 0; level < levelized_spls.size(); ++level)
-      {
-        std::size_t level_size = levelized_spls[level].size();
-        const std::uint32_t* level_data = spds.GetDeviceLevelVector(level);
-        ::dim3 block_size{block_size_x, block_size_y};
-        gpu_kernel::UnsaturatedKernelOptimized<<<level_size, block_size, shared_memory_size, stream>>>(
-          args, level_data, saved_psi);
-      }
-    }
-    else
-    {
-      for (std::uint32_t level = 0; level < levelized_spls.size(); ++level)
-      {
-        std::size_t level_size = levelized_spls[level].size();
-        const std::uint32_t* level_data = spds.GetDeviceLevelVector(level);
-        gpu_kernel::SaturatedKernelOptimized<<<level_size, gpu_kernel::threshold, 0, stream>>>(
-          args, level_data, saved_psi);
-      }
+      std::size_t level_size = levelized_spls[level].size();
+      const std::uint32_t* level_data = spds.GetDeviceLevelVector(level);
+      gpu_kernel::SaturatedKernelOptimized<<<level_size, gpu_kernel::threshold, 0, stream>>>(
+        args, level_data, saved_psi);
     }
   }
 }

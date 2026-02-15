@@ -145,21 +145,14 @@ AAHD_FLUDS::AAHD_FLUDS(unsigned int num_groups,
 void
 AAHD_FLUDS::ClearLocalAndReceivePsi()
 {
-  if (reflecting_compatible_mode_)
-  {
-    local_psi_.async_free(stream_);
-    nonlocal_incoming_psi_bank_.Clear(stream_);
-  }
-  // Non-reflecting path keeps allocations persistent across sweeps.
+  // Keep allocations persistent across sweeps.
   prelocI_outgoing_psi_view_.clear();
 }
 
 void
 AAHD_FLUDS::ClearSendPsi()
 {
-  if (reflecting_compatible_mode_)
-    nonlocal_outgoing_psi_bank_.Clear(stream_);
-  // Non-reflecting path keeps allocations persistent across sweeps.
+  // Keep allocations persistent across sweeps.
   deplocI_outgoing_psi_view_.clear();
 }
 
@@ -167,31 +160,21 @@ void
 AAHD_FLUDS::AllocateInternalLocalPsi()
 {
   const std::size_t required_size = common_data_.GetLocalNodeStackSize() * num_groups_and_angles_;
-  if (reflecting_compatible_mode_)
-    local_psi_ = crb::DeviceMemory<double>(required_size, stream_);
-  else if (local_psi_.size() != required_size)
+  if (local_psi_.size() != required_size)
     local_psi_ = crb::DeviceMemory<double>(required_size, stream_);
 }
 
 void
 AAHD_FLUDS::AllocateOutgoingPsi()
 {
-  if (reflecting_compatible_mode_)
+  const std::size_t required_size =
+    common_data_.GetNonLocalOutgoingNodeOffsets().back() * num_groups_and_angles_;
+  if (nonlocal_outgoing_psi_bank_.location_sizes == nullptr or
+      nonlocal_outgoing_psi_bank_.host_storage.size() != required_size)
     nonlocal_outgoing_psi_bank_ = AAHD_NonLocalBank(common_data_.GetNumNonLocalOutgoingNodes(),
                                                     common_data_.GetNonLocalOutgoingNodeOffsets(),
                                                     num_groups_and_angles_,
                                                     stream_);
-  else
-  {
-    const std::size_t required_size =
-      common_data_.GetNonLocalOutgoingNodeOffsets().back() * num_groups_and_angles_;
-    if (nonlocal_outgoing_psi_bank_.location_sizes == nullptr or
-        nonlocal_outgoing_psi_bank_.host_storage.size() != required_size)
-      nonlocal_outgoing_psi_bank_ = AAHD_NonLocalBank(common_data_.GetNumNonLocalOutgoingNodes(),
-                                                      common_data_.GetNonLocalOutgoingNodeOffsets(),
-                                                      num_groups_and_angles_,
-                                                      stream_);
-  }
   nonlocal_outgoing_psi_bank_.UpdateViews(deplocI_outgoing_psi_view_);
 }
 
@@ -209,22 +192,14 @@ AAHD_FLUDS::AllocateDelayedLocalPsi()
 void
 AAHD_FLUDS::AllocatePrelocIOutgoingPsi()
 {
-  if (reflecting_compatible_mode_)
+  const std::size_t required_size =
+    common_data_.GetNonLocalIncomingNodeOffsets().back() * num_groups_and_angles_;
+  if (nonlocal_incoming_psi_bank_.location_sizes == nullptr or
+      nonlocal_incoming_psi_bank_.host_storage.size() != required_size)
     nonlocal_incoming_psi_bank_ = AAHD_NonLocalBank(common_data_.GetNumNonLocalIncomingNodes(),
                                                     common_data_.GetNonLocalIncomingNodeOffsets(),
                                                     num_groups_and_angles_,
                                                     stream_);
-  else
-  {
-    const std::size_t required_size =
-      common_data_.GetNonLocalIncomingNodeOffsets().back() * num_groups_and_angles_;
-    if (nonlocal_incoming_psi_bank_.location_sizes == nullptr or
-        nonlocal_incoming_psi_bank_.host_storage.size() != required_size)
-      nonlocal_incoming_psi_bank_ = AAHD_NonLocalBank(common_data_.GetNumNonLocalIncomingNodes(),
-                                                      common_data_.GetNonLocalIncomingNodeOffsets(),
-                                                      num_groups_and_angles_,
-                                                      stream_);
-  }
   nonlocal_incoming_psi_bank_.UpdateViews(prelocI_outgoing_psi_view_);
 }
 
@@ -242,16 +217,7 @@ AAHD_FLUDS::AllocateDelayedPrelocIOutgoingPsi()
 void
 AAHD_FLUDS::AllocateSaveAngularFlux(DiscreteOrdinatesProblem& problem, const LBSGroupset& groupset)
 {
-  if (reflecting_compatible_mode_)
-  {
-    if (not problem.GetPsiNewLocal()[groupset.id].empty())
-    {
-      auto* mesh_carrier_ptr = reinterpret_cast<MeshCarrier*>(problem.GetCarrier(2));
-      save_angular_flux_ =
-        AAHD_Bank(mesh_carrier_ptr->num_nodes_total * num_groups_and_angles_, stream_);
-    }
-  }
-  else if (not problem.GetPsiNewLocal()[groupset.id].empty())
+  if (not problem.GetPsiNewLocal()[groupset.id].empty())
   {
     auto* mesh_carrier_ptr = reinterpret_cast<MeshCarrier*>(problem.GetCarrier(2));
     const std::size_t required_size = mesh_carrier_ptr->num_nodes_total * num_groups_and_angles_;
@@ -299,62 +265,31 @@ AAHD_FLUDS::CopyBoundaryToDevice(MeshContinuum& grid,
                                  const LBSGroupset& groupset,
                                  bool is_surface_source_active)
 {
-  if (reflecting_compatible_mode_)
-  {
+  const std::vector<std::uint32_t>& as_angle_indices = angle_set.GetAngleIndices();
+  const auto gs_gi = groupset.first_group;
+  const std::size_t required_size = common_data_.GetNumBoundaryNodes() * num_groups_and_angles_;
+  if (boundary_psi_.host_storage.size() != required_size)
     boundary_psi_ =
       AAHD_BoundaryBank(common_data_.GetNumBoundaryNodes(), num_groups_and_angles_, stream_);
-    for (const auto& [face_node, node_index] : common_data_.GetNodeTracker())
-    {
-      if (node_index.IsUndefined() || !node_index.IsBoundary() || node_index.IsOutGoing())
-        continue;
-      const CellFace& face =
-        grid.local_cells[face_node.GetCellIndex()].faces[face_node.GetFaceIndex()];
-      auto gs_gi = groupset.first_group;
-      double* dest =
-        boundary_psi_.host_storage.data() + node_index.GetIndex() * num_groups_and_angles_;
-      const std::vector<std::uint32_t>& as_angle_indices = angle_set.GetAngleIndices();
-      for (const std::uint32_t& direction_num : as_angle_indices)
-      {
-        const double* src = angle_set.PsiBoundary(face.neighbor_id,
-                                                  direction_num,
-                                                  face_node.GetCellIndex(),
-                                                  face_node.GetFaceIndex(),
-                                                  face_node.GetFaceNodeIndex(),
-                                                  gs_gi,
-                                                  is_surface_source_active);
-        std::memcpy(dest, src, num_groups_ * sizeof(double));
-        dest += num_groups_;
-      }
-    }
-  }
-  else
+  for (const auto& [face_node, node_index] : common_data_.GetNodeTracker())
   {
-    const std::vector<std::uint32_t>& as_angle_indices = angle_set.GetAngleIndices();
-    const auto gs_gi = groupset.first_group;
-    const std::size_t required_size = common_data_.GetNumBoundaryNodes() * num_groups_and_angles_;
-    if (boundary_psi_.host_storage.size() != required_size)
-      boundary_psi_ =
-        AAHD_BoundaryBank(common_data_.GetNumBoundaryNodes(), num_groups_and_angles_, stream_);
-    for (const auto& [face_node, node_index] : common_data_.GetNodeTracker())
+    if (node_index.IsUndefined() or not node_index.IsBoundary() or node_index.IsOutGoing())
+      continue;
+    const CellFace& face =
+      grid.local_cells[face_node.GetCellIndex()].faces[face_node.GetFaceIndex()];
+    double* dest =
+      boundary_psi_.host_storage.data() + node_index.GetIndex() * num_groups_and_angles_;
+    for (const std::uint32_t& direction_num : as_angle_indices)
     {
-      if (node_index.IsUndefined() or not node_index.IsBoundary() or node_index.IsOutGoing())
-        continue;
-      const CellFace& face =
-        grid.local_cells[face_node.GetCellIndex()].faces[face_node.GetFaceIndex()];
-      double* dest =
-        boundary_psi_.host_storage.data() + node_index.GetIndex() * num_groups_and_angles_;
-      for (const std::uint32_t& direction_num : as_angle_indices)
-      {
-        const double* src = angle_set.PsiBoundary(face.neighbor_id,
-                                                  direction_num,
-                                                  face_node.GetCellIndex(),
-                                                  face_node.GetFaceIndex(),
-                                                  face_node.GetFaceNodeIndex(),
-                                                  gs_gi,
-                                                  is_surface_source_active);
-        std::memcpy(dest, src, num_groups_ * sizeof(double));
-        dest += num_groups_;
-      }
+      const double* src = angle_set.PsiBoundary(face.neighbor_id,
+                                                direction_num,
+                                                face_node.GetCellIndex(),
+                                                face_node.GetFaceIndex(),
+                                                face_node.GetFaceNodeIndex(),
+                                                gs_gi,
+                                                is_surface_source_active);
+      std::memcpy(dest, src, num_groups_ * sizeof(double));
+      dest += num_groups_;
     }
   }
   boundary_psi_.UploadToDevice(stream_);
@@ -421,57 +356,27 @@ AAHD_FLUDS::CopyPsiFromDevice()
 void
 AAHD_FLUDS::CopyBoundaryPsiToAngleSet(MeshContinuum& grid, AngleSet& angle_set)
 {
-  if (reflecting_compatible_mode_)
+  const std::vector<std::uint32_t>& as_angle_indices = angle_set.GetAngleIndices();
+  const auto& boundaries = angle_set.GetBoundaries();
+  for (const auto& [face_node, node_index] : common_data_.GetNodeTracker())
   {
-    for (const auto& [face_node, node_index] : common_data_.GetNodeTracker())
+    if (node_index.IsUndefined() or not node_index.IsBoundary() or not node_index.IsOutGoing())
+      continue;
+    const CellFace& face =
+      grid.local_cells[face_node.GetCellIndex()].faces[face_node.GetFaceIndex()];
+    auto bndry_it = boundaries.find(face.neighbor_id);
+    if (bndry_it == boundaries.end() or not bndry_it->second->IsReflecting())
+      continue;
+    double* src =
+      boundary_psi_.host_storage.data() + node_index.GetIndex() * num_groups_and_angles_;
+    for (const std::uint32_t& direction_num : as_angle_indices)
     {
-      if (node_index.IsUndefined() || !node_index.IsBoundary() || !node_index.IsOutGoing())
-        continue;
-      const CellFace& face =
-        grid.local_cells[face_node.GetCellIndex()].faces[face_node.GetFaceIndex()];
-      bool is_reflecting_boundary_face = angle_set.GetBoundaries()[face.neighbor_id]->IsReflecting();
-      if (!is_reflecting_boundary_face)
-        continue;
-      double* src =
-        boundary_psi_.host_storage.data() + node_index.GetIndex() * num_groups_and_angles_;
-      const std::vector<std::uint32_t>& as_angle_indices = angle_set.GetAngleIndices();
-      for (const std::uint32_t& direction_num : as_angle_indices)
-      {
-        double* dest = angle_set.PsiReflected(face.neighbor_id,
-                                              direction_num,
-                                              face_node.GetCellIndex(),
-                                              face_node.GetFaceIndex(),
-                                              face_node.GetFaceNodeIndex());
-        std::memcpy(dest, src, num_groups_ * sizeof(double));
-        src += num_groups_;
-      }
-    }
-    boundary_psi_.Clear(stream_);
-  }
-  else
-  {
-    const std::vector<std::uint32_t>& as_angle_indices = angle_set.GetAngleIndices();
-    const auto& boundaries = angle_set.GetBoundaries();
-    for (const auto& [face_node, node_index] : common_data_.GetNodeTracker())
-    {
-      if (node_index.IsUndefined() or not node_index.IsBoundary() or not node_index.IsOutGoing())
-        continue;
-      const CellFace& face =
-        grid.local_cells[face_node.GetCellIndex()].faces[face_node.GetFaceIndex()];
-      auto bndry_it = boundaries.find(face.neighbor_id);
-      if (bndry_it == boundaries.end() or not bndry_it->second->IsReflecting())
-        continue;
-      double* src =
-        boundary_psi_.host_storage.data() + node_index.GetIndex() * num_groups_and_angles_;
-      for (const std::uint32_t& direction_num : as_angle_indices)
-      {
-        double* dest = bndry_it->second->PsiOutgoing(face_node.GetCellIndex(),
-                                                     face_node.GetFaceIndex(),
-                                                     face_node.GetFaceNodeIndex(),
-                                                     direction_num);
-        std::memcpy(dest, src, num_groups_ * sizeof(double));
-        src += num_groups_;
-      }
+      double* dest = bndry_it->second->PsiOutgoing(face_node.GetCellIndex(),
+                                                   face_node.GetFaceIndex(),
+                                                   face_node.GetFaceNodeIndex(),
+                                                   direction_num);
+      std::memcpy(dest, src, num_groups_ * sizeof(double));
+      src += num_groups_;
     }
   }
 }
@@ -526,11 +431,7 @@ AAHD_FLUDS::CopySaveAngularFluxToDestinationPsi(DiscreteOrdinatesProblem& proble
     }
   }
 
-  if (reflecting_compatible_mode_)
-  {
-    save_angular_flux_.Clear(stream_);
-  }
-  // Non-reflecting path keeps save-angular-flux allocation persistent across sweeps.
+  // Keep save-angular-flux allocation persistent across sweeps.
 }
 
 } // namespace opensn

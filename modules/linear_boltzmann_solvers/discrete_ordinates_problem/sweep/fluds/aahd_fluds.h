@@ -219,10 +219,6 @@ public:
   const AAHD_FLUDSCommonData& GetCommonData() { return common_data_; }
   /// Get reference to stream.
   crb::Stream& GetStream() { return stream_; }
-  /// Set whether this FLUDS should use reflecting-compatible (main-like) lifecycle behavior.
-  void SetReflectingCompatibleMode(bool enabled) { reflecting_compatible_mode_ = enabled; }
-  /// Returns whether this FLUDS is in reflecting-compatible (main-like) lifecycle behavior.
-  bool IsReflectingCompatibleMode() const { return reflecting_compatible_mode_; }
   /// Get saved angular flux device pointer.
   double* GetSavedAngularFluxDevicePointer() { return save_angular_flux_.device_storage.get(); }
   /// Check if the FLUDS has save angular flux storage.
@@ -255,9 +251,6 @@ protected:
 
   /// Stream for asynchronous operations.
   crb::Stream stream_;
-
-  /// Whether to use reflecting-compatible (main-like) lifecycle behavior.
-  bool reflecting_compatible_mode_ = false;
 };
 
 } // namespace opensn

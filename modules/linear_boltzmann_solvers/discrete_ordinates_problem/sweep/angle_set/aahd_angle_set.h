@@ -109,7 +109,7 @@ protected:
   /// Per-sweep mode selected by scheduler: true mirrors main reflecting path.
   bool reflecting_compatible_mode_ = false;
 
-  AngleSetStatus AdvanceReflectingMainPath(AAHDSweepChunk& aahd_sweep_chunk);
+  AngleSetStatus AdvanceReflectingPath(AAHDSweepChunk& aahd_sweep_chunk);
   AngleSetStatus AdvanceNonReflectingOptimizedPath(AAHDSweepChunk& aahd_sweep_chunk);
 };
 

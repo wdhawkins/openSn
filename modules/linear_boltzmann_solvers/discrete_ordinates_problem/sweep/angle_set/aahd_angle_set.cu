@@ -66,24 +66,24 @@ AAHD_AngleSet::AngleSetAdvance(SweepChunk& sweep_chunk, AngleSetStatus permissio
   auto* aahd_fluds = static_cast<AAHD_FLUDS*>(fluds_.get());
   auto& aahd_sweep_chunk = static_cast<AAHDSweepChunk&>(sweep_chunk);
   const bool has_reflecting_bc = reflecting_compatible_mode_;
-  aahd_fluds->SetReflectingCompatibleMode(has_reflecting_bc);
 
   if (has_reflecting_bc)
-    return AdvanceReflectingMainPath(aahd_sweep_chunk);
+    return AdvanceReflectingPath(aahd_sweep_chunk);
   else
     return AdvanceNonReflectingOptimizedPath(aahd_sweep_chunk);
 }
 
 AngleSetStatus
-AAHD_AngleSet::AdvanceReflectingMainPath(AAHDSweepChunk& aahd_sweep_chunk)
+AAHD_AngleSet::AdvanceReflectingPath(AAHDSweepChunk& aahd_sweep_chunk)
 {
   auto* aahd_fluds = static_cast<AAHD_FLUDS*>(fluds_.get());
 
   aahd_fluds->AllocateInternalLocalPsi();
   aahd_fluds->AllocateOutgoingPsi();
-  aahd_fluds->CopyDelayedPsiToDevice();
   aahd_fluds->AllocatePrelocIOutgoingPsi();
   async_comm_.PrepostReceiveUpstreamPsi(static_cast<int>(this->GetID()));
+  async_comm_.PrepostReceiveDelayedData(static_cast<int>(this->GetID()));
+  aahd_fluds->CopyDelayedPsiToDevice();
   starting_latch_->wait();
   aahd_fluds->CopyBoundaryToDevice(aahd_sweep_chunk.GetGrid(),
                                    *this,
@@ -93,30 +93,27 @@ AAHD_AngleSet::AdvanceReflectingMainPath(AAHDSweepChunk& aahd_sweep_chunk)
   async_comm_.WaitForUpstreamPsi();
 
   aahd_fluds->CopyNonLocalIncomingPsiToDevice();
-  aahd_fluds->AllocateSaveAngularFlux(aahd_sweep_chunk.GetProblem(), aahd_sweep_chunk.GetGroupset());
+  aahd_fluds->AllocateSaveAngularFlux(aahd_sweep_chunk.GetProblem(),
+                                      aahd_sweep_chunk.GetGroupset());
   aahd_sweep_chunk.Sweep(*this);
   aahd_fluds->CopyPsiFromDevice();
+  aahd_fluds->CopySaveAngularFluxFromDevice();
   stream_.synchronize();
 
-  aahd_fluds->CopySaveAngularFluxFromDevice();
   aahd_fluds->ClearLocalAndReceivePsi();
   async_comm_.SendDownstreamPsi(static_cast<int>(this->GetID()));
-  async_comm_.PrepostReceiveDelayedData(static_cast<int>(this->GetID()));
   aahd_fluds->CopyBoundaryPsiToAngleSet(aahd_sweep_chunk.GetGrid(), *this);
-  for (auto& following_as : following_angle_sets_)
-    following_as->starting_latch_->count_down();
+  if (not following_angle_sets_.empty())
+    for (auto& following_as : following_angle_sets_)
+      following_as->starting_latch_->count_down();
 
   if (aahd_fluds->HasSaveAngularFlux())
-  {
-    stream_.synchronize();
     aahd_fluds->CopySaveAngularFluxToDestinationPsi(
       aahd_sweep_chunk.GetProblem(), aahd_sweep_chunk.GetGroupset(), *this);
-  }
   async_comm_.WaitForDownstreamPsi();
 
   aahd_fluds->ClearSendPsi();
   async_comm_.WaitForDelayedIncomingPsi();
-  stream_.synchronize();
 
   executed_ = true;
   return AngleSetStatus::FINISHED;
@@ -142,7 +139,8 @@ AAHD_AngleSet::AdvanceNonReflectingOptimizedPath(AAHDSweepChunk& aahd_sweep_chun
   async_comm_.WaitForUpstreamPsi();
 
   aahd_fluds->CopyNonLocalIncomingPsiToDevice();
-  aahd_fluds->AllocateSaveAngularFlux(aahd_sweep_chunk.GetProblem(), aahd_sweep_chunk.GetGroupset());
+  aahd_fluds->AllocateSaveAngularFlux(aahd_sweep_chunk.GetProblem(),
+                                      aahd_sweep_chunk.GetGroupset());
   aahd_sweep_chunk.Sweep(*this);
   aahd_fluds->CopyPsiFromDevice();
   aahd_fluds->CopySaveAngularFluxFromDevice();
