@@ -15,6 +15,8 @@ namespace crb = caribou;
 namespace opensn
 {
 
+class AAHDSweepChunk;
+
 /// AAHD angle set.
 class AAHD_AngleSet : public AngleSet
 {
@@ -37,6 +39,8 @@ public:
 
   /// Set the latch value to wait on before starting the sweep.
   void SetStartingLatch();
+  /// Force this angle-set to use reflecting-compatible (main-like) sweep path for current sweep.
+  void SetReflectingCompatibleMode(bool enabled) { reflecting_compatible_mode_ = enabled; }
 
   void InitializeDelayedUpstreamData() override;
 
@@ -102,6 +106,11 @@ protected:
    * waiting after it to allow them to proceed.
    */
   std::vector<AAHD_AngleSet*> following_angle_sets_;
+  /// Per-sweep mode selected by scheduler: true mirrors main reflecting path.
+  bool reflecting_compatible_mode_ = false;
+
+  AngleSetStatus AdvanceReflectingMainPath(AAHDSweepChunk& aahd_sweep_chunk);
+  AngleSetStatus AdvanceNonReflectingOptimizedPath(AAHDSweepChunk& aahd_sweep_chunk);
 };
 
 } // namespace opensn
