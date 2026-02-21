@@ -17,7 +17,6 @@
 #include "framework/math/spatial_discretization/finite_element/unit_cell_matrices.h"
 #include "framework/math/geometry.h"
 #include <petscksp.h>
-#include <any>
 #include <chrono>
 
 namespace opensn
@@ -72,6 +71,13 @@ public:
 
   /// Is the problem time dependent
 
+  /**
+   * Toggle forward/adjoint transport mode.
+   *
+   * If called after initialization, this performs a mode-transition reset:
+   * materials are reinitialized in the selected mode, sources and boundaries
+   * are cleared, and scalar/angular solution state is zeroed.
+   */
   void SetAdjoint(bool adjoint);
 
   GeometryType GetGeometryType() const;
@@ -291,6 +297,7 @@ protected:
   void ResetGPUCarriers();
 
   virtual void ZeroSolutions() = 0;
+  virtual void ValidateAdjointModeChange(bool adjoint) const;
 
   LBSOptions options_;
   double time_ = 0.0;

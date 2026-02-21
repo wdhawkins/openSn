@@ -572,6 +572,9 @@ LBSProblem::SetOptions(const InputParameters& input)
                                    ? params_at_assignment
                                    : static_cast<const ParameterBlock&>(input);
 
+  bool set_adjoint_mode = false;
+  bool adjoint_mode_value = options_.adjoint;
+
   // Apply only options explicitly specified by the caller.
   for (const auto& spec : specified_params.GetParameters())
   {
@@ -649,7 +652,10 @@ LBSProblem::SetOptions(const InputParameters& input)
       options_.field_function_prefix = spec.GetValue<std::string>();
 
     else if (spec.GetName() == "adjoint")
-      options_.adjoint = spec.GetValue<bool>();
+    {
+      set_adjoint_mode = true;
+      adjoint_mode_value = spec.GetValue<bool>();
+    }
 
   } // for specified options
 
@@ -693,6 +699,9 @@ LBSProblem::SetOptions(const InputParameters& input)
     opensn::mpi_comm.barrier();
     UpdateRestartWriteTime();
   }
+
+  if (set_adjoint_mode)
+    SetAdjoint(adjoint_mode_value);
 }
 
 void
@@ -1373,34 +1382,36 @@ LBSProblem::~LBSProblem()
 }
 
 void
+LBSProblem::ValidateAdjointModeChange(bool /*adjoint*/) const
+{
+}
+
+void
 LBSProblem::SetAdjoint(bool adjoint)
 {
-  if (adjoint != options_.adjoint)
+  if (adjoint == options_.adjoint)
+    return;
+
+  ValidateAdjointModeChange(adjoint);
+
+  options_.adjoint = adjoint;
+
+  // If a discretization exists, the solver has already been initialized.
+  // Reinitialize materials and reset state to ensure a clean mode transition.
+  if (discretization_)
   {
-    options_.adjoint = adjoint;
+    InitializeMaterials();
 
-    // If a discretization exists, the solver has already been initialized.
-    // Reinitialize the materials to obtain the appropriate xs and clear the
-    // sources to prepare for defining the adjoint problem
-    if (discretization_)
-    {
-      // The materials are reinitialized here to ensure that the proper cross sections
-      // are available to the solver. Because an adjoint solve requires volumetric or
-      // point sources, the material-based sources are not set within the initialize routine.
-      InitializeMaterials();
+    // Forward and adjoint sources are fundamentally different, so any existing
+    // source and boundary state should be cleared on mode transitions.
+    point_sources_.clear();
+    volumetric_sources_.clear();
+    ClearBoundaries();
 
-      // Forward and adjoint sources are fundamentally different, so any existing sources
-      // should be cleared and reset through options upon changing modes.
-      point_sources_.clear();
-      volumetric_sources_.clear();
-      ClearBoundaries();
-
-      // Set all solutions to zero.
-      phi_old_local_.assign(phi_old_local_.size(), 0.0);
-      phi_new_local_.assign(phi_new_local_.size(), 0.0);
-      ZeroSolutions();
-      precursor_new_local_.assign(precursor_new_local_.size(), 0.0);
-    }
+    // Reset flux solutions after toggling transport direction.
+    phi_old_local_.assign(phi_old_local_.size(), 0.0);
+    phi_new_local_.assign(phi_new_local_.size(), 0.0);
+    ZeroSolutions();
   }
 }
 
