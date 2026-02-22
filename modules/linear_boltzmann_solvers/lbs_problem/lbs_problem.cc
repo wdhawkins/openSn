@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_problem.h"
+#include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/discrete_ordinates_problem.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/wgs_context.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/ags_linear_solver.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/point_source/point_source.h"
@@ -1382,37 +1383,43 @@ LBSProblem::~LBSProblem()
 }
 
 void
-LBSProblem::ValidateAdjointModeChange(bool /*adjoint*/) const
-{
-}
-
-void
 LBSProblem::SetAdjoint(bool adjoint)
 {
   if (adjoint == options_.adjoint)
     return;
 
-  ValidateAdjointModeChange(adjoint);
+  // Pre-initialize path: avoid virtual dispatch until discretization has been
+  // created. If material data is available, keep material mode in sync.
+  if (not discretization_)
+  {
+    options_.adjoint = adjoint;
+    if (not block_id_to_xs_map_.empty())
+      InitializeMaterials();
+    return;
+  }
+
+  if (adjoint)
+  {
+    const auto* do_problem = dynamic_cast<const DiscreteOrdinatesProblem*>(this);
+    if (do_problem and do_problem->IsTimeDependent())
+      throw std::runtime_error(GetName() + ": Time-dependent adjoint problems are not supported.");
+  }
 
   options_.adjoint = adjoint;
 
-  // If a discretization exists, the solver has already been initialized.
-  // Reinitialize materials and reset state to ensure a clean mode transition.
-  if (discretization_)
-  {
-    InitializeMaterials();
+  // Runtime mode transition: reinitialize materials and reset state.
+  InitializeMaterials();
 
-    // Forward and adjoint sources are fundamentally different, so any existing
-    // source and boundary state should be cleared on mode transitions.
-    point_sources_.clear();
-    volumetric_sources_.clear();
-    ClearBoundaries();
+  // Forward and adjoint sources are fundamentally different, so any existing
+  // source and boundary state should be cleared on mode transitions.
+  point_sources_.clear();
+  volumetric_sources_.clear();
+  ClearBoundaries();
 
-    // Reset flux solutions after toggling transport direction.
-    phi_old_local_.assign(phi_old_local_.size(), 0.0);
-    phi_new_local_.assign(phi_new_local_.size(), 0.0);
-    ZeroSolutions();
-  }
+  // Reset solution vectors after toggling adjoint mode.
+  phi_old_local_.assign(phi_old_local_.size(), 0.0);
+  phi_new_local_.assign(phi_new_local_.size(), 0.0);
+  ZeroSolutions();
 }
 
 } // namespace opensn

@@ -573,13 +573,6 @@ DiscreteOrdinatesProblem::EnableTimeDependentMode()
 }
 
 void
-DiscreteOrdinatesProblem::ValidateAdjointModeChange(bool adjoint) const
-{
-  if (adjoint and IsTimeDependent())
-    throw std::runtime_error(GetName() + ": Time-dependent adjoint problems are not supported.");
-}
-
-void
 DiscreteOrdinatesProblem::ReinitializeSolverSchemes()
 {
   InitializeSolverSchemes();
