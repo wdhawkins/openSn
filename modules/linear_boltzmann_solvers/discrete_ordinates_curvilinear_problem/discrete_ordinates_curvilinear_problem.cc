@@ -46,9 +46,12 @@ DiscreteOrdinatesCurvilinearProblem::Create(const ParameterBlock& params)
 
 DiscreteOrdinatesCurvilinearProblem::DiscreteOrdinatesCurvilinearProblem(
   const InputParameters& params)
-  : DiscreteOrdinatesProblem(params)
+  : DiscreteOrdinatesProblem(params.GetParamValue<std::string>("name"),
+                             params.GetSharedPtrParam<MeshContinuum>("mesh"))
 {
+  ConfigureOnly(params);
   PerformInputChecks();
+  Initialize();
 }
 
 void
@@ -244,7 +247,7 @@ void
 DiscreteOrdinatesCurvilinearProblem::ComputeSecondaryUnitIntegrals()
 {
   log.Log() << "Computing RZ secondary unit integrals.\n";
-  const auto& sdm = *discretization_;
+  const auto& sdm = *discretization_secondary_;
 
   // Secondary matrices are used for the azimuthal streaming term in RZ.
   // That term carries a 1/r factor, so use unweighted volume integrals

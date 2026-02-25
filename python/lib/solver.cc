@@ -261,8 +261,8 @@ WrapLBS(py::module& slv)
       3. ``SetAdjoint(...)``.
 
     If ``adjoint`` is explicitly supplied in this call and differs from the current mode, OpenSn
-    performs the same mode-transition behavior as :meth:`LBSProblem.SetAdjoint`. If ``adjoint``
-    is omitted, the existing mode is unchanged.
+    applies the requested transition to runtime state immediately.
+    If ``adjoint`` is omitted, the existing mode is unchanged.
 
     Options requirements:
     - ``restart_writes_enabled=True`` requires non-empty ``write_restart_path``.
@@ -628,7 +628,15 @@ WrapLBS(py::module& slv)
     {
       self.SetSaveAngularFlux(save);
     },
-    py::arg("save")
+    py::arg("save"),
+    R"(
+    Request whether angular flux storage should be enabled.
+
+    Notes
+    -----
+    This method requires a fully constructed problem and applies
+    storage policy immediately.
+    )"
   );
   lbs_problem.def(
     "ZeroPhi",
@@ -673,8 +681,10 @@ WrapLBS(py::module& slv)
 
     In typical Python workflows, use constructor options or ``SetOptions``.
 
-    When this changes mode after the problem has been initialized, OpenSn performs a
-    full mode-transition reset:
+    This method requires a fully constructed problem and applies the mode
+    transition immediately.
+
+    When applied after initialization, mode transitions perform a full reset:
       - Materials are reinitialized in the selected mode.
       - Point and volumetric sources are cleared.
       - Boundary conditions are cleared.

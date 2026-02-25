@@ -113,20 +113,45 @@ DiscreteOrdinatesProblem::Create(const ParameterBlock& params)
 }
 
 DiscreteOrdinatesProblem::DiscreteOrdinatesProblem(const InputParameters& params)
-  : LBSProblem(params),
-    verbose_sweep_angles_(params.GetParamVectorValue<int>("directions_sweep_order_to_print")),
-    sweep_type_(params.GetParamValue<std::string>("sweep_type"))
+  : DiscreteOrdinatesProblem(params.GetParamValue<std::string>("name"),
+                             params.GetSharedPtrParam<MeshContinuum>("mesh"))
+{
+  ConfigureOnly(params);
+  Initialize();
+}
+
+void
+DiscreteOrdinatesProblem::ConfigureOnly(const InputParameters& params)
+{
+  verbose_sweep_angles_ = params.GetParamVectorValue<int>("directions_sweep_order_to_print");
+  sweep_type_ = params.GetParamValue<std::string>("sweep_type");
+
+  Configure(params);
+  ConfigureFromInput(params);
+}
+
+void
+DiscreteOrdinatesProblem::ConfigureFromInput(const InputParameters& params)
 {
   if (params.GetParamValue<bool>("time_dependent"))
-    SetTimeDependentMode();
+  {
+    EnableTimeDependentMode();
+    if (not options_.save_angular_flux)
+      options_.save_angular_flux = true;
+  }
   else
-    SetSteadyStateMode();
+    SetSweepChunkMode(SweepChunkMode::SteadyState);
 
   if (params.Has("boundary_conditions"))
   {
     const auto& bcs = params.GetParam("boundary_conditions");
     bcs.RequireBlockTypeIs(ParameterBlockType::ARRAY);
-    boundary_conditions_block_ = bcs;
+    for (size_t b = 0; b < bcs.GetNumParameters(); ++b)
+    {
+      auto bndry_params = GetBoundaryOptionsBlock();
+      bndry_params.AssignParameters(bcs.GetParam(b));
+      SetBoundaryOptions(bndry_params);
+    }
   }
 
   if (use_gpus_ && sweep_type_ == "CBC")
@@ -485,20 +510,34 @@ void
 DiscreteOrdinatesProblem::Initialize()
 {
   CALI_CXX_MARK_SCOPE("DiscreteOrdinatesProblem::Initialize");
-
-  if (boundary_conditions_block_)
-  {
-    const auto& bcs = *boundary_conditions_block_;
-    for (size_t b = 0; b < bcs.GetNumParameters(); ++b)
-    {
-      auto bndry_params = GetBoundaryOptionsBlock();
-      bndry_params.AssignParameters(bcs.GetParam(b));
-      SetBoundaryOptions(bndry_params);
-    }
-  }
+  if (initialized_)
+    return;
 
   LBSProblem::Initialize();
+  InitializeRuntime();
+}
 
+void
+DiscreteOrdinatesProblem::ConfigureSourceFunctionForCurrentMode()
+{
+  using namespace std::placeholders;
+  if (IsTimeDependent())
+  {
+    auto src_function = std::make_shared<TransientSourceFunction>(*this);
+    SetActiveSetSourceFunction(
+      std::bind(&TransientSourceFunction::operator(), src_function, _1, _2, _3, _4)); // NOLINT
+  }
+  else
+  {
+    auto src_function = std::make_shared<SourceFunction>(*this);
+    SetActiveSetSourceFunction(
+      std::bind(&SourceFunction::operator(), src_function, _1, _2, _3, _4)); // NOLINT
+  }
+}
+
+void
+DiscreteOrdinatesProblem::InitializeRuntime()
+{
   // Make face histogram
   grid_face_histogram_ = grid_->MakeGridFaceHistogram();
 
@@ -510,25 +549,13 @@ DiscreteOrdinatesProblem::Initialize()
     const auto quad_dim = groupset.quadrature->GetDimension();
     OpenSnInvalidArgumentIf(grid_dim != quad_dim,
                             "Dimensionality of quadrature set (" + std::to_string(quad_dim) +
-                              ") for groupset #" + std::to_string(groupset.id) +
-                              " does not match dimensionality of mesh (" +
-                              std::to_string(grid_dim) + ").");
+                            ") for groupset #" + std::to_string(groupset.id) +
+                            " does not match dimensionality of mesh (" +
+                            std::to_string(grid_dim) + ").");
   }
 
   // Initialize source function according to problem mode.
-  using namespace std::placeholders;
-  if (IsTimeDependent())
-  {
-    auto src_function = std::make_shared<TransientSourceFunction>(*this);
-    active_set_source_function_ =
-      std::bind(&TransientSourceFunction::operator(), src_function, _1, _2, _3, _4); // NOLINT
-  }
-  else
-  {
-    auto src_function = std::make_shared<SourceFunction>(*this);
-    active_set_source_function_ =
-      std::bind(&SourceFunction::operator(), src_function, _1, _2, _3, _4); // NOLINT
-  }
+  ConfigureSourceFunctionForCurrentMode();
 
   // Initialize groupsets for sweeping
   InitializeSweepDataStructures();
@@ -550,7 +577,7 @@ DiscreteOrdinatesProblem::SetSweepChunkMode(SweepChunkMode mode)
     return;
 
   sweep_chunk_mode_ = mode;
-  if (discretization_)
+  if (initialized_)
     UpdateAngularFluxStorage();
 }
 
@@ -570,26 +597,16 @@ DiscreteOrdinatesProblem::EnableTimeDependentMode()
 void
 DiscreteOrdinatesProblem::SetTimeDependentMode()
 {
-  if (not discretization_)
-  {
-    SetSweepChunkMode(SweepChunkMode::TimeDependent);
-    if (not options_.save_angular_flux)
-      LBSProblem::SetSaveAngularFlux(true);
-    return;
-  }
-
+  OpenSnLogicalErrorIf(not initialized_,
+                       GetName() + ": SetTimeDependentMode requires a constructed problem.");
   ResetMode(SweepChunkMode::TimeDependent);
 }
 
 void
 DiscreteOrdinatesProblem::SetSteadyStateMode()
 {
-  if (not discretization_)
-  {
-    SetSweepChunkMode(SweepChunkMode::SteadyState);
-    return;
-  }
-
+  OpenSnLogicalErrorIf(not initialized_,
+                       GetName() + ": SetSteadyStateMode requires a constructed problem.");
   ResetMode(SweepChunkMode::SteadyState);
 }
 
@@ -598,27 +615,20 @@ DiscreteOrdinatesProblem::ResetMode(SweepChunkMode target_mode)
 {
   OpenSnInvalidArgumentIf(target_mode == SweepChunkMode::Default,
                           GetName() + ": target mode cannot be SweepChunkMode::Default.");
-  OpenSnLogicalErrorIf(not discretization_, GetName() + ": Problem must be initialized first.");
+  OpenSnLogicalErrorIf(not initialized_, GetName() + ": Problem must be initialized first.");
 
-  // Current configured sweep mode (or Default if no explicit mode has been selected yet).
   const auto active_mode = sweep_chunk_mode_.value_or(SweepChunkMode::Default);
-  // True only when changing between steady-state and time-dependent (in either direction).
   const bool switching_modes =
     (active_mode == SweepChunkMode::SteadyState and target_mode == SweepChunkMode::TimeDependent) or
     (active_mode == SweepChunkMode::TimeDependent and target_mode == SweepChunkMode::SteadyState);
-  // True when no explicit mode has been adopted yet.
   const bool has_no_active_mode = (active_mode == SweepChunkMode::Default);
-  // True when the requested target mode is time-dependent.
   const bool switching_to_transient = target_mode == SweepChunkMode::TimeDependent;
 
   if (has_no_active_mode)
   {
     SetSweepChunkMode(target_mode);
-
-    if (switching_to_transient)
-      if (not options_.save_angular_flux)
-        DiscreteOrdinatesProblem::SetSaveAngularFlux(true);
-
+    ApplyTransientSaveAngularFluxPolicy(active_mode, target_mode);
+    RebuildRuntime();
     return;
   }
 
@@ -626,64 +636,67 @@ DiscreteOrdinatesProblem::ResetMode(SweepChunkMode target_mode)
   {
     if (switching_to_transient)
     {
-      save_angular_flux_before_transient_ = options_.save_angular_flux;
-      forced_save_angular_flux_for_transient_ = not options_.save_angular_flux;
-      if (forced_save_angular_flux_for_transient_)
-        DiscreteOrdinatesProblem::SetSaveAngularFlux(true);
-
+      ApplyTransientSaveAngularFluxPolicy(active_mode, target_mode);
       EnableTimeDependentMode();
     }
     else
     {
       SetSweepChunkMode(SweepChunkMode::SteadyState);
-      if (forced_save_angular_flux_for_transient_)
-        DiscreteOrdinatesProblem::SetSaveAngularFlux(save_angular_flux_before_transient_);
-      forced_save_angular_flux_for_transient_ = false;
+      ApplyTransientSaveAngularFluxPolicy(active_mode, target_mode);
     }
 
-    // Preserve user boundary/source setup and only reset mode-dependent internals.
+    ConfigureSourceFunctionForCurrentMode();
+    RebuildRuntime();
 
-    using namespace std::placeholders;
-    if (switching_to_transient)
-    {
-      auto src_function = std::make_shared<TransientSourceFunction>(*this);
-      SetActiveSetSourceFunction(
-        std::bind(&TransientSourceFunction::operator(), src_function, _1, _2, _3, _4)); // NOLINT
-    }
-    else
-    {
-      auto src_function = std::make_shared<SourceFunction>(*this);
-      SetActiveSetSourceFunction(
-        std::bind(&SourceFunction::operator(), src_function, _1, _2, _3, _4)); // NOLINT
-    }
-
-    ReinitializeSolverSchemes();
+    InitializeSolverSchemes();
   }
 
+  ApplyTransitionWGSFissionScopes(switching_to_transient);
+}
+
+void
+DiscreteOrdinatesProblem::OnSaveAngularFluxOptionChanged()
+{
+  UpdateAngularFluxStorage();
+}
+
+void
+DiscreteOrdinatesProblem::ApplyTransientSaveAngularFluxPolicy(SweepChunkMode active_mode,
+                                                              SweepChunkMode target_mode)
+{
+  const bool switching_to_transient = target_mode == SweepChunkMode::TimeDependent;
+  const bool switching_from_transient = active_mode == SweepChunkMode::TimeDependent and
+                                        target_mode == SweepChunkMode::SteadyState;
+
   if (switching_to_transient)
-    for (auto& wgs_solver : GetWGSSolvers())
-    {
-      auto wgs_context = std::dynamic_pointer_cast<WGSContext>(wgs_solver->GetContext());
-      OpenSnLogicalErrorIf(not wgs_context, GetName() + ": Cast to WGSContext failed.");
-      wgs_context->lhs_src_scope.Unset(APPLY_WGS_FISSION_SOURCES);
-      wgs_context->rhs_src_scope |= APPLY_WGS_FISSION_SOURCES;
-      wgs_context->rhs_src_scope |= APPLY_AGS_FISSION_SOURCES;
-    }
+  {
+    save_angular_flux_before_transient_ = options_.save_angular_flux;
+    forced_save_angular_flux_for_transient_ = not options_.save_angular_flux;
+    if (forced_save_angular_flux_for_transient_)
+      SetSaveAngularFlux(true);
+  }
+  else if (switching_from_transient)
+  {
+    if (forced_save_angular_flux_for_transient_)
+      SetSaveAngularFlux(save_angular_flux_before_transient_);
+    forced_save_angular_flux_for_transient_ = false;
+  }
 }
 
 void
-DiscreteOrdinatesProblem::SetSaveAngularFlux(bool save)
+DiscreteOrdinatesProblem::ApplyTransitionWGSFissionScopes(bool switching_to_transient)
 {
-  LBSProblem::SetSaveAngularFlux(save);
+  if (not switching_to_transient)
+    return;
 
-  if (discretization_)
-    UpdateAngularFluxStorage();
-}
-
-void
-DiscreteOrdinatesProblem::ReinitializeSolverSchemes()
-{
-  InitializeSolverSchemes();
+  for (auto& wgs_solver : GetWGSSolvers())
+  {
+    auto wgs_context = std::dynamic_pointer_cast<WGSContext>(wgs_solver->GetContext());
+    OpenSnLogicalErrorIf(not wgs_context, GetName() + ": Cast to WGSContext failed.");
+    wgs_context->lhs_src_scope.Unset(APPLY_WGS_FISSION_SOURCES);
+    wgs_context->rhs_src_scope |= APPLY_WGS_FISSION_SOURCES;
+    wgs_context->rhs_src_scope |= APPLY_AGS_FISSION_SOURCES;
+  }
 }
 
 void
@@ -724,7 +737,7 @@ std::vector<std::shared_ptr<FieldFunctionGridBased>>
 DiscreteOrdinatesProblem::GetAngularFluxFieldFunctionList(const std::vector<unsigned int>& groups,
                                                           const std::vector<size_t>& angles)
 {
-  OpenSnLogicalErrorIf(discretization_ == nullptr || grid_ == nullptr || groupsets_.empty(),
+  OpenSnLogicalErrorIf(not initialized_ || grid_ == nullptr || groupsets_.empty(),
                        "GetAngularFluxFieldFunctionList: problem not initialized.");
 
   OpenSnLogicalErrorIf(groups.empty(), "GetAngularFluxFieldFunctionList: groups cannot be empty.");

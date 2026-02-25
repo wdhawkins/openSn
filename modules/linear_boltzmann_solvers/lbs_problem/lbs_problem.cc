@@ -75,6 +75,15 @@ LBSProblem::LBSProblem(const InputParameters& params)
     grid_(params.GetSharedPtrParam<MeshContinuum>("mesh")),
     use_gpus_(params.GetParamValue<bool>("use_gpus"))
 {
+}
+
+void
+LBSProblem::Configure(const InputParameters& params)
+{
+  OpenSnInvalidArgumentIf(configured_, GetName() + ": Configure may only be called once.");
+  num_groups_ = params.GetParamValue<unsigned int>("num_groups");
+  use_gpus_ = params.GetParamValue<bool>("use_gpus");
+
   // Check system for GPU acceleration
   if (use_gpus_)
   {
@@ -105,6 +114,7 @@ LBSProblem::LBSProblem(const InputParameters& params)
   InitializeSources(params);
   InitializeXSmapAndDensities(params);
   InitializeMaterials();
+  configured_ = true;
 }
 
 LBSOptions&
@@ -229,8 +239,7 @@ void
 LBSProblem::AddPointSource(std::shared_ptr<PointSource> point_source)
 {
   point_sources_.push_back(point_source);
-  if (discretization_)
-    point_sources_.back()->Initialize(*this);
+  point_sources_.back()->Initialize(*this);
 }
 
 void
@@ -249,8 +258,7 @@ void
 LBSProblem::AddVolumetricSource(std::shared_ptr<VolumetricSource> volumetric_source)
 {
   volumetric_sources_.push_back(volumetric_source);
-  if (discretization_)
-    volumetric_sources_.back()->Initialize(*this);
+  volumetric_sources_.back()->Initialize(*this);
 }
 
 void
@@ -274,6 +282,10 @@ LBSProblem::GetBlockID2XSMap() const
 void
 LBSProblem::SetBlockID2XSMap(const BlockID2XSMap& xs_map)
 {
+  OpenSnLogicalErrorIf(
+    not initialized_,
+    GetName() + ": SetBlockID2XSMap may only be called after problem construction.");
+
   block_id_to_xs_map_ = xs_map;
   InitializeMaterials();
   ResetGPUCarriers();
@@ -569,7 +581,7 @@ void
 LBSProblem::SetOptions(const InputParameters& input)
 {
   ParseOptions(input);
-  ApplyOptions();
+  RebuildRuntime();
 }
 
 void
@@ -706,31 +718,22 @@ LBSProblem::ParseOptions(const InputParameters& input)
 }
 
 void
-LBSProblem::ApplyOptions()
-{
-  if (not discretization_)
-    return;
-
-  if (options_.adjoint != applied_adjoint_)
-    SetAdjoint(options_.adjoint);
-
-  if (options_.save_angular_flux != applied_save_angular_flux_)
-    SetSaveAngularFlux(options_.save_angular_flux);
-}
-
-void
 LBSProblem::Initialize()
 {
   CALI_CXX_MARK_SCOPE("LBSProblem::Initialize");
+  OpenSnLogicalErrorIf(not configured_,
+                       GetName() + ": Configure must be called before Initialize.");
+  if (initialized_)
+    return;
 
   PrintSimHeader();
   mpi_comm.barrier();
 
   InitializeSpatialDiscretization();
+  InitializeMaterials();
   InitializeParrays();
   InitializeBoundaries();
   InitializeGPUExtras();
-  SetAdjoint(options_.adjoint);
 
   // Initialize point sources
   for (auto& point_source : point_sources_)
@@ -739,6 +742,10 @@ LBSProblem::Initialize()
   // Initialize volumetric sources
   for (auto& volumetric_source : volumetric_sources_)
     volumetric_source->Initialize(*this);
+
+  applied_adjoint_ = options_.adjoint;
+  applied_save_angular_flux_ = options_.save_angular_flux;
+  initialized_ = true;
 }
 
 void
@@ -1398,9 +1405,16 @@ LBSProblem::~LBSProblem()
 void
 LBSProblem::SetSaveAngularFlux(bool save)
 {
+  OpenSnLogicalErrorIf(
+    not initialized_,
+    GetName() + ": SetSaveAngularFlux may only be called after problem construction.");
+
   options_.save_angular_flux = save;
-  if (discretization_)
-    applied_save_angular_flux_ = save;
+  if (options_.save_angular_flux != applied_save_angular_flux_)
+  {
+    OnSaveAngularFluxOptionChanged();
+    applied_save_angular_flux_ = options_.save_angular_flux;
+  }
 }
 
 void
@@ -1413,19 +1427,26 @@ LBSProblem::ZeroPhi()
 void
 LBSProblem::SetAdjoint(bool adjoint)
 {
-  if (adjoint and discretization_)
+  OpenSnLogicalErrorIf(not initialized_,
+                       GetName() + ": SetAdjoint may only be called after problem construction.");
+  if (adjoint)
     if (const auto* do_problem = dynamic_cast<const DiscreteOrdinatesProblem*>(this);
         do_problem and do_problem->IsTimeDependent())
       throw std::runtime_error(GetName() + ": Time-dependent adjoint problems are not supported.");
 
   options_.adjoint = adjoint;
+  RebuildRuntime();
+}
 
-  if (not discretization_)
-    return;
+void
+LBSProblem::RebuildRuntime()
+{
+  OpenSnLogicalErrorIf(not initialized_,
+                       GetName() + ": RebuildRuntime may only be called after problem construction.");
 
-  if (adjoint != applied_adjoint_)
+  if (options_.adjoint != applied_adjoint_)
   {
-    // If a discretization exists, the solver has already been initialized.
+    // If initialized, the solver has already been initialized.
     // Reinitialize the materials to obtain the appropriate xs and clear the
     // sources to prepare for defining the adjoint problem
     // The materials are reinitialized here to ensure that the proper cross sections
@@ -1445,7 +1466,13 @@ LBSProblem::SetAdjoint(bool adjoint)
     ZeroPsi();
     precursor_new_local_.assign(precursor_new_local_.size(), 0.0);
 
-    applied_adjoint_ = adjoint;
+    applied_adjoint_ = options_.adjoint;
+  }
+
+  if (options_.save_angular_flux != applied_save_angular_flux_)
+  {
+    OnSaveAngularFluxOptionChanged();
+    applied_save_angular_flux_ = options_.save_angular_flux;
   }
 }
 

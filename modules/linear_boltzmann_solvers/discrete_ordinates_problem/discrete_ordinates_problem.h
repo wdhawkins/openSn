@@ -46,8 +46,6 @@ public:
   }
   void EnableTimeDependentMode();
   void ResetMode(SweepChunkMode target_mode);
-  /// Rebuild WGS/AGS solver schemes (e.g., after changing sweep chunk mode).
-  void ReinitializeSolverSchemes();
 
   /// Static registration based constructor.
   explicit DiscreteOrdinatesProblem(const InputParameters& params);
@@ -104,8 +102,6 @@ public:
   GetAngularFluxFieldFunctionList(const std::vector<unsigned int>& groups,
                                   const std::vector<size_t>& angles);
 
-  void SetSaveAngularFlux(bool save) override;
-
   /// Update angular flux field functions from psi_new_local_.
   void UpdateAngularFieldFunctions();
 
@@ -116,6 +112,18 @@ public:
   void CopyPhiAndOutflowBackToHost();
 
 protected:
+  /// Configure the problem from input without calling Initialize.
+  void ConfigureOnly(const InputParameters& params);
+
+  /// Parses and stores discrete-ordinates specific configuration from input.
+  void ConfigureFromInput(const InputParameters& params);
+
+  /// Sets the active source function based on current mode.
+  void ConfigureSourceFunctionForCurrentMode();
+
+  /// Initializes all sweep/runtime structures after base initialization.
+  void InitializeRuntime();
+
   explicit DiscreteOrdinatesProblem(const std::string& name,
                                     std::shared_ptr<MeshContinuum> grid_ptr);
 
@@ -160,10 +168,9 @@ protected:
     quadrature_fluds_commondata_map_;
 
   std::vector<int> verbose_sweep_angles_;
-  const std::string sweep_type_;
+  std::string sweep_type_ = "AAH";
   std::map<uint64_t, std::shared_ptr<SweepBoundary>> sweep_boundaries_;
   std::map<uint64_t, BoundaryDefinition> boundary_definitions_;
-  std::optional<ParameterBlock> boundary_conditions_block_;
 
   /// Max level size.
   std::size_t max_level_size_ = 0;
@@ -183,6 +190,10 @@ protected:
   std::map<std::tuple<size_t, size_t, size_t>, size_t> angular_flux_field_functions_local_map_;
 
 private:
+  void OnSaveAngularFluxOptionChanged() override;
+  void ApplyTransientSaveAngularFluxPolicy(SweepChunkMode active_mode, SweepChunkMode target_mode);
+  void ApplyTransitionWGSFissionScopes(bool switching_to_transient);
+
   void CreateAAHD_FLUDSCommonData();
   std::shared_ptr<FLUDS> CreateAAHD_FLUDS(unsigned int num_groups,
                                           std::size_t num_angles,

@@ -73,14 +73,16 @@ public:
   /**
    * Toggle forward/adjoint transport mode.
    *
-   * If called after initialization, this performs a mode-transition reset:
-   * materials are reinitialized in the selected mode, sources and boundaries
-   * are cleared, and solution vectors are zeroed.
+   * This may only be called after problem construction and applies the
+   * mode transition immediately.
    */
   void SetAdjoint(bool adjoint);
   bool IsAdjoint() const;
+  /// Sets whether angular flux storage is requested.
+  /// This may only be called after problem construction.
   virtual void SetSaveAngularFlux(bool save);
-  void ApplyOptions();
+  /// Internal runtime synchronization for option-driven state changes.
+  virtual void RebuildRuntime();
   void ZeroPhi();
   virtual void ZeroPsi() = 0;
 
@@ -273,6 +275,12 @@ public:
   virtual void UpdatePsiOld() {};
 
 protected:
+  /// Parses and stores all problem configuration from input.
+  void Configure(const InputParameters& params);
+
+  /// Hook for derived classes to respond to save-angular-flux option changes.
+  virtual void OnSaveAngularFluxOptionChanged() {}
+
   virtual void PrintSimHeader();
 
   void ComputeUnitIntegrals();
@@ -393,6 +401,9 @@ public:
 protected:
   /// Checks if the current CPU is associated with any GPU.
   static void CheckCapableDevices();
+
+  bool configured_ = false;
+  bool initialized_ = false;
 };
 
 } // namespace opensn
