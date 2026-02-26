@@ -51,7 +51,8 @@ DiscreteOrdinatesCurvilinearProblem::DiscreteOrdinatesCurvilinearProblem(
 {
   ConfigureOnly(params);
   PerformInputChecks();
-  Initialize();
+  FinalizeConstruction();
+  InitializeRuntime();
 }
 
 void

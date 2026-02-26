@@ -49,7 +49,8 @@ SteadyStateSourceSolver::Initialize()
 {
   CALI_CXX_MARK_SCOPE("SteadyStateSourceSolver::Initialize");
 
-  lbs_problem_->Initialize();
+  OpenSnLogicalErrorIf(not lbs_problem_->IsInitialized(),
+                       GetName() + ": Problem must be fully constructed before solver setup.");
   if (auto do_problem = std::dynamic_pointer_cast<DiscreteOrdinatesProblem>(lbs_problem_))
     if (do_problem->IsTimeDependent())
       throw std::runtime_error(GetName() + ": Problem is in time-dependent mode. Call problem."

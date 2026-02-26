@@ -96,16 +96,11 @@ TransientSolver::Initialize()
   // Ensure angular fluxes are available from the initial condition.
   auto& options = do_problem_->GetOptions();
   do_problem_->SetTime(current_time_);
+  OpenSnLogicalErrorIf(not do_problem_->IsInitialized(),
+                       GetName() + ": Problem must be fully constructed before solver setup.");
 
   const std::string& init_state = initial_state_;
   RefreshLocalViews();
-  if (not phi_new_local_ or phi_new_local_->empty())
-  {
-    if (init_state != "zero")
-      throw std::runtime_error(GetName() + ": Problem must be initialized before TransientSolver.");
-    do_problem_->Initialize();
-    RefreshLocalViews();
-  }
   if (not phi_new_local_ or phi_new_local_->empty())
     throw std::runtime_error(GetName() + ": Problem initialization failed.");
 

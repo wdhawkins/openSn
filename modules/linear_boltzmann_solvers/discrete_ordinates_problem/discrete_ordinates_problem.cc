@@ -117,7 +117,8 @@ DiscreteOrdinatesProblem::DiscreteOrdinatesProblem(const InputParameters& params
                              params.GetSharedPtrParam<MeshContinuum>("mesh"))
 {
   ConfigureOnly(params);
-  Initialize();
+  FinalizeConstruction();
+  InitializeRuntime();
 }
 
 void
@@ -504,17 +505,6 @@ DiscreteOrdinatesProblem::PrintSimHeader()
 
     log.Log() << outstr.str() << '\n';
   }
-}
-
-void
-DiscreteOrdinatesProblem::Initialize()
-{
-  CALI_CXX_MARK_SCOPE("DiscreteOrdinatesProblem::Initialize");
-  if (initialized_)
-    return;
-
-  LBSProblem::Initialize();
-  InitializeRuntime();
 }
 
 void

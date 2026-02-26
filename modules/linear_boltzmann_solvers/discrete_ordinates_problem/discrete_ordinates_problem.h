@@ -80,8 +80,6 @@ public:
 
   void PrintSimHeader() override;
 
-  void Initialize() override;
-
   /// Returns the sweep boundaries as a read only reference
   const std::map<uint64_t, std::shared_ptr<SweepBoundary>>& GetSweepBoundaries() const;
 

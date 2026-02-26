@@ -53,6 +53,9 @@ public:
   /// Returns simulation time in seconds for time dependent problems
   double GetTime() const;
 
+  /// Indicates if the problem has completed construction/runtime setup.
+  bool IsInitialized() const { return initialized_; }
+
   /// Sets simulation time in seconds for time dependent problems
   void SetTime(double time);
 
@@ -238,8 +241,6 @@ public:
   /// Returns the power generation field function, if enabled.
   std::shared_ptr<FieldFunctionGridBased> GetPowerFieldFunction() const;
 
-  void Initialize() override;
-
   bool TriggerRestartDump() const
   {
     if (options_.write_restart_time_interval <= std::chrono::seconds(0))
@@ -277,6 +278,9 @@ public:
 protected:
   /// Parses and stores all problem configuration from input.
   void Configure(const InputParameters& params);
+
+  /// Final construction/runtime setup step executed by concrete problem constructors.
+  void FinalizeConstruction();
 
   /// Hook for derived classes to respond to save-angular-flux option changes.
   virtual void OnSaveAngularFluxOptionChanged() {}

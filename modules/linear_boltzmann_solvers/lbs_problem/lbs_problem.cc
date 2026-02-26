@@ -718,7 +718,7 @@ LBSProblem::ParseOptions(const InputParameters& input)
 }
 
 void
-LBSProblem::Initialize()
+LBSProblem::FinalizeConstruction()
 {
   CALI_CXX_MARK_SCOPE("LBSProblem::Initialize");
   OpenSnLogicalErrorIf(not configured_,
