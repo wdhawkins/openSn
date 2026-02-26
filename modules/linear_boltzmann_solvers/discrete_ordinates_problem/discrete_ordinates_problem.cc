@@ -16,19 +16,14 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep_chunks/aah_sweep_chunk_td.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep_chunks/cbc_sweep_chunk.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/iterative_methods/sweep_wgs_context.h"
-#include "modules/linear_boltzmann_solvers/lbs_problem/lbs_problem.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_vecops.h"
-#include "framework/math/functions/function.h"
 #include "framework/data_types/allowable_range.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/wgs_linear_solver.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/classic_richardson.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/source_functions/source_function.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/source_functions/transient_source_function.h"
-#include "modules/linear_boltzmann_solvers/lbs_problem/groupset/lbs_groupset.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/acceleration/wgdsa.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/acceleration/tgdsa.h"
-#include "framework/mesh/mesh_continuum/mesh_continuum.h"
-#include "framework/field_functions/field_function.h"
 #include "framework/field_functions/field_function_grid_based.h"
 #include "framework/math/quadratures/angular/product_quadrature.h"
 #include "framework/logging/log.h"
@@ -116,7 +111,14 @@ DiscreteOrdinatesProblem::DiscreteOrdinatesProblem(const InputParameters& params
   : DiscreteOrdinatesProblem(params.GetParamValue<std::string>("name"),
                              params.GetSharedPtrParam<MeshContinuum>("mesh"))
 {
+  ConstructFromInput(params);
+}
+
+void
+DiscreteOrdinatesProblem::ConstructFromInput(const InputParameters& params)
+{
   ConfigureOnly(params);
+  VerifyConfiguredInput();
   FinalizeConstruction();
   InitializeRuntime();
 }
@@ -587,16 +589,14 @@ DiscreteOrdinatesProblem::EnableTimeDependentMode()
 void
 DiscreteOrdinatesProblem::SetTimeDependentMode()
 {
-  OpenSnLogicalErrorIf(not initialized_,
-                       GetName() + ": SetTimeDependentMode requires a constructed problem.");
+  RequireRuntimeReady("SetTimeDependentMode");
   ResetMode(SweepChunkMode::TimeDependent);
 }
 
 void
 DiscreteOrdinatesProblem::SetSteadyStateMode()
 {
-  OpenSnLogicalErrorIf(not initialized_,
-                       GetName() + ": SetSteadyStateMode requires a constructed problem.");
+  RequireRuntimeReady("SetSteadyStateMode");
   ResetMode(SweepChunkMode::SteadyState);
 }
 
@@ -605,7 +605,7 @@ DiscreteOrdinatesProblem::ResetMode(SweepChunkMode target_mode)
 {
   OpenSnInvalidArgumentIf(target_mode == SweepChunkMode::Default,
                           GetName() + ": target mode cannot be SweepChunkMode::Default.");
-  OpenSnLogicalErrorIf(not initialized_, GetName() + ": Problem must be initialized first.");
+  RequireRuntimeReady("ResetMode");
 
   const auto active_mode = sweep_chunk_mode_.value_or(SweepChunkMode::Default);
   const bool switching_modes =

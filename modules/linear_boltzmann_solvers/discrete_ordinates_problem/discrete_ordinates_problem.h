@@ -110,11 +110,17 @@ public:
   void CopyPhiAndOutflowBackToHost();
 
 protected:
+  /// Constructor helper that performs configuration and full construction.
+  void ConstructFromInput(const InputParameters& params);
+
   /// Configure the problem from input without calling Initialize.
   void ConfigureOnly(const InputParameters& params);
 
   /// Parses and stores discrete-ordinates specific configuration from input.
   void ConfigureFromInput(const InputParameters& params);
+
+  /// Hook for derived classes to validate input after configuration and before construction.
+  virtual void VerifyConfiguredInput() {}
 
   /// Sets the active source function based on current mode.
   void ConfigureSourceFunctionForCurrentMode();

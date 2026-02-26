@@ -1011,7 +1011,7 @@ WrapLBS(py::module& slv)
         if (message.find("problem not initialized") != std::string::npos)
           throw std::runtime_error(
             "GetAngularFieldFunctionList requires Initialize() to be called first. "
-            "Call solver.Initialize() (or problem.Initialize()) before requesting "
+            "Call solver.Initialize() before requesting "
             "angular flux field functions.");
         throw;
       }

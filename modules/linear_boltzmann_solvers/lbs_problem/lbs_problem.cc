@@ -282,9 +282,7 @@ LBSProblem::GetBlockID2XSMap() const
 void
 LBSProblem::SetBlockID2XSMap(const BlockID2XSMap& xs_map)
 {
-  OpenSnLogicalErrorIf(
-    not initialized_,
-    GetName() + ": SetBlockID2XSMap may only be called after problem construction.");
+  RequireRuntimeReady("SetBlockID2XSMap");
 
   block_id_to_xs_map_ = xs_map;
   InitializeMaterials();
@@ -301,30 +299,35 @@ LBSProblem::GetGrid() const
 const SpatialDiscretization&
 LBSProblem::GetSpatialDiscretization() const
 {
+  assert(initialized_);
   return *discretization_;
 }
 
 const std::vector<UnitCellMatrices>&
 LBSProblem::GetUnitCellMatrices() const
 {
+  assert(initialized_);
   return unit_cell_matrices_;
 }
 
 const std::map<uint64_t, UnitCellMatrices>&
 LBSProblem::GetUnitGhostCellMatrices() const
 {
+  assert(initialized_);
   return unit_ghost_cell_matrices_;
 }
 
 std::vector<CellLBSView>&
 LBSProblem::GetCellTransportViews()
 {
+  assert(initialized_);
   return cell_transport_views_;
 }
 
 const std::vector<CellLBSView>&
 LBSProblem::GetCellTransportViews() const
 {
+  assert(initialized_);
   return cell_transport_views_;
 }
 
@@ -720,7 +723,7 @@ LBSProblem::ParseOptions(const InputParameters& input)
 void
 LBSProblem::FinalizeConstruction()
 {
-  CALI_CXX_MARK_SCOPE("LBSProblem::Initialize");
+  CALI_CXX_MARK_SCOPE("LBSProblem::FinalizeConstruction");
   OpenSnLogicalErrorIf(not configured_,
                        GetName() + ": Configure must be called before Initialize.");
   if (initialized_)
@@ -1405,9 +1408,7 @@ LBSProblem::~LBSProblem()
 void
 LBSProblem::SetSaveAngularFlux(bool save)
 {
-  OpenSnLogicalErrorIf(
-    not initialized_,
-    GetName() + ": SetSaveAngularFlux may only be called after problem construction.");
+  RequireRuntimeReady("SetSaveAngularFlux");
 
   options_.save_angular_flux = save;
   if (options_.save_angular_flux != applied_save_angular_flux_)
@@ -1427,8 +1428,7 @@ LBSProblem::ZeroPhi()
 void
 LBSProblem::SetAdjoint(bool adjoint)
 {
-  OpenSnLogicalErrorIf(not initialized_,
-                       GetName() + ": SetAdjoint may only be called after problem construction.");
+  RequireRuntimeReady("SetAdjoint");
   if (adjoint)
     if (const auto* do_problem = dynamic_cast<const DiscreteOrdinatesProblem*>(this);
         do_problem and do_problem->IsTimeDependent())
@@ -1441,8 +1441,7 @@ LBSProblem::SetAdjoint(bool adjoint)
 void
 LBSProblem::RebuildRuntime()
 {
-  OpenSnLogicalErrorIf(not initialized_,
-                       GetName() + ": RebuildRuntime may only be called after problem construction.");
+  RequireRuntimeReady("RebuildRuntime");
 
   if (options_.adjoint != applied_adjoint_)
   {
@@ -1480,6 +1479,14 @@ bool
 LBSProblem::IsAdjoint() const
 {
   return options_.adjoint;
+}
+
+void
+LBSProblem::RequireRuntimeReady(std::string_view caller) const
+{
+  OpenSnLogicalErrorIf(not initialized_,
+                       GetName() + ": " + std::string(caller) +
+                         " requires a constructed problem.");
 }
 
 } // namespace opensn

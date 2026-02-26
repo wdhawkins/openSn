@@ -17,6 +17,7 @@
 #include "framework/math/geometry.h"
 #include <petscksp.h>
 #include <chrono>
+#include <string_view>
 
 namespace opensn
 {
@@ -26,6 +27,7 @@ class GridFaceHistogram;
 class AGSLinearSolver;
 class WGSLinearSolver;
 struct WGSContext;
+class DiscreteOrdinatesProblem;
 
 /// Base class for all Linear Boltzmann Solvers.
 class LBSProblem : public Problem
@@ -281,6 +283,9 @@ protected:
 
   /// Final construction/runtime setup step executed by concrete problem constructors.
   void FinalizeConstruction();
+
+  /// Throws if runtime mutators are called before construction is complete.
+  void RequireRuntimeReady(std::string_view caller) const;
 
   /// Hook for derived classes to respond to save-angular-flux option changes.
   virtual void OnSaveAngularFluxOptionChanged() {}

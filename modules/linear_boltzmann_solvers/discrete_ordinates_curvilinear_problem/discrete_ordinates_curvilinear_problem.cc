@@ -49,10 +49,13 @@ DiscreteOrdinatesCurvilinearProblem::DiscreteOrdinatesCurvilinearProblem(
   : DiscreteOrdinatesProblem(params.GetParamValue<std::string>("name"),
                              params.GetSharedPtrParam<MeshContinuum>("mesh"))
 {
-  ConfigureOnly(params);
+  ConstructFromInput(params);
+}
+
+void
+DiscreteOrdinatesCurvilinearProblem::VerifyConfiguredInput()
+{
   PerformInputChecks();
-  FinalizeConstruction();
-  InitializeRuntime();
 }
 
 void
