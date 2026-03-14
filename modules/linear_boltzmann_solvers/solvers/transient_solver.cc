@@ -290,10 +290,12 @@ TransientSolver::StepPrecursors()
 
   // Uses phi_new and precursor_prev_local to compute precursor_new_local (theta-flavor)
   auto& transport_views = do_problem_->GetCellTransportViews();
+  const auto& densities = do_problem_->GetDensitiesLocal();
   for (const auto& cell : do_problem_->GetGrid()->local_cells)
   {
     const auto& fe_values = do_problem_->GetUnitCellMatrices()[cell.local_id];
     const double cell_volume = transport_views[cell.local_id].GetVolume();
+    const auto rho = densities[cell.local_id];
     const auto& xs = do_problem_->GetBlockID2XSMap().at(cell.block_id);
     const auto& precursors = xs->GetPrecursors();
     const auto& nu_delayed_sigma_f = xs->GetNuDelayedSigmaF();
@@ -306,7 +308,8 @@ TransientSolver::StepPrecursors()
       const double node_V_fraction = fe_values.intV_shapeI(i) / cell_volume;
 
       for (int g = 0; g < do_problem_->GetNumGroups(); ++g)
-        delayed_fission += nu_delayed_sigma_f[g] * (*phi_new_local_)[uk_map + g] * node_V_fraction;
+        delayed_fission +=
+          rho * nu_delayed_sigma_f[g] * (*phi_new_local_)[uk_map + g] * node_V_fraction;
     }
 
     // Loop over precursors

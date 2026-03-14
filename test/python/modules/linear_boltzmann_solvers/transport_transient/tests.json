@@ -92,7 +92,7 @@
         "type": "KeyValuePair",
         "key": "Max phi(3s) = ",
         "goldvalue": 5.104477,
-        "abs_tol": 0.000001
+        "abs_tol": 1e-06
       }
     ]
   },
@@ -105,7 +105,7 @@
         "type": "KeyValuePair",
         "key": "Max phi(1s) = ",
         "goldvalue": 2.330956,
-        "abs_tol": 0.000001
+        "abs_tol": 1e-06
       }
     ]
   },
@@ -118,13 +118,13 @@
         "type": "KeyValuePair",
         "key": "Max phi0(2s) = ",
         "goldvalue": 3.658193,
-        "abs_tol": 0.000001
+        "abs_tol": 1e-06
       },
       {
         "type": "KeyValuePair",
         "key": "Max phi1(2s) = ",
         "goldvalue": 1.027354,
-        "abs_tol": 0.000001
+        "abs_tol": 1e-06
       }
     ]
   },
@@ -137,7 +137,7 @@
         "type": "KeyValuePair",
         "key": "Max phi(2s) = ",
         "goldvalue": 0.889725,
-        "abs_tol": 0.000001
+        "abs_tol": 1e-06
       }
     ]
   },
@@ -150,7 +150,7 @@
         "type": "KeyValuePair",
         "key": "Max phi(1s) = ",
         "goldvalue": 1.736077,
-        "abs_tol": 0.000001
+        "abs_tol": 1e-06
       }
     ]
   },
@@ -163,7 +163,7 @@
         "type": "KeyValuePair",
         "key": "Max phi(1s) = ",
         "goldvalue": 3.184793,
-        "abs_tol": 0.000001
+        "abs_tol": 1e-06
       }
     ]
   },
@@ -176,13 +176,13 @@
         "type": "KeyValuePair",
         "key": "Max phi0(1s) = ",
         "goldvalue": 1.978816,
-        "abs_tol": 0.000001
+        "abs_tol": 1e-06
       },
       {
         "type": "KeyValuePair",
         "key": "Max phi1(1s) = ",
         "goldvalue": 0.394171,
-        "abs_tol": 0.000001
+        "abs_tol": 1e-06
       }
     ]
   },
@@ -195,13 +195,13 @@
         "type": "KeyValuePair",
         "key": "Max phi0 = ",
         "goldvalue": 3.672537,
-        "abs_tol": 0.000001
+        "abs_tol": 1e-06
       },
       {
         "type": "KeyValuePair",
         "key": "Max phi1 = ",
         "goldvalue": 1.035548,
-        "abs_tol": 0.000001
+        "abs_tol": 1e-06
       }
     ]
   },
@@ -214,13 +214,13 @@
         "type": "KeyValuePair",
         "key": "Max phi0 = ",
         "goldvalue": 3.674989,
-        "abs_tol": 0.000001
+        "abs_tol": 1e-06
       },
       {
         "type": "KeyValuePair",
         "key": "Max phi1 = ",
         "goldvalue": 1.035541,
-        "abs_tol": 0.000001
+        "abs_tol": 1e-06
       }
     ]
   },
@@ -345,7 +345,7 @@
         "key": "FP_RATIO_ACTUAL",
         "wordnum": 1,
         "gold": 1.2,
-        "abs_tol": 0.000001
+        "abs_tol": 1e-06
       },
       {
         "type": "FloatCompare",
@@ -366,7 +366,7 @@
         "key": "FP_RATIO_ACTUAL",
         "wordnum": 1,
         "gold": 1.2,
-        "abs_tol": 0.000001
+        "abs_tol": 1e-06
       },
       {
         "type": "FloatCompare",
@@ -387,7 +387,7 @@
         "key": "FP_RATIO_ACTUAL",
         "wordnum": 1,
         "gold": 2.2,
-        "abs_tol": 0.000001
+        "abs_tol": 1e-06
       },
       {
         "type": "FloatCompare",
@@ -450,7 +450,7 @@
         "key": "FP_RATIO_ACTUAL",
         "wordnum": 1,
         "gold": 1.2,
-        "abs_tol": 0.000001
+        "abs_tol": 1e-06
       },
       {
         "type": "FloatCompare",
@@ -471,7 +471,7 @@
         "key": "FP_RATIO_ACTUAL",
         "wordnum": 1,
         "gold": 1.2,
-        "abs_tol": 0.000001
+        "abs_tol": 1e-06
       }
     ]
   },
@@ -525,6 +525,76 @@
       {
         "type": "FloatCompare",
         "key": "RAMP_SOURCE_ANALYTIC_PASS",
+        "wordnum": 1,
+        "gold": 1,
+        "abs_tol": 1e-12
+      }
+    ]
+  },
+  {
+    "file": "transient_density_zero_absorber_ratio.py",
+    "comment": "Transient zero-init absorber/source follows density-scaled analytic trend",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "FloatCompare",
+        "key": "DENSITY_TRANSIENT_PASS",
+        "wordnum": 1,
+        "gold": 1,
+        "abs_tol": 1e-12
+      }
+    ]
+  },
+  {
+    "file": "transient_density_theta_recurrence.py",
+    "comment": "Multi-step transient BE and CN recurrence checks with density scaling",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "FloatCompare",
+        "key": "DENSITY_THETA_PASS",
+        "wordnum": 1,
+        "gold": 1,
+        "abs_tol": 1e-12
+      }
+    ]
+  },
+  {
+    "file": "transient_density_decay_recurrence.py",
+    "comment": "Transient pure-decay from existing state versus exact BE recurrence",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "FloatCompare",
+        "key": "DENSITY_DECAY_PASS",
+        "wordnum": 1,
+        "gold": 1,
+        "abs_tol": 1e-12
+      }
+    ]
+  },
+  {
+    "file": "transient_density_prompt_alpha_scaling.py",
+    "comment": "Prompt-only transient alpha scales linearly with uniform density",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "FloatCompare",
+        "key": "DENSITY_ALPHA_PASS",
+        "wordnum": 1,
+        "gold": 1,
+        "abs_tol": 1e-12
+      }
+    ]
+  },
+  {
+    "file": "transient_density_3d_theta_recurrence.py",
+    "comment": "3D unstructured transient BE recurrence check",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "FloatCompare",
+        "key": "DENSITY_3D_THETA_PASS",
         "wordnum": 1,
         "gold": 1,
         "abs_tol": 1e-12

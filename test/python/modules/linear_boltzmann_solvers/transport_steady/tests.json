@@ -161,13 +161,13 @@
       {
         "type": "KeyValuePair",
         "key": "Max-value1=",
-        "goldvalue": 5.27523e-01,
+        "goldvalue": 0.527523,
         "abs_tol": 0.0001
       },
       {
         "type": "KeyValuePair",
         "key": "Max-value2=",
-        "goldvalue": 3.54369e-04,
+        "goldvalue": 0.000354369,
         "abs_tol": 0.0001
       }
     ]
@@ -590,13 +590,13 @@
       {
         "type": "KeyValuePair",
         "key": "Max-value1=",
-        "goldvalue": 5.52528e-1,
+        "goldvalue": 0.552528,
         "abs_tol": 0.0001
       },
       {
         "type": "KeyValuePair",
         "key": "Max-value2=",
-        "goldvalue": 4.59362e-04,
+        "goldvalue": 0.000459362,
         "abs_tol": 0.0001
       }
     ]
@@ -808,7 +808,7 @@
       {
         "type": "KeyValuePair",
         "key": "Max-value1=",
-        "goldvalue": 5.55349e-01,
+        "goldvalue": 0.555349,
         "abs_tol": 0.0001
       },
       {
@@ -829,14 +829,14 @@
         "type": "KeyValuePair",
         "key": "Max-value-0=",
         "wordnum": 4,
-        "goldvalue": 5.15248e-01,
+        "goldvalue": 0.515248,
         "abs_tol": 1e-05
       },
       {
         "type": "KeyValuePair",
         "key": "Max-value-19=",
         "wordnum": 4,
-        "goldvalue": 1.45034e-03,
+        "goldvalue": 0.00145034,
         "abs_tol": 1e-08
       },
       {
@@ -869,14 +869,14 @@
         "type": "KeyValuePair",
         "key": "Max-value-0=",
         "wordnum": 4,
-        "goldvalue": 5.15248e-01,
+        "goldvalue": 0.515248,
         "abs_tol": 1e-05
       },
       {
         "type": "KeyValuePair",
         "key": "Max-value-19=",
         "wordnum": 4,
-        "goldvalue": 1.45034e-03,
+        "goldvalue": 0.00145034,
         "abs_tol": 1e-08
       },
       {
@@ -909,14 +909,14 @@
         "type": "KeyValuePair",
         "key": "Max-value-0=",
         "wordnum": 4,
-        "goldvalue": 5.15248e-01,
+        "goldvalue": 0.515248,
         "abs_tol": 1e-05
       },
       {
         "type": "KeyValuePair",
         "key": "Max-value-19=",
         "wordnum": 4,
-        "goldvalue": 1.45034e-03,
+        "goldvalue": 0.00145034,
         "abs_tol": 1e-08
       },
       {
@@ -949,14 +949,14 @@
         "type": "KeyValuePair",
         "key": "Max-value-0=",
         "wordnum": 4,
-        "goldvalue": 5.15248e-01,
+        "goldvalue": 0.515248,
         "abs_tol": 1e-05
       },
       {
         "type": "KeyValuePair",
         "key": "Max-value-19=",
         "wordnum": 4,
-        "goldvalue": 1.45034e-03,
+        "goldvalue": 0.00145034,
         "abs_tol": 1e-08
       },
       {
@@ -1202,13 +1202,13 @@
       {
         "type": "KeyValuePair",
         "key": "Max-value1=",
-        "goldvalue": 7.94030e-01,
+        "goldvalue": 0.79403,
         "abs_tol": 0.0001
       },
       {
         "type": "KeyValuePair",
         "key": "Max-value2=",
-        "goldvalue": 9.12411e-01,
+        "goldvalue": 0.912411,
         "abs_tol": 0.0001
       }
     ]
@@ -1221,13 +1221,13 @@
       {
         "type": "KeyValuePair",
         "key": "Max-value1=",
-        "goldvalue": 1.01202e+00,
+        "goldvalue": 1.01202,
         "abs_tol": 0.0001
       },
       {
         "type": "KeyValuePair",
         "key": "Max-value2=",
-        "goldvalue": 1.57353e+00,
+        "goldvalue": 1.57353,
         "abs_tol": 0.0001
       }
     ]
@@ -1241,7 +1241,7 @@
         "type": "KeyValuePair",
         "key": "Sum=",
         "goldvalue": 0.14766,
-        "abs_tol": 0.00001
+        "abs_tol": 1e-05
       }
     ]
   },
@@ -1254,7 +1254,7 @@
         "type": "KeyValuePair",
         "key": "Sum=",
         "goldvalue": 0.14766,
-        "abs_tol": 0.00001
+        "abs_tol": 1e-05
       }
     ]
   },
@@ -1267,7 +1267,7 @@
         "type": "KeyValuePair",
         "key": "Sum=",
         "goldvalue": 4.10588,
-        "abs_tol": 0.00001
+        "abs_tol": 1e-05
       }
     ]
   },
@@ -1279,26 +1279,26 @@
       {
         "type": "KeyValuePair",
         "key": "Top leakage=",
-        "goldvalue": 36.104510,
-        "abs_tol": 1.0e-6
+        "goldvalue": 36.10451,
+        "abs_tol": 1e-06
       },
       {
         "type": "KeyValuePair",
         "key": "Bottom leakage=",
         "goldvalue": 36.104355,
-        "abs_tol": 1.0e-6
+        "abs_tol": 1e-06
       },
       {
         "type": "KeyValuePair",
         "key": "Side leakage=",
         "goldvalue": 39.754077,
-        "abs_tol": 1.0e-6
+        "abs_tol": 1e-06
       },
       {
         "type": "KeyValuePair",
         "key": "Total leakage=",
         "goldvalue": 111.962942,
-        "abs_tol": 1.0e-6
+        "abs_tol": 1e-06
       }
     ]
   },
@@ -1323,13 +1323,13 @@
         "type": "KeyValuePair",
         "key": "Side leakage=",
         "goldvalue": 97.14824832,
-        "abs_tol": 1e-6
+        "abs_tol": 1e-06
       },
       {
         "type": "KeyValuePair",
         "key": "Total leakage=",
         "goldvalue": 97.14824832,
-        "abs_tol": 1e-6
+        "abs_tol": 1e-06
       }
     ]
   },
@@ -1348,7 +1348,177 @@
         "type": "KeyValuePair",
         "key": "Top + Right leakage = ",
         "goldvalue": 1.0,
-        "abs_tol": 1e-8
+        "abs_tol": 1e-08
+      }
+    ]
+  },
+  {
+    "file": "transport_1d_gpu_xsmap_update.py",
+    "comment": "GPU steady-state runtime XS map update",
+    "num_procs": 3,
+    "requires_gpu": "True",
+    "checks": [
+      {
+        "type": "FloatCompare",
+        "key": "GPU_XSMAP_SWAP_PASS",
+        "wordnum": 1,
+        "gold": 1,
+        "abs_tol": 1e-12
+      }
+    ]
+  },
+  {
+    "file": "transport_1d_gpu_density_update.py",
+    "comment": "GPU steady-state runtime density update",
+    "num_procs": 3,
+    "requires_gpu": "True",
+    "checks": [
+      {
+        "type": "FloatCompare",
+        "key": "GPU_DENSITY_UPDATE_PASS",
+        "wordnum": 1,
+        "gold": 1,
+        "abs_tol": 1e-12
+      }
+    ]
+  },
+  {
+    "file": "transport_density_reflective_absorber_ratio.py",
+    "comment": "Reflective 1D absorber/source: doubling density halves steady flux",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "FloatCompare",
+        "key": "DENSITY_REFLECT_PASS",
+        "wordnum": 1,
+        "gold": 1,
+        "abs_tol": 1e-12
+      }
+    ]
+  },
+  {
+    "file": "transport_density_multimat_by_block_vs_scaled_xs.py",
+    "comment": "Multimaterial by_block density API matches explicitly scaled XS",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "FloatCompare",
+        "key": "DENSITY_MULTIMAT_PASS",
+        "wordnum": 1,
+        "gold": 1,
+        "abs_tol": 1e-12
+      }
+    ]
+  },
+  {
+    "file": "transport_density_combine_vs_density_api.py",
+    "comment": "XS.Combine scalar scaling matches density API",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "FloatCompare",
+        "key": "DENSITY_COMBINE_PASS",
+        "wordnum": 1,
+        "gold": 1,
+        "abs_tol": 1e-12
+      }
+    ]
+  },
+  {
+    "file": "transport_density_leakage_scaling.py",
+    "comment": "Leakage behavior: reflective near-zero leakage and reduced vacuum leakage at higher density",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "FloatCompare",
+        "key": "DENSITY_LEAKAGE_PASS",
+        "wordnum": 1,
+        "gold": 1,
+        "abs_tol": 1e-12
+      }
+    ]
+  },
+  {
+    "file": "transport_density_unstructured_absorber_analytic_value.py",
+    "comment": "2D unstructured reflected pure absorber/source absolute analytic q/(rho sigma_a) check",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "FloatCompare",
+        "key": "DENSITY_UNSTRUCT_ABS_PASS",
+        "wordnum": 1,
+        "gold": 1,
+        "abs_tol": 1e-12
+      }
+    ]
+  },
+  {
+    "file": "transport_density_unstructured_multimat_balance.py",
+    "comment": "2D unstructured two-material reflected absorber/source global balance check",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "FloatCompare",
+        "key": "DENSITY_MM_BAL_PASS",
+        "wordnum": 1,
+        "gold": 1,
+        "abs_tol": 1e-12
+      }
+    ]
+  },
+  {
+    "file": "transport_density_1d_boundary_attenuation_e2.py",
+    "comment": "1D slab semi-analytic boundary attenuation ratio versus E2",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "FloatCompare",
+        "key": "DENSITY_ATT_PASS",
+        "wordnum": 1,
+        "gold": 1,
+        "abs_tol": 1e-12
+      }
+    ]
+  },
+  {
+    "file": "transport_density_dsa_tgdsa_homogeneous_analytic.py",
+    "comment": "2-group reflected homogeneous analytic check with WGDSA and TGDSA enabled",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "FloatCompare",
+        "key": "DENSITY_DSA_ANALYTIC_PASS",
+        "wordnum": 1,
+        "gold": 1,
+        "abs_tol": 1e-12
+      }
+    ]
+  },
+  {
+    "file": "transport_density_disk_reflective_absorber_analytic_value.py",
+    "comment": "Disk mesh reflected pure absorber/source absolute analytic q/(rho sigma_a) check",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "FloatCompare",
+        "key": "DENSITY_DISK_PASS",
+        "wordnum": 1,
+        "gold": 1,
+        "abs_tol": 1e-12
+      }
+    ]
+  },
+  {
+    "file": "transport_density_3d_unstructured_absorber_analytic_value.py",
+    "comment": "3D unstructured reflected pure absorber/source absolute analytic q/(rho sigma_a) check",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "FloatCompare",
+        "key": "DENSITY_3D_ABS_PASS",
+        "wordnum": 1,
+        "gold": 1,
+        "abs_tol": 1e-12
       }
     ]
   }

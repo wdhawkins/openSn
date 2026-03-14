@@ -515,10 +515,64 @@ WrapLBS(py::module& slv)
 
     Notes
     -----
+    This call replaces only the block-id to cross-section map; it does not modify
+    the current cell density field.
+
     Forward/adjoint mode toggles via :meth:`LBSProblem.SetAdjoint` do not change this map.
     The ``MultiGroupXS`` objects themselves are mutable and shared by pointer. If the same
     ``MultiGroupXS`` handle is shared across multiple problems, toggling adjoint mode in one
     problem also changes the transport mode seen by the others.
+    )"
+  );
+  lbs_problem.def(
+    "SetUniformDensities",
+    &LBSProblem::SetUniformDensities,
+    py::arg("density"),
+    R"(
+    Set the same density in all local cells.
+
+    Parameters
+    ----------
+    density: float
+        Cell density value. Must be finite and >= 0.
+
+    Notes
+    -----
+    For DSA-enabled groupsets (WGDSA/TGDSA, and acceleration paths that use the same guard), density
+    must remain uniform per block id across the full domain.
+
+    If ``use_gpus=True``, internal GPU carriers are rebuilt so the new densities are
+    used in subsequent solves.
+    )"
+  );
+  lbs_problem.def(
+    "SetDensities",
+    [](LBSProblem& self, py::kwargs& params)
+    {
+      self.SetDensities(kwargs_to_param_block(params));
+    },
+    R"(
+    Set densities with the same structure as the problem ``density`` block.
+
+    Parameters
+    ----------
+    default_density: float, default=1.0
+        Base density applied first.
+    by_block: List[Dict], default=[]
+        Per-block overrides. Each entry:
+          - block_ids: List[int]
+          - density: float
+    Notes
+    -----
+    Override precedence:
+      1. ``default_density``
+      2. ``by_block``
+
+    For DSA-enabled groupsets (WGDSA/TGDSA, and acceleration paths that use the same
+    guard), density must remain uniform per block id across the full domain.
+
+    If ``use_gpus=True``, internal GPU carriers are rebuilt so the new densities are
+    used in subsequent solves.
     )"
   );
   lbs_problem.def(
@@ -686,6 +740,23 @@ WrapLBS(py::module& slv)
               Mesh block IDs to associate with the cross section.
           - xs: pyopensn.xs.MultiGroupXS (required)
               Cross-section object to assign to the specified blocks.
+    density : Dict, default={}
+        Optional cell-density specification.
+          - default_density: float, default=1.0
+              Base density applied to all local cells first.
+          - by_block: List[Dict], default=[]
+              Per-block overrides. Each entry supports:
+                - block_ids: List[int] (required)
+                - density: float (required, finite and >= 0)
+        Override precedence is applied in this order:
+          1. ``default_density``
+          2. ``by_block`` overrides
+
+        If omitted, all local cell densities default to 1.0.
+
+        DSA restriction:
+          If WGDSA/TGDSA (or other DSA acceleration paths using the same guard) is enabled,
+          density must be uniform per block id across the full domain.
     boundary_conditions: List[Dict], default=[]
         A list containing tables for each boundary specification. Each dictionary supports:
           - name: str (required)
@@ -1094,6 +1165,23 @@ WrapLBS(py::module& slv)
               Mesh block IDs to associate with the cross section.
           - xs: pyopensn.xs.MultiGroupXS (required)
               Cross-section object to assign to the specified blocks.
+    density : Dict, default={}
+        Optional cell-density specification.
+          - default_density: float, default=1.0
+              Base density applied to all local cells first.
+          - by_block: List[Dict], default=[]
+              Per-block overrides. Each entry supports:
+                - block_ids: List[int] (required)
+                - density: float (required, finite and >= 0)
+        Override precedence is applied in this order:
+          1. ``default_density``
+          2. ``by_block`` overrides
+
+        If omitted, all local cell densities default to 1.0.
+
+        DSA restriction:
+          If WGDSA/TGDSA (or other DSA acceleration paths using the same guard) is enabled,
+          density must be uniform per block id across the full domain.
     boundary_conditions: List[Dict], default=[]
         A list containing tables for each boundary specification. Each dictionary supports:
           - name: str (required)
