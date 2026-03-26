@@ -79,10 +79,21 @@ public:
                       unsigned int angle_num,
                       unsigned int group_num) override;
 
+  double* PsiIncomingE(std::uint32_t cell_local_id,
+                       unsigned int face_num,
+                       unsigned int fi,
+                       unsigned int angle_num,
+                       unsigned int group_num) override;
+
   double* PsiOutgoing(uint64_t cell_local_id,
                       unsigned int face_num,
                       unsigned int fi,
                       unsigned int angle_num) override;
+
+  double* PsiOutgoingE(uint64_t cell_local_id,
+                       unsigned int face_num,
+                       unsigned int fi,
+                       unsigned int angle_num) override;
 
   void UpdateAnglesReadyStatus(const std::vector<std::uint32_t>& angles) override;
 
@@ -100,6 +111,8 @@ protected:
   using AngularFluxData = std::vector<std::vector<std::vector<std::vector<std::vector<double>>>>>;
   AngularFluxData boundary_flux_;
   AngularFluxData boundary_flux_old_;
+  AngularFluxData boundary_slope_;
+  AngularFluxData boundary_slope_old_;
 
   std::vector<int> reflected_anglenum_;
   std::vector<bool> angle_readyflags_;
@@ -110,6 +123,12 @@ private:
 
   template <typename Fn>
   void ForEachDelayedAngularFluxConst(bool use_old_store, Fn&& fn) const;
+
+  template <typename Fn>
+  void ForEachDelayedAngularSlope(bool use_old_store, Fn&& fn);
+
+  template <typename Fn>
+  void ForEachDelayedAngularSlopeConst(bool use_old_store, Fn&& fn) const;
 
 private:
   static constexpr double epsilon_ = 1.0e-8;

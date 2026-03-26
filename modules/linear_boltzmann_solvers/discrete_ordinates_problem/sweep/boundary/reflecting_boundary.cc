@@ -42,6 +42,34 @@ ReflectingBoundary::ForEachDelayedAngularFluxConst(bool use_old_store, Fn&& fn) 
             apply(val);
 }
 
+template <typename Fn>
+void
+ReflectingBoundary::ForEachDelayedAngularSlope(bool use_old_store, Fn&& fn)
+{
+  auto&& apply = std::forward<Fn>(fn);
+  auto& slope = use_old_store ? boundary_slope_old_ : boundary_slope_;
+  for (auto& angle : slope)
+    for (auto& cellvec : angle)
+      for (auto& facevec : cellvec)
+        for (auto& dofvec : facevec)
+          for (auto& val : dofvec)
+            apply(val);
+}
+
+template <typename Fn>
+void
+ReflectingBoundary::ForEachDelayedAngularSlopeConst(bool use_old_store, Fn&& fn) const
+{
+  auto&& apply = std::forward<Fn>(fn);
+  const auto& slope = use_old_store ? boundary_slope_old_ : boundary_slope_;
+  for (const auto& angle : slope)
+    for (const auto& cellvec : angle)
+      for (const auto& facevec : cellvec)
+        for (const auto& dofvec : facevec)
+          for (const auto& val : dofvec)
+            apply(val);
+}
+
 void
 ReflectingBoundary::InitializeDelayedAngularFlux(const std::shared_ptr<MeshContinuum>& grid,
                                                  const AngularQuadrature& quadrature)
@@ -114,7 +142,10 @@ ReflectingBoundary::InitializeDelayedAngularFlux(const std::shared_ptr<MeshConti
 
   boundary_flux_.clear();
   boundary_flux_old_.clear();
+  boundary_slope_.clear();
+  boundary_slope_old_.clear();
   boundary_flux_.resize(tot_num_angles);
+  boundary_slope_.resize(tot_num_angles);
 
   const size_t num_local_cells = grid->local_cells.size();
   for (int n = 0; n < tot_num_angles; ++n)
@@ -123,7 +154,9 @@ ReflectingBoundary::InitializeDelayedAngularFlux(const std::shared_ptr<MeshConti
       continue;
 
     auto& cell_vec = boundary_flux_[n];
+    auto& slope_cell_vec = boundary_slope_[n];
     cell_vec.resize(num_local_cells);
+    slope_cell_vec.resize(num_local_cells);
 
     for (const auto& cell : grid->local_cells)
     {
@@ -143,6 +176,7 @@ ReflectingBoundary::InitializeDelayedAngularFlux(const std::shared_ptr<MeshConti
         continue;
 
       cell_vec[c].resize(cell.faces.size());
+      slope_cell_vec[c].resize(cell.faces.size());
       int f = 0;
       for (const auto& face : cell.faces)
       {
@@ -150,6 +184,9 @@ ReflectingBoundary::InitializeDelayedAngularFlux(const std::shared_ptr<MeshConti
         {
           cell_vec[c][f].clear();
           cell_vec[c][f].resize(face.vertex_ids.size(), std::vector<double>(num_groups_, 0.0));
+          slope_cell_vec[c][f].clear();
+          slope_cell_vec[c][f].resize(face.vertex_ids.size(),
+                                      std::vector<double>(num_groups_, 0.0));
         }
         ++f;
       }
@@ -210,7 +247,10 @@ ReflectingBoundary::FinalizeDelayedAngularFluxSetup(
   }
 
   if (opposing_reflected_)
+  {
     boundary_flux_old_ = boundary_flux_;
+    boundary_slope_old_ = boundary_slope_;
+  }
 }
 
 void
@@ -220,6 +260,7 @@ ReflectingBoundary::ZeroOpposingDelayedAngularFluxOld()
     return;
 
   ForEachDelayedAngularFlux(true, [](double& val) { val = 0.0; });
+  ForEachDelayedAngularSlope(true, [](double& val) { val = 0.0; });
 }
 
 size_t
@@ -230,6 +271,8 @@ ReflectingBoundary::CountDelayedAngularDOFsNew() const
 
   size_t counter = 0;
   ForEachDelayedAngularFluxConst(false, [&](const double&) { ++counter; });
+  if (delayed_angular_slope_enabled_)
+    ForEachDelayedAngularSlopeConst(false, [&](const double&) { ++counter; });
   return counter;
 }
 
@@ -241,6 +284,8 @@ ReflectingBoundary::CountDelayedAngularDOFsOld() const
 
   size_t counter = 0;
   ForEachDelayedAngularFluxConst(true, [&](const double&) { ++counter; });
+  if (delayed_angular_slope_enabled_)
+    ForEachDelayedAngularSlopeConst(true, [&](const double&) { ++counter; });
   return counter;
 }
 
@@ -251,6 +296,8 @@ ReflectingBoundary::AppendNewDelayedAngularDOFsToVector(std::vector<double>& out
     return;
 
   ForEachDelayedAngularFluxConst(false, [&](const double& val) { output.push_back(val); });
+  if (delayed_angular_slope_enabled_)
+    ForEachDelayedAngularSlopeConst(false, [&](const double& val) { output.push_back(val); });
 }
 
 void
@@ -260,6 +307,8 @@ ReflectingBoundary::AppendOldDelayedAngularDOFsToVector(std::vector<double>& out
     return;
 
   ForEachDelayedAngularFluxConst(true, [&](const double& val) { output.push_back(val); });
+  if (delayed_angular_slope_enabled_)
+    ForEachDelayedAngularSlopeConst(true, [&](const double& val) { output.push_back(val); });
 }
 
 void
@@ -274,6 +323,13 @@ ReflectingBoundary::AppendNewDelayedAngularDOFsToArray(int64_t& index, double* b
                                    ++index;
                                    buffer[index] = val;
                                  });
+  if (delayed_angular_slope_enabled_)
+    ForEachDelayedAngularSlopeConst(false,
+                                    [&](const double& val)
+                                    {
+                                      ++index;
+                                      buffer[index] = val;
+                                    });
 }
 
 void
@@ -288,6 +344,13 @@ ReflectingBoundary::AppendOldDelayedAngularDOFsToArray(int64_t& index, double* b
                                    ++index;
                                    buffer[index] = val;
                                  });
+  if (delayed_angular_slope_enabled_)
+    ForEachDelayedAngularSlopeConst(true,
+                                    [&](const double& val)
+                                    {
+                                      ++index;
+                                      buffer[index] = val;
+                                    });
 }
 
 void
@@ -302,6 +365,13 @@ ReflectingBoundary::SetNewDelayedAngularDOFsFromArray(int64_t& index, const doub
                               ++index;
                               val = buffer[index];
                             });
+  if (delayed_angular_slope_enabled_)
+    ForEachDelayedAngularSlope(false,
+                               [&](double& val)
+                               {
+                                 ++index;
+                                 val = buffer[index];
+                               });
 }
 
 void
@@ -316,6 +386,13 @@ ReflectingBoundary::SetOldDelayedAngularDOFsFromArray(int64_t& index, const doub
                               ++index;
                               val = buffer[index];
                             });
+  if (delayed_angular_slope_enabled_)
+    ForEachDelayedAngularSlope(true,
+                               [&](double& val)
+                               {
+                                 ++index;
+                                 val = buffer[index];
+                               });
 }
 
 void
@@ -326,6 +403,8 @@ ReflectingBoundary::SetNewDelayedAngularDOFsFromVector(const std::vector<double>
     return;
 
   ForEachDelayedAngularFlux(false, [&](double& val) { val = values[index++]; });
+  if (delayed_angular_slope_enabled_)
+    ForEachDelayedAngularSlope(false, [&](double& val) { val = values[index++]; });
 }
 
 void
@@ -336,6 +415,8 @@ ReflectingBoundary::SetOldDelayedAngularDOFsFromVector(const std::vector<double>
     return;
 
   ForEachDelayedAngularFlux(true, [&](double& val) { val = values[index++]; });
+  if (delayed_angular_slope_enabled_)
+    ForEachDelayedAngularSlope(true, [&](double& val) { val = values[index++]; });
 }
 
 void
@@ -345,6 +426,7 @@ ReflectingBoundary::CopyDelayedAngularFluxOldToNew()
     return;
 
   boundary_flux_ = boundary_flux_old_;
+  boundary_slope_ = boundary_slope_old_;
 }
 
 void
@@ -354,6 +436,7 @@ ReflectingBoundary::CopyDelayedAngularFluxNewToOld()
     return;
 
   boundary_flux_old_ = boundary_flux_;
+  boundary_slope_old_ = boundary_slope_;
 }
 
 double*
@@ -372,12 +455,36 @@ ReflectingBoundary::PsiIncoming(std::uint32_t cell_local_id,
 }
 
 double*
+ReflectingBoundary::PsiIncomingE(std::uint32_t cell_local_id,
+                                 unsigned int face_num,
+                                 unsigned int fi,
+                                 unsigned int angle_num,
+                                 unsigned int group_num)
+{
+  int reflected_angle_num = reflected_anglenum_[angle_num];
+
+  if (opposing_reflected_)
+    return &boundary_slope_old_[reflected_angle_num][cell_local_id][face_num][fi].front();
+
+  return &boundary_slope_[reflected_angle_num][cell_local_id][face_num][fi].front();
+}
+
+double*
 ReflectingBoundary::PsiOutgoing(uint64_t cell_local_id,
                                 unsigned int face_num,
                                 unsigned int fi,
                                 unsigned int angle_num)
 {
   return &boundary_flux_[angle_num][cell_local_id][face_num][fi].front();
+}
+
+double*
+ReflectingBoundary::PsiOutgoingE(uint64_t cell_local_id,
+                                 unsigned int face_num,
+                                 unsigned int fi,
+                                 unsigned int angle_num)
+{
+  return &boundary_slope_[angle_num][cell_local_id][face_num][fi].front();
 }
 
 void
@@ -405,6 +512,7 @@ void
 ReflectingBoundary::ResetAnglesReadyStatus()
 {
   boundary_flux_old_ = boundary_flux_;
+  boundary_slope_old_ = boundary_slope_;
   std::fill(angle_readyflags_.begin(), angle_readyflags_.end(), false);
 }
 

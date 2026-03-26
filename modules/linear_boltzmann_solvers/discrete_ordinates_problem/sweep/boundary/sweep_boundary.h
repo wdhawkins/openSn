@@ -26,6 +26,7 @@ public:
     : num_groups_(num_groups), type_(bndry_type), coord_type_(coord_type)
   {
     zero_boundary_flux_.resize(num_groups_, 0.0);
+    zero_boundary_slope_.resize(num_groups_, 0.0);
   }
 
   virtual ~SweepBoundary() = default;
@@ -39,6 +40,9 @@ public:
   double GetEvaluationTime() const { return evaluation_time_; }
 
   void SetEvaluationTime(double time) { evaluation_time_ = time; }
+
+  void SetDelayedAngularSlopeEnabled(bool enabled) { delayed_angular_slope_enabled_ = enabled; }
+  bool DelayedAngularSlopeEnabled() const { return delayed_angular_slope_enabled_; }
 
   virtual bool HasDelayedAngularFlux() const { return false; }
 
@@ -103,11 +107,30 @@ public:
                               unsigned int angle_num,
                               unsigned int group_num);
 
+  /// Returns a pointer to the location of the incoming slope data.
+  virtual double* PsiIncomingE(std::uint32_t cell_local_id,
+                               unsigned int face_num,
+                               unsigned int fi,
+                               unsigned int angle_num,
+                               unsigned int group_num)
+  {
+    return &zero_boundary_slope_[group_num];
+  }
+
   /// Returns a pointer to the location of the outgoing flux.
   virtual double* PsiOutgoing(uint64_t cell_local_id,
                               unsigned int face_num,
                               unsigned int fi,
                               unsigned int angle_num);
+
+  /// Returns a pointer to the location of the outgoing slope data.
+  virtual double* PsiOutgoingE(uint64_t cell_local_id,
+                               unsigned int face_num,
+                               unsigned int fi,
+                               unsigned int angle_num)
+  {
+    return &zero_boundary_slope_.front();
+  }
 
   virtual void UpdateAnglesReadyStatus(const std::vector<std::uint32_t>& angles) {}
 
@@ -122,6 +145,8 @@ public:
 
 protected:
   std::vector<double> zero_boundary_flux_;
+  std::vector<double> zero_boundary_slope_;
+  bool delayed_angular_slope_enabled_ = false;
   unsigned int num_groups_;
 
 private:

@@ -50,7 +50,8 @@ class AngleAggregation
 public:
   AngleAggregation(const std::map<uint64_t, std::shared_ptr<SweepBoundary>>& boundaries,
                    std::shared_ptr<AngularQuadrature>& quadrature,
-                   std::shared_ptr<MeshContinuum>& grid);
+                   std::shared_ptr<MeshContinuum>& grid,
+                   bool csda_enabled);
 
   using iterator = typename std::vector<std::shared_ptr<AngleSet>>::iterator;
   using const_iterator = typename std::vector<std::shared_ptr<AngleSet>>::const_iterator;
@@ -134,6 +135,7 @@ public:
 private:
   bool num_ang_unknowns_avail_;
   std::pair<size_t, size_t> number_angular_unknowns_;
+  bool csda_enabled_;
   std::shared_ptr<MeshContinuum> grid_;
   std::shared_ptr<AngularQuadrature> quadrature_;
   std::map<uint64_t, std::shared_ptr<SweepBoundary>> boundaries_;

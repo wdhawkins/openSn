@@ -22,6 +22,7 @@ public:
 
   SweepChunk(std::vector<double>& destination_phi,
              std::vector<double>& destination_psi,
+             bool csda_enabled,
              const std::shared_ptr<MeshContinuum>& grid,
              const SpatialDiscretization& discretization,
              const std::vector<UnitCellMatrices>& unit_cell_matrices,
@@ -46,7 +47,8 @@ public:
                                    groupset_.GetNumGroups()),
       groupset_group_stride_(groupset_.GetNumGroups()),
       destination_phi_(destination_phi),
-      destination_psi_(destination_psi)
+      destination_psi_(destination_psi),
+      csda_enabled_(csda_enabled)
   {
   }
 
@@ -81,6 +83,7 @@ public:
   void IncludeRHSTimeTerm(bool status) { include_rhs_time_term_ = status; }
 
   virtual bool IsTimeDependent() const { return false; }
+  bool IsCSDAEnabled() const { return csda_enabled_; }
 
   virtual ~SweepChunk() = default;
 
@@ -107,6 +110,7 @@ protected:
   const size_t groupset_group_stride_;
   std::vector<double>& destination_phi_;
   std::vector<double>& destination_psi_;
+  const bool csda_enabled_;
   bool surface_source_active_ = false;
   bool include_rhs_time_term_ = true;
 };
