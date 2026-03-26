@@ -30,8 +30,9 @@ AAHSweepChunk::AAHSweepChunk(DiscreteOrdinatesProblem& problem, LBSGroupset& gro
     problem_(problem),
     sweep_impl_(&AAHSweepChunk::Sweep_Generic)
 {
-  if (min_num_cell_dofs_ == max_num_cell_dofs_ and min_num_cell_dofs_ >= 2 and
-      min_num_cell_dofs_ <= 8)
+  const bool csda_enabled = problem_.GetOptions().csda_enabled;
+  if (not csda_enabled and min_num_cell_dofs_ == max_num_cell_dofs_ and
+      min_num_cell_dofs_ >= 2 and min_num_cell_dofs_ <= 8)
   {
     switch (min_num_cell_dofs_)
     {
@@ -89,6 +90,7 @@ AAHSweepChunk::Sweep_Generic(AngleSet& angle_set)
                     destination_psi_,
                     surface_source_active_,
                     include_rhs_time_term_,
+                    problem_.GetOptions().csda_enabled,
                     problem_,
                     nullptr,
                     group_block_size_};
