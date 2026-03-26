@@ -18,6 +18,21 @@
 namespace opensn
 {
 
+namespace
+{
+int
+MakePsiTag(int max_num_messages, int angle_set_num, int msg)
+{
+  return 2 * max_num_messages * angle_set_num + msg;
+}
+
+int
+MakePsiETag(int max_num_messages, int angle_set_num, int msg)
+{
+  return 2 * max_num_messages * angle_set_num + max_num_messages + msg;
+}
+} // namespace
+
 AAH_ASynchronousCommunicator::AAH_ASynchronousCommunicator(FLUDS& fluds,
                                                            unsigned int num_groups,
                                                            std::size_t num_angles,
@@ -144,20 +159,25 @@ AAH_ASynchronousCommunicator::ReceiveDelayedData(int angle_set_num)
   for (std::size_t i = 0; i < num_delayed_dependencies; ++i)
   {
     auto& upstream_psi = fluds_.DelayedPrelocIOutgoingPsi()[i];
+    auto& upstream_psiE = fluds_.DelayedPrelocIOutgoingPsiE()[i];
 
     for (int m = 0; m < delayed_preloc_msg_data_[i].size(); ++m)
     {
       const auto& [source, size, block_pos] = delayed_preloc_msg_data_[i][m];
-      int tag = max_num_messages_ * angle_set_num + m;
-      assert(tag <= std::numeric_limits<int>::max());
+      const int psi_tag = MakePsiTag(max_num_messages_, angle_set_num, m);
+      const int psiE_tag = MakePsiETag(max_num_messages_, angle_set_num, m);
+      assert(psiE_tag <= std::numeric_limits<int>::max());
       if (not delayed_preloc_msg_received_[i][m])
       {
-        if (not comm.iprobe(source, tag))
+        if (not comm.iprobe(source, psi_tag) or not comm.iprobe(source, psiE_tag))
         {
           all_messages_received = false;
           continue;
         }
-        if (not comm.recv<double>(source, tag, &upstream_psi[block_pos], size).error())
+        const bool psi_ok = not comm.recv<double>(source, psi_tag, &upstream_psi[block_pos], size).error();
+        const bool psiE_ok =
+          not comm.recv<double>(source, psiE_tag, &upstream_psiE[block_pos], size).error();
+        if (psi_ok and psiE_ok)
           delayed_preloc_msg_received_[i][m] = true;
       }
     }
@@ -186,20 +206,25 @@ AAH_ASynchronousCommunicator::ReceiveUpstreamPsi(int angle_set_num)
   for (std::size_t i = 0; i < num_dependencies; ++i)
   {
     auto& upstream_psi = fluds_.PrelocIOutgoingPsi()[i];
+    auto& upstream_psiE = fluds_.PrelocIOutgoingPsiE()[i];
 
     for (int m = 0; m < preloc_msg_data_[i].size(); ++m)
     {
       const auto& [source, size, block_pos] = preloc_msg_data_[i][m];
-      int tag = max_num_messages_ * angle_set_num + m;
-      assert(tag <= std::numeric_limits<int>::max());
+      const int psi_tag = MakePsiTag(max_num_messages_, angle_set_num, m);
+      const int psiE_tag = MakePsiETag(max_num_messages_, angle_set_num, m);
+      assert(psiE_tag <= std::numeric_limits<int>::max());
       if (not preloc_msg_received_[i][m])
       {
-        if (not comm.iprobe(source, tag))
+        if (not comm.iprobe(source, psi_tag) or not comm.iprobe(source, psiE_tag))
         {
           all_messages_received = false;
           continue;
         }
-        if (not comm.recv<double>(source, tag, &upstream_psi[block_pos], size).error())
+        const bool psi_ok = not comm.recv<double>(source, psi_tag, &upstream_psi[block_pos], size).error();
+        const bool psiE_ok =
+          not comm.recv<double>(source, psiE_tag, &upstream_psiE[block_pos], size).error();
+        if (psi_ok and psiE_ok)
           preloc_msg_received_[i][m] = true;
       }
     }
@@ -224,13 +249,16 @@ AAH_ASynchronousCommunicator::SendDownstreamPsi(int angle_set_num)
   {
     const auto& comm = comm_set_.LocICommunicator(location_successors[i]);
     const auto& outgoing_psi = fluds_.DeplocIOutgoingPsi()[i];
+    const auto& outgoing_psiE = fluds_.DeplocIOutgoingPsiE()[i];
 
     for (int m = 0; m < deploc_msg_data_[i].size(); ++m, ++req)
     {
       const auto& [dest, size, block_pos] = deploc_msg_data_[i][m];
-      int tag = max_num_messages_ * angle_set_num + m;
-      assert(tag <= std::numeric_limits<int>::max());
-      deploc_msg_request_[req] = comm.isend(dest, tag, &outgoing_psi[block_pos], size);
+      const int psi_tag = MakePsiTag(max_num_messages_, angle_set_num, m);
+      const int psiE_tag = MakePsiETag(max_num_messages_, angle_set_num, m);
+      assert(psiE_tag <= std::numeric_limits<int>::max());
+      deploc_msg_request_[req] = comm.isend(dest, psi_tag, &outgoing_psi[block_pos], size);
+      comm.send<double>(dest, psiE_tag, &outgoing_psiE[block_pos], size);
     }
   }
 }
