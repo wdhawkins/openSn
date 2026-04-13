@@ -62,7 +62,7 @@ public:
   double GetTime() const;
 
   /// Sets simulation time in seconds for time dependent problems.
-  void SetTime(double time);
+  virtual void SetTime(double time);
 
   /// Sets dt.
   void SetTimeStep(double dt);
@@ -320,9 +320,6 @@ protected:
 
   /// Initializes boundaries.
   virtual void InitializeBoundaries() {}
-
-  /// Derived problems handle boundary options.
-  virtual void SetBoundaryOptions(const InputParameters& params) = 0;
 
   void SetActiveSetSourceFunction(SetSourceFunction source_function);
 

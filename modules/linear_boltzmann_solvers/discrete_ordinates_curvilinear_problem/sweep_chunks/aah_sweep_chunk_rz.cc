@@ -202,7 +202,7 @@ AAHSweepChunkRZ::Sweep(AngleSet& angle_set)
                                             cell_local_id,
                                             f,
                                             fj,
-                                            gs_gi,
+                                            0,
                                             IsSurfaceSourceActive());
               }
             }

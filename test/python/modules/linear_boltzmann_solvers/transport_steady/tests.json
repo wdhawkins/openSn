@@ -578,8 +578,53 @@
       },
       {
         "type": "KeyValuePair",
+        "key": "Max-value2=",
+        "goldvalue": 8.86760,
+        "abs_tol": 1e-09
+      }
+    ]
+  },
+  {
+    "file": "transport_2d_4b_dsa_ortho_dual_quad.py",
+    "comment": "2D LinearBSolver test of a block of graphite with an air cavity. DSA and TG",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "StrCompare",
+        "key": "WGS groups [0-62] iteration = 54",
+        "wordnum": 18,
+        "gold": "converged"
+      },
+      {
+        "type": "StrCompare",
+        "key": "WGS groups [63-167] iteration = 58",
+        "wordnum": 18,
+        "gold": "converged"
+      },
+      {
+        "type": "FloatCompare",
+        "key": "WGS groups [0-62] iteration = 54",
+        "wordnum": 13,
+        "gold": 6.8534e-07,
+        "abs_tol": 1e-09
+      },
+      {
+        "type": "FloatCompare",
+        "key": "WGS groups [63-167] iteration = 58",
+        "wordnum": 13,
+        "gold": 6.2607e-07,
+        "abs_tol": 1e-09
+      },
+      {
+        "type": "KeyValuePair",
         "key": "Max-value1=",
         "goldvalue": 0.16196,
+        "abs_tol": 1e-09
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Max-value2=",
+        "goldvalue": 8.86850,
         "abs_tol": 1e-09
       }
     ]
@@ -1455,6 +1500,26 @@
   {
     "file": "boundary_mutation_rebuild.py",
     "comment": "Runtime boundary-condition mutation rebuild regression",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "BOUNDARY_MUTATION_MATCH=",
+        "goldvalue": 1,
+        "abs_tol": 0
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "BOUNDARY_MUTATION_MAX_DIFF=",
+        "goldvalue": 0.0,
+        "abs_tol": 5.0e-8
+      }
+    ]
+  },
+  {
+    "file": "boundary_mutation_rebuild_gpu.py",
+    "comment": "Runtime boundary-condition mutation rebuild regression",
+    "requires_gpu": "True",
     "num_procs": 4,
     "checks": [
       {
