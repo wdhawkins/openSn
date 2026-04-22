@@ -94,7 +94,14 @@ public:
   /// Read access to previous angular flux vector.
   const std::vector<std::vector<double>>& GetPsiOldLocal() const;
 
+  /// Read/write access to cellwise scalar CSDA slope moments \phi_{E,g}.
+  std::vector<double>& GetPhiENewLocal();
+
+  /// Read access to cellwise scalar CSDA slope moments \phi_{E,g}.
+  const std::vector<double>& GetPhiENewLocal() const;
+
   void ZeroPsi();
+  void ZeroPhiE();
 
   bool SaveAngularFluxEnabled() const { return options_.save_angular_flux; }
 
@@ -237,6 +244,8 @@ protected:
   void ResetDerivedSolutionVectors() override;
   void UpdateBoundaryDefinition(const InputParameters& params);
   void RebuildBoundaryRuntimeData();
+  std::optional<std::vector<double>>
+  ComputeDerivedFieldFunctionData(const std::string& xs_name) const override;
 
   /**
    * @name Sweep dependency data
@@ -282,6 +291,7 @@ protected:
 
   std::vector<std::vector<double>> psi_new_local_;
   std::vector<std::vector<double>> psi_old_local_;
+  std::vector<double> phi_e_new_local_;
   std::optional<SweepChunkMode> sweep_chunk_mode_;
   std::shared_ptr<AGSLinearSolver> ags_solver_;
   std::vector<std::shared_ptr<WGSContext>> wgs_contexts_;
