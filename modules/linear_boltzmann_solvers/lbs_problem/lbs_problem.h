@@ -21,6 +21,7 @@
 #include <petscksp.h>
 #include <chrono>
 #include <functional>
+#include <optional>
 
 namespace opensn
 {
@@ -313,6 +314,8 @@ protected:
   void UpdateDerivedFieldFunction(FieldFunctionGridBased& ff,
                                   const std::string& xs_name,
                                   double power_normalization_target);
+  virtual std::optional<std::vector<double>>
+  ComputeDerivedFieldFunctionData(const std::string& xs_name) const;
   virtual bool ReadProblemRestartData(hid_t file_id);
   virtual bool WriteProblemRestartData(hid_t file_id) const;
 
