@@ -297,6 +297,12 @@ Source
 Cross section
 -------------
 
+CEPXS-BFP charged-particle CSDA data is loaded through
+``xs.MultiGroupXS.LoadFromCEPXS(..., csda_format=True)`` and enabled on
+``solver.DiscreteOrdinatesProblem`` with ``options={"csda_enabled": True}``.
+See :doc:`/userguide/csda` for the supported workflow, restrictions, and
+balance/output names.
+
 .. autosummary::
    :toctree: generated
    :nosignatures:
