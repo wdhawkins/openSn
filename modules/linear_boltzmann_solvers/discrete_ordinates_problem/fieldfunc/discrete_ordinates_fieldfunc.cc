@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/discrete_ordinates_problem.h"
+#include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/csda_utils.h"
 #include "framework/field_functions/field_function_grid_based.h"
 #include "framework/utils/error.h"
 #include <iomanip>
@@ -13,29 +14,6 @@ namespace opensn
 {
 namespace
 {
-
-std::vector<std::pair<unsigned int, unsigned int>>
-FindChargedGroupRanges(const std::vector<double>& stopping_power)
-{
-  constexpr double tol = 1.0e-12;
-  std::vector<std::pair<unsigned int, unsigned int>> ranges;
-
-  unsigned int g = 0;
-  while (g < stopping_power.size())
-  {
-    while (g < stopping_power.size() and std::abs(stopping_power[g]) <= tol)
-      ++g;
-    if (g >= stopping_power.size())
-      break;
-
-    const unsigned int g_begin = g;
-    while (g < stopping_power.size() and std::abs(stopping_power[g]) > tol)
-      ++g;
-    ranges.emplace_back(g_begin, g);
-  }
-
-  return ranges;
-}
 
 std::vector<double>
 ComputeCellAveragePhi0g(const SpatialDiscretization& sdm,
@@ -260,7 +238,7 @@ DiscreteOrdinatesProblem::ComputeDerivedFieldFunctionData(const std::string& xs_
 
     const auto charged_ranges =
       stopping_power.empty() ? std::vector<std::pair<unsigned int, unsigned int>>{}
-                             : FindChargedGroupRanges(stopping_power);
+                             : FindCSDAChargedGroupRanges(stopping_power);
     if (is_csda_charge_deposition)
       OpenSnLogicalErrorIf(charged_ranges.size() > 2,
                            GetName() + ": Field function \"" + xs_name +
