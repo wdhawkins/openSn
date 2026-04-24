@@ -161,7 +161,12 @@ def compute_reference():
     phi_e = sol[G:]
     raw_edep = sum(SIGMA_EDEP[g] * phi[g] for g in range(G))
     raw_cdep = sum(SIGMA_CDEP[g] * phi[g] for g in range(G))
-    csda_edep = raw_edep + sum(phi[g] / delta_e[g] - phi_e[g] * STOPPING[g] for g in range(G))
+    csda_edep = raw_edep
+    for g in range(G):
+        group_center = 0.5 * (E_BOUNDS[g] + E_BOUNDS[g + 1])
+        next_group_center = 0.0 if g + 1 == G else 0.5 * (E_BOUNDS[g + 1] + E_BOUNDS[g + 2])
+        terminal_current = STOPPING[g] * (phi[g] / delta_e[g] - phi_e[g])
+        csda_edep += terminal_current * (group_center - next_group_center)
     g_last = G - 1
     csda_cdep = raw_cdep + STOPPING[g_last] * (phi[g_last] / delta_e[g_last] - phi_e[g_last])
     return phi, raw_edep, csda_edep, raw_cdep, csda_cdep
