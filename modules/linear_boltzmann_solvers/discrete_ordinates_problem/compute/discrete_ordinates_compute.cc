@@ -6,6 +6,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/discrete_ordinates_problem.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/vecops/lbs_vecops.h"
 #include "framework/runtime.h"
+#include "framework/utils/error.h"
 #include "caliper/cali.h"
 #include <algorithm>
 #include <cmath>
@@ -39,6 +40,12 @@ FindChargedGroupRangesForBalance(const std::vector<double>& stopping_power)
   }
 
   return ranges;
+}
+
+double
+GroupCenterEnergy(const std::vector<double>& energy_bounds, unsigned int g)
+{
+  return 0.5 * (energy_bounds.at(g) + energy_bounds.at(g + 1));
 }
 
 } // namespace
@@ -138,6 +145,11 @@ ComputeBalanceTable(DiscreteOrdinatesProblem& do_problem, double scaling_factor)
   double local_final = 0.0;
   double local_csda_charge_deposition = 0.0;
   double local_csda_energy_deposition = 0.0;
+  double local_csda_energy_collision_loss = 0.0;
+  double local_csda_energy_continuous_loss = 0.0;
+  double local_csda_energy_production = 0.0;
+  double local_csda_energy_in_flow = 0.0;
+  double local_csda_energy_out_flow = 0.0;
   for (const auto& cell : grid_->local_cells)
   {
     const auto& cell_mapping = discretization_.GetCellMapping(cell);
@@ -147,6 +159,12 @@ ComputeBalanceTable(DiscreteOrdinatesProblem& do_problem, double scaling_factor)
     const auto& IntV_shapeI = fe_intgrl_values.intV_shapeI;
     const auto& IntS_shapeI = fe_intgrl_values.intS_shapeI;
     const auto& xs_data = block_id_to_xs_map_.at(cell.block_id);
+    const auto& energy_bounds = xs_data->GetEnergyBounds();
+    const bool compute_csda_energy_balance = options_.csda_enabled;
+
+    if (compute_csda_energy_balance)
+      OpenSnLogicalErrorIf(energy_bounds.size() != num_groups_ + 1,
+                           "CSDA energy balance requires energy-bin boundaries.");
 
     // Inflow: This is essentially an integration over all faces, all angles, and all groups. For
     // non-reflective boundaries, only the cosines that are negative are added to the inflow
@@ -163,7 +181,12 @@ ComputeBalanceTable(DiscreteOrdinatesProblem& do_problem, double scaling_factor)
         if (bndry->IsReflecting())
         {
           for (unsigned int g = 0; g < num_groups_; ++g)
+          {
             local_in_flow += transport_view.GetOutflow(f, g);
+            if (compute_csda_energy_balance)
+              local_csda_energy_in_flow +=
+                GroupCenterEnergy(energy_bounds, g) * transport_view.GetOutflow(f, g);
+          }
         }
         else
         {
@@ -186,6 +209,9 @@ ComputeBalanceTable(DiscreteOrdinatesProblem& do_problem, double scaling_factor)
                   {
                     const double psi = *bndry->PsiIncoming(cell.local_id, f, fi, n, g);
                     local_in_flow -= mu * wt * psi * IntFi_shapeI;
+                    if (compute_csda_energy_balance)
+                      local_csda_energy_in_flow -=
+                        GroupCenterEnergy(energy_bounds, g) * mu * wt * psi * IntFi_shapeI;
                   } // for group
                 } // for fi
               } // if mu < 0
@@ -198,16 +224,28 @@ ComputeBalanceTable(DiscreteOrdinatesProblem& do_problem, double scaling_factor)
     // Outflow: The group-wise outflow was determined during a solve so we just accumulate it here.
     for (size_t f = 0; f < cell.faces.size(); ++f)
       for (unsigned int g = 0; g < num_groups_; ++g)
+      {
         local_out_flow += transport_view.GetOutflow(f, g);
+        if (compute_csda_energy_balance)
+          local_csda_energy_out_flow +=
+            GroupCenterEnergy(energy_bounds, g) * transport_view.GetOutflow(f, g);
+      }
 
     // Absorption and sources
     const auto& xs = transport_view.GetXS();
     const auto& sigma_a = xs.GetSigmaAbsorption();
+    const auto& sigma_t = xs.GetSigmaTotal();
+    const auto& transfer_matrices = xs.GetTransferMatrices();
     const auto& inv_vel = xs.GetInverseVelocity();
     const auto& stopping_power = xs_data->GetStoppingPower();
+    const auto& energy_deposition = xs_data->GetEnergyDeposition();
     const auto charged_ranges = stopping_power.empty()
                                   ? std::vector<std::pair<unsigned int, unsigned int>>{}
                                   : FindChargedGroupRangesForBalance(stopping_power);
+    if (compute_csda_energy_balance and not energy_deposition.empty())
+      OpenSnLogicalErrorIf(energy_deposition.size() != num_groups_,
+                           "CSDA energy balance requires one energy-deposition coefficient "
+                           "per group.");
     for (size_t i = 0; i < num_nodes; ++i)
     {
       for (unsigned int g = 0; g < num_groups_; ++g)
@@ -219,15 +257,48 @@ ComputeBalanceTable(DiscreteOrdinatesProblem& do_problem, double scaling_factor)
         const double abs_contrib = sigma_a[g] * phi_0g * IntV_shapeI(i);
         local_absorption += abs_contrib;
         local_production += q_0g * IntV_shapeI(i);
+        if (compute_csda_energy_balance)
+        {
+          local_csda_energy_production +=
+            GroupCenterEnergy(energy_bounds, g) * q_0g * IntV_shapeI(i);
+          if (not energy_deposition.empty())
+            local_csda_energy_deposition +=
+              energy_deposition[g] * phi_0g * IntV_shapeI(i);
+        }
       } // for g
     } // for i
+
+    if (compute_csda_energy_balance)
+    {
+      OpenSnLogicalErrorIf(sigma_t.size() != num_groups_,
+                           "CSDA energy balance requires one total cross section per group.");
+
+      std::vector<double> collision_loss_coeff(num_groups_, 0.0);
+      for (unsigned int g = 0; g < num_groups_; ++g)
+        collision_loss_coeff[g] = GroupCenterEnergy(energy_bounds, g) * sigma_t[g];
+
+      if (not transfer_matrices.empty())
+      {
+        const auto& S0 = transfer_matrices.front();
+        for (unsigned int g_to = 0; g_to < num_groups_; ++g_to)
+          for (const auto& [_, g_from, sigma_s] : S0.Row(g_to))
+            collision_loss_coeff[g_from] -= GroupCenterEnergy(energy_bounds, g_to) * sigma_s;
+      }
+
+      for (size_t i = 0; i < num_nodes; ++i)
+        for (unsigned int g = 0; g < num_groups_; ++g)
+        {
+          const auto imap = transport_view.MapDOF(i, 0, g);
+          local_csda_energy_collision_loss +=
+            collision_loss_coeff[g] * phi_new_local_[imap] * IntV_shapeI(i);
+        }
+    }
 
     if (options_.csda_enabled)
     {
       if (not stopping_power.empty())
       {
         const auto delta_e = xs_data->GetDeltaE();
-        const auto& energy_bounds = xs_data->GetEnergyBounds();
         double cell_volume = 0.0;
         for (size_t i = 0; i < num_nodes; ++i)
           cell_volume += IntV_shapeI(i);
@@ -249,13 +320,20 @@ ComputeBalanceTable(DiscreteOrdinatesProblem& do_problem, double scaling_factor)
               }
               const double phi_avg = phi_integral / cell_volume;
               const double Sg = stopping_power[g];
+              const double terminal_charge_current =
+                Sg * (phi_avg / delta_e[g] - phi_e_new_local_[cell_g_offset + g]);
+              const bool is_terminal_group = (g + 1 == g_end);
+              const double edge_energy_loss =
+                is_terminal_group ? GroupCenterEnergy(energy_bounds, g)
+                                  : GroupCenterEnergy(energy_bounds, g) -
+                                      GroupCenterEnergy(energy_bounds, g + 1);
 
               local_csda_energy_deposition += Sg * phi_integral;
+              local_csda_energy_continuous_loss +=
+                edge_energy_loss * terminal_charge_current * cell_volume;
 
-              if (g + 1 == g_end)
+              if (is_terminal_group)
               {
-                const double terminal_charge_current =
-                  Sg * (phi_avg / delta_e[g] - phi_e_new_local_[cell_g_offset + g]);
                 local_csda_energy_deposition +=
                   energy_bounds[g + 1] * terminal_charge_current * cell_volume;
                 local_csda_charge_deposition += sign * terminal_charge_current * cell_volume;
@@ -328,13 +406,38 @@ ComputeBalanceTable(DiscreteOrdinatesProblem& do_problem, double scaling_factor)
   double global_final = 0.0;
   double global_csda_charge_deposition = 0.0;
   double global_csda_energy_deposition = 0.0;
+  double global_csda_energy_collision_loss = 0.0;
+  double global_csda_energy_continuous_loss = 0.0;
+  double global_csda_energy_production = 0.0;
+  double global_csda_energy_in_flow = 0.0;
+  double global_csda_energy_out_flow = 0.0;
   mpi_comm.all_reduce(
     &local_csda_charge_deposition, 1, &global_csda_charge_deposition, mpi::op::sum<double>());
   mpi_comm.all_reduce(
     &local_csda_energy_deposition, 1, &global_csda_energy_deposition, mpi::op::sum<double>());
+  std::vector<double> local_csda_energy_balance_table = {local_csda_energy_collision_loss,
+                                                         local_csda_energy_continuous_loss,
+                                                         local_csda_energy_production,
+                                                         local_csda_energy_in_flow,
+                                                         local_csda_energy_out_flow};
+  std::vector<double> global_csda_energy_balance_table(
+    local_csda_energy_balance_table.size(), 0.0);
+  mpi_comm.all_reduce(local_csda_energy_balance_table.data(),
+                      static_cast<int>(local_csda_energy_balance_table.size()),
+                      global_csda_energy_balance_table.data(),
+                      mpi::op::sum<double>());
+  global_csda_energy_collision_loss = global_csda_energy_balance_table.at(0);
+  global_csda_energy_continuous_loss = global_csda_energy_balance_table.at(1);
+  global_csda_energy_production = global_csda_energy_balance_table.at(2);
+  global_csda_energy_in_flow = global_csda_energy_balance_table.at(3);
+  global_csda_energy_out_flow = global_csda_energy_balance_table.at(4);
   double global_csda_particle_balance =
     global_production + global_in_flow -
     (global_absorption + global_out_flow + global_csda_charge_deposition);
+  double global_csda_energy_balance =
+    global_csda_energy_production + global_csda_energy_in_flow -
+    (global_csda_energy_out_flow + global_csda_energy_collision_loss +
+     global_csda_energy_continuous_loss);
   if (scaling_factor != 1.0)
   {
     global_production *= scaling_factor;
@@ -342,6 +445,10 @@ ComputeBalanceTable(DiscreteOrdinatesProblem& do_problem, double scaling_factor)
     global_csda_particle_balance =
       global_production + global_in_flow -
       (global_absorption + global_out_flow + global_csda_charge_deposition);
+    global_csda_energy_balance =
+      global_csda_energy_production + global_csda_energy_in_flow -
+      (global_csda_energy_out_flow + global_csda_energy_collision_loss +
+       global_csda_energy_continuous_loss);
   }
 
   if (time_dependent)
@@ -368,6 +475,12 @@ ComputeBalanceTable(DiscreteOrdinatesProblem& do_problem, double scaling_factor)
                              global_csda_charge_deposition,
                              global_csda_particle_balance,
                              global_csda_energy_deposition,
+                             global_csda_energy_collision_loss,
+                             global_csda_energy_continuous_loss,
+                             global_csda_energy_production,
+                             global_csda_energy_in_flow,
+                             global_csda_energy_out_flow,
+                             global_csda_energy_balance,
                              global_initial,
                              global_final,
                              predicted_inventory_change,
@@ -386,6 +499,18 @@ ComputeBalanceTable(DiscreteOrdinatesProblem& do_problem, double scaling_factor)
               << table.csda_particle_balance.value_or(0.0) << "\n"
               << " CSDA energy deposition      = "
               << table.csda_energy_deposition_rate.value_or(0.0) << "\n"
+              << " CSDA energy collision loss  = "
+              << table.csda_energy_collision_loss_rate.value_or(0.0) << "\n"
+              << " CSDA energy continuous loss = "
+              << table.csda_energy_continuous_loss_rate.value_or(0.0) << "\n"
+              << " CSDA energy production      = "
+              << table.csda_energy_production_rate.value_or(0.0) << "\n"
+              << " CSDA energy in-flow         = "
+              << table.csda_energy_inflow_rate.value_or(0.0) << "\n"
+              << " CSDA energy out-flow        = "
+              << table.csda_energy_outflow_rate.value_or(0.0) << "\n"
+              << " CSDA energy balance         = "
+              << table.csda_energy_balance.value_or(0.0) << "\n"
               << " Initial inventory           = " << table.initial_inventory.value() << "\n"
               << " Final inventory             = " << table.final_inventory.value() << "\n"
               << " Predicted inventory change  = " << table.predicted_inventory_change.value()
@@ -406,6 +531,12 @@ ComputeBalanceTable(DiscreteOrdinatesProblem& do_problem, double scaling_factor)
           global_csda_charge_deposition,
           global_csda_particle_balance,
           global_csda_energy_deposition,
+          global_csda_energy_collision_loss,
+          global_csda_energy_continuous_loss,
+          global_csda_energy_production,
+          global_csda_energy_in_flow,
+          global_csda_energy_out_flow,
+          global_csda_energy_balance,
           std::nullopt,
           std::nullopt,
           std::nullopt,
@@ -437,6 +568,18 @@ ComputeBalance(DiscreteOrdinatesProblem& do_problem, double scaling_factor)
               << table.csda_particle_balance.value_or(0.0) << "\n"
               << " CSDA energy deposition      = "
               << table.csda_energy_deposition_rate.value_or(0.0) << "\n"
+              << " CSDA energy collision loss  = "
+              << table.csda_energy_collision_loss_rate.value_or(0.0) << "\n"
+              << " CSDA energy continuous loss = "
+              << table.csda_energy_continuous_loss_rate.value_or(0.0) << "\n"
+              << " CSDA energy production      = "
+              << table.csda_energy_production_rate.value_or(0.0) << "\n"
+              << " CSDA energy in-flow         = "
+              << table.csda_energy_inflow_rate.value_or(0.0) << "\n"
+              << " CSDA energy out-flow        = "
+              << table.csda_energy_outflow_rate.value_or(0.0) << "\n"
+              << " CSDA energy balance         = "
+              << table.csda_energy_balance.value_or(0.0) << "\n"
               << " Initial inventory           = " << table.initial_inventory.value_or(0.0) << "\n"
               << " Final inventory             = " << table.final_inventory.value_or(0.0) << "\n"
               << " Predicted inventory change  = " << table.predicted_inventory_change.value_or(0.0)
@@ -460,7 +603,19 @@ ComputeBalance(DiscreteOrdinatesProblem& do_problem, double scaling_factor)
               << " CSDA particle balance       = "
               << table.csda_particle_balance.value_or(0.0) << "\n"
               << " CSDA energy deposition      = "
-              << table.csda_energy_deposition_rate.value_or(0.0) << "\n\n";
+              << table.csda_energy_deposition_rate.value_or(0.0) << "\n"
+              << " CSDA energy collision loss  = "
+              << table.csda_energy_collision_loss_rate.value_or(0.0) << "\n"
+              << " CSDA energy continuous loss = "
+              << table.csda_energy_continuous_loss_rate.value_or(0.0) << "\n"
+              << " CSDA energy production      = "
+              << table.csda_energy_production_rate.value_or(0.0) << "\n"
+              << " CSDA energy in-flow         = "
+              << table.csda_energy_inflow_rate.value_or(0.0) << "\n"
+              << " CSDA energy out-flow        = "
+              << table.csda_energy_outflow_rate.value_or(0.0) << "\n"
+              << " CSDA energy balance         = "
+              << table.csda_energy_balance.value_or(0.0) << "\n\n";
   }
 }
 

@@ -1,0 +1,325 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{hyperref}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  urlcolor=blue,
+  citecolor=blue
+}
+
+\title{OpenMC Delayed-Neutron Import:\\
+Consistency Checks and User Reporting}
+\author{OpenSn Developer Note}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Purpose}
+
+This note defines the consistency checks that should be performed when importing
+delayed-neutron multigroup data from an OpenMC MGXS library into OpenSn, and it
+defines what information should be reported to the user.
+
+The goal is not to force noisy Monte Carlo data to satisfy deterministic
+identities exactly. The goal is to:
+\begin{enumerate}[label=\arabic*.]
+  \item detect important inconsistencies between steady-state and transient data,
+  \item quantify those inconsistencies,
+  \item make the approximations used by OpenSn explicit, and
+  \item warn the user when a null transient should not be expected.
+\end{enumerate}
+
+\section{Background}
+
+OpenSn steady-state transport currently assumes a rank-1 fission operator of the form
+\begin{equation}
+  F_{g \leftarrow g'}^{\mathrm{SS}} \approx \chi_g \, \nu \Sigma_{f,g'}^{\mathrm{tot}},
+\end{equation}
+while the transient treatment with delayed neutrons uses prompt production plus
+delayed precursor emission:
+\begin{align}
+  F_{g \leftarrow g'}^{\mathrm{prompt}} &\approx \chi^{p}_g \, \nu \Sigma_{f,g'}^{p}, \\
+  \text{delayed source} &\propto \sum_j \chi^{d,j}_g \, \lambda_j C_j.
+\end{align}
+
+When OpenMC data are imported, the following issues may prevent a clean null transient:
+\begin{enumerate}[label=\arabic*.]
+  \item \textbf{Closure may fail due to noise:}
+  \begin{equation}
+    \nu \Sigma_f^{\mathrm{tot}} \neq \nu \Sigma_f^p + \nu \Sigma_f^d.
+  \end{equation}
+
+  \item \textbf{Steady-state chi may not be recoverable exactly} from prompt and delayed
+  spectra unless delayed fractions factor cleanly from energy.
+
+  \item \textbf{The true fission operator may not be rank-1.}
+  OpenMC may provide a full fission matrix and a rank-1 approximation; OpenSn uses the
+  latter representation.
+\end{enumerate}
+
+\section{Notation}
+
+For energy group \(g\) and precursor family \(j\), define:
+\begin{align}
+  \nu \Sigma_{f,g}^{\mathrm{tot}} &: \text{ total neutron production cross section}, \\
+  \nu \Sigma_{f,g}^{p} &: \text{ prompt neutron production cross section}, \\
+  \nu \Sigma_{f,g}^{d,j} &: \text{ delayed production cross section for family } j, \\
+  \nu \Sigma_{f,g}^{d} &= \sum_j \nu \Sigma_{f,g}^{d,j}, \\
+  \chi_g &: \text{ imported steady-state fission spectrum}, \\
+  \chi^p_g &: \text{ imported prompt fission spectrum}, \\
+  \chi^{d,j}_g &: \text{ delayed emission spectrum for family } j, \\
+  \beta_g &= \frac{\nu \Sigma_{f,g}^{d}}{\nu \Sigma_{f,g}^{\mathrm{tot}}}, \\
+  \beta_{j,g} &= \frac{\nu \Sigma_{f,g}^{d,j}}{\nu \Sigma_{f,g}^{\mathrm{tot}}}, \\
+  y_{j,g} &= \frac{\nu \Sigma_{f,g}^{d,j}}{\nu \Sigma_{f,g}^{d}}.
+\end{align}
+
+\section{Checks To Perform}
+
+\subsection{Basic validity checks}
+
+These are hard checks. Failure should abort import.
+\begin{enumerate}[label=\arabic*.]
+  \item All required delayed-neutron datasets are present when delayed groups are declared.
+  \item All \(\nu \Sigma_f\), spectra, and decay constants are non-negative.
+  \item Each spectrum is either zero everywhere or has positive sum.
+  \item Dimensions match the declared number of groups and precursor families.
+\end{enumerate}
+
+\subsection{Nu-fission closure checks}
+
+For each group \(g\), compute the residual
+\begin{equation}
+  r^{\nu}_g = \nu \Sigma_{f,g}^{\mathrm{tot}} -
+  \nu \Sigma_{f,g}^{p} -
+  \sum_j \nu \Sigma_{f,g}^{d,j}.
+\end{equation}
+
+Also compute a relative residual
+\begin{equation}
+  \epsilon^{\nu}_g =
+  \frac{\left|r^{\nu}_g\right|}
+       {\max\!\left(\left|\nu \Sigma_{f,g}^{\mathrm{tot}}\right|, \epsilon_{\mathrm{floor}}\right)}.
+\end{equation}
+
+In addition, compute global closure:
+\begin{equation}
+  R^{\nu} =
+  \sum_g \nu \Sigma_{f,g}^{\mathrm{tot}} -
+  \sum_g \nu \Sigma_{f,g}^{p} -
+  \sum_{g,j} \nu \Sigma_{f,g}^{d,j}.
+\end{equation}
+
+This is the most important consistency check for transient behavior.
+
+\subsection{Spectrum normalization checks}
+
+For each available spectrum, report its normalization residual:
+\begin{align}
+  r^{\chi} &= \left|\sum_g \chi_g - 1\right|, \\
+  r^{\chi^p} &= \left|\sum_g \chi^p_g - 1\right|, \\
+  r^{\chi^{d,j}} &= \left|\sum_g \chi^{d,j}_g - 1\right|.
+\end{align}
+
+If a spectrum is not normalized but has positive sum, OpenSn may renormalize it on import,
+but the renormalization should be reported explicitly.
+
+\subsection{Energy dependence of delayed fraction}
+
+To determine whether the steady-state spectrum can be approximated from prompt and delayed
+data in a simple way, measure the variation of
+\begin{equation}
+  \beta_g = \frac{\nu \Sigma_{f,g}^{d}}{\nu \Sigma_{f,g}^{\mathrm{tot}}}.
+\end{equation}
+
+Recommended reported metrics:
+\begin{align}
+  \beta_{\min} &= \min_g \beta_g, \\
+  \beta_{\max} &= \max_g \beta_g, \\
+  \overline{\beta} &= \frac{\sum_g \nu \Sigma_{f,g}^{\mathrm{tot}} \beta_g}
+                           {\sum_g \nu \Sigma_{f,g}^{\mathrm{tot}}}, \\
+  \Delta \beta &= \beta_{\max} - \beta_{\min}.
+\end{align}
+
+If \(\Delta \beta\) is small, then the delayed fraction is nearly energy independent.
+If it is not small, then the usual factorized interpretation of \(\chi\) becomes weak.
+
+\subsection{Energy dependence of precursor-family yields}
+
+Measure whether family fractions are approximately independent of incident energy:
+\begin{equation}
+  y_{j,g} = \frac{\nu \Sigma_{f,g}^{d,j}}{\nu \Sigma_{f,g}^{d}}.
+\end{equation}
+
+For each family \(j\), report
+\begin{align}
+  y_{j,\min} &= \min_g y_{j,g}, \\
+  y_{j,\max} &= \max_g y_{j,g}, \\
+  \Delta y_j &= y_{j,\max} - y_{j,\min}.
+\end{align}
+
+Large variation in \(y_{j,g}\) indicates that even the delayed-family decomposition does
+not factor simply with energy.
+
+\subsection{Approximate steady-state spectrum reconstruction}
+
+If \(\beta_g\) and \(y_{j,g}\) are approximately energy independent, define the weighted
+average family fractions
+\begin{equation}
+  \overline{y}_j =
+  \frac{\sum_g \nu \Sigma_{f,g}^{d,j}}
+       {\sum_g \nu \Sigma_{f,g}^{d}},
+\end{equation}
+and an effective delayed spectrum
+\begin{equation}
+  \chi_g^{d,\mathrm{eff}} = \sum_j \overline{y}_j \chi_g^{d,j}.
+\end{equation}
+
+Then reconstruct an approximate steady-state spectrum:
+\begin{equation}
+  \chi_g^{\mathrm{recon}} =
+  (1-\overline{\beta}) \chi_g^p + \overline{\beta}\chi_g^{d,\mathrm{eff}}.
+\end{equation}
+
+Compare this against the imported steady-state \(\chi_g\) using
+\begin{align}
+  \delta^{\chi}_{\infty} &= \max_g \left|\chi_g - \chi_g^{\mathrm{recon}}\right|, \\
+  \delta^{\chi}_{1} &= \sum_g \left|\chi_g - \chi_g^{\mathrm{recon}}\right|.
+\end{align}
+
+This is not an exact identity in the general case. It is a diagnostic showing whether the
+steady-state spectrum is compatible with the prompt/delayed decomposition under the
+factorization assumptions used by OpenSn.
+
+\subsection{Prompt-spectrum fallback check}
+
+If OpenMC delayed data are present but \(\chi^p\) is absent and OpenSn falls back to
+\(\chi^p \leftarrow \chi\), then this should always generate a warning:
+
+\begin{quote}
+  Prompt fission spectrum was not provided by the OpenMC library. OpenSn is using the
+  steady-state spectrum as a prompt-spectrum surrogate. This is an approximation and may
+  prevent a null transient.
+\end{quote}
+
+\subsection{Rank-1 fission-operator check}
+
+If the OpenMC library contains a full fission matrix \(F^{\mathrm{full}}\) in addition to the
+rank-1 approximation \(F^{\mathrm{rank1}}\), compare them.
+
+Recommended metrics:
+\begin{align}
+  \delta^F_{\infty} &= \max_{g,g'} \left|F^{\mathrm{full}}_{g \leftarrow g'} -
+                                      F^{\mathrm{rank1}}_{g \leftarrow g'}\right|, \\
+  \delta^F_{1,\mathrm{rel}} &=
+  \frac{\sum_{g,g'} \left|F^{\mathrm{full}}_{g \leftarrow g'} -
+                        F^{\mathrm{rank1}}_{g \leftarrow g'}\right|}
+       {\max\!\left(\sum_{g,g'} \left|F^{\mathrm{full}}_{g \leftarrow g'}\right|,
+                    \epsilon_{\mathrm{floor}}\right)}.
+\end{align}
+
+If only rank-1 data are available, report that fact. If full-matrix data are available and
+the mismatch is large, warn that steady-state behavior is already using an approximation
+before transient delayed-neutron effects are considered.
+
+\section{What To Report To The User}
+
+For each imported material with delayed-neutron data, print a compact summary such as:
+
+\begin{verbatim}
+OpenMC delayed-neutron consistency summary for material "fuel":
+  groups = 6, precursor families = 8
+  nu-sigma-f closure:
+    max abs residual       = 2.1e-5
+    max rel residual       = 4.6e-4
+    global abs residual    = 7.8e-6
+  spectrum normalization:
+    chi sum                = 1.000000
+    chi_prompt sum         = 0.999991
+    max chi_delayed sum err= 3.2e-5
+  delayed fraction:
+    beta_min, beta_max     = 6.12e-3, 6.58e-3
+    beta range             = 4.6e-4
+  delayed family variation:
+    max family fraction range = 1.1e-3
+  chi consistency:
+    ||chi - chi_recon||_inf = 8.3e-4
+    ||chi - chi_recon||_1   = 2.5e-3
+  fission operator:
+    using rank-1 approximation from OpenMC
+    relative full-vs-rank1 mismatch = 1.7e-2
+\end{verbatim}
+
+\subsection{Required warning messages}
+
+Warnings should be issued when any of the following occur:
+\begin{enumerate}[label=\arabic*.]
+  \item \(\nu \Sigma_f^{\mathrm{tot}}\) does not close well against prompt plus delayed parts.
+  \item \(\chi^p\) is missing and \(\chi\) is used as a surrogate.
+  \item \(\beta_g\) varies appreciably with energy.
+  \item precursor-family fractions vary appreciably with energy.
+  \item reconstructed \(\chi^{\mathrm{recon}}\) differs appreciably from imported \(\chi\).
+  \item the full fission matrix differs appreciably from the rank-1 approximation.
+\end{enumerate}
+
+A top-level warning should state:
+
+\begin{quote}
+  Imported OpenMC delayed-neutron data are not fully consistent with the steady-state
+  fission data used by OpenSn. A null transient should not be expected.
+\end{quote}
+
+\section{Suggested Severity Levels}
+
+The exact thresholds should remain configurable, but the reporting logic should follow:
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Condition & Severity & Action \\
+\midrule
+Missing required delayed dataset & Error & Abort import \\
+Negative XS, decay constant, or spectrum entry & Error & Abort import \\
+Bad dimensions & Error & Abort import \\
+Small closure / normalization mismatch & Info & Report only \\
+Moderate closure or chi mismatch & Warning & Report prominently \\
+Large closure or rank-1 mismatch & Warning & State null transient not expected \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Implementation Guidance}
+
+The import routine should keep three categories distinct:
+\begin{enumerate}[label=\arabic*.]
+  \item \textbf{Hard validity checks:} data are unusable; fail immediately.
+  \item \textbf{Soft consistency checks:} data are usable but internally inconsistent; warn.
+  \item \textbf{Approximation disclosures:} data are valid, but OpenSn is using a reduced model;
+  disclose the approximation even if numerical mismatch is small.
+\end{enumerate}
+
+The implementation should not silently ``fix'' Monte Carlo noise by enforcing exact closure,
+because doing so hides the actual data quality from the user. If renormalization is applied to
+spectra, it should be reported.
+
+\section{Bottom Line}
+
+The delayed-neutron import should be accepted only after it does all of the following:
+\begin{enumerate}[label=\arabic*.]
+  \item checks prompt-plus-delayed closure against steady-state \(\nu \Sigma_f\),
+  \item checks whether the prompt/delayed decomposition is compatible with the imported
+  steady-state \(\chi\),
+  \item warns when \(\beta\) or delayed-family fractions are energy dependent,
+  \item warns when prompt-spectrum fallback is used,
+  \item warns when the OpenMC full fission operator is not well represented by the rank-1
+  form consumed by OpenSn, and
+  \item reports all of the above clearly to the user at import time.
+\end{enumerate}
+
+\end{document}

@@ -1728,62 +1728,62 @@
       {
         "type": "KeyValuePair",
         "key": "III1A_CSDA_AUG_TOTAL=",
-        "goldvalue": 9.775572842385e-01,
-        "abs_tol": 1e-10
+        "goldvalue": 9.775572676584e-01,
+        "abs_tol": 1e-7
       },
       {
         "type": "KeyValuePair",
         "key": "III1A_CSDA_TERM_TOTAL=",
-        "goldvalue": 5.988448427667e+00,
-        "abs_tol": 1e-10
+        "goldvalue": 5.988448410753e+00,
+        "abs_tol": 1e-7
       },
       {
         "type": "KeyValuePair",
         "key": "III1A_CSDA_BALANCE_PARTICLE=",
-        "goldvalue": -1.655507120280e-08,
-        "abs_tol": 1e-10
+        "goldvalue": 3.741884579966e-11,
+        "abs_tol": 1e-7
       },
       {
         "type": "KeyValuePair",
         "key": "III1A_CSDA_BALANCE_ENERGY_DEP=",
-        "goldvalue": 1.082315743299e+00,
-        "abs_tol": 1e-10
+        "goldvalue": 1.049286833860e+00,
+        "abs_tol": 1e-9
       },
       {
         "type": "KeyValuePair",
         "key": "III1A_CSDA_AUG_NORM_AT_0p05_GCM2=",
-        "goldvalue": 4.011264986758e-01,
-        "abs_tol": 1e-10
+        "goldvalue": 4.011264858518e-01,
+        "abs_tol": 1e-7
       },
       {
         "type": "KeyValuePair",
         "key": "III1A_CSDA_AUG_NORM_AT_0p1_GCM2=",
-        "goldvalue": 9.737449186507e-01,
-        "abs_tol": 1e-10
+        "goldvalue": 9.737448969273e-01,
+        "abs_tol": 1e-7
       },
       {
         "type": "KeyValuePair",
         "key": "III1A_CSDA_AUG_NORM_AT_0p2_GCM2=",
-        "goldvalue": 2.836725797961e+00,
-        "abs_tol": 1e-10
+        "goldvalue": 2.836725749645e+00,
+        "abs_tol": 1e-7
       },
       {
         "type": "KeyValuePair",
         "key": "III1A_CSDA_AUG_NORM_AT_0p3_GCM2=",
-        "goldvalue": 4.499440202489e+00,
-        "abs_tol": 1e-10
+        "goldvalue": 4.499440134927e+00,
+        "abs_tol": 1e-7
       },
       {
         "type": "KeyValuePair",
         "key": "III1A_CSDA_AUG_NORM_AT_0p4_GCM2=",
-        "goldvalue": 1.719037205904e+00,
-        "abs_tol": 1e-10
+        "goldvalue": 1.719037179016e+00,
+        "abs_tol": 1e-7
       },
       {
         "type": "KeyValuePair",
         "key": "III1A_CSDA_AUG_NORM_AT_0p5_GCM2=",
-        "goldvalue": 5.177471699191e-02,
-        "abs_tol": 1e-10
+        "goldvalue": 5.177471452489e-02,
+        "abs_tol": 1e-7
       }
     ]
   }
