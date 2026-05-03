@@ -132,6 +132,31 @@ DiffusionSolver::AddToRHS(const std::vector<double>& values)
 }
 
 void
+DiffusionSolver::ApplyOperator(const std::vector<double>& input, std::vector<double>& output) const
+{
+  const auto num_local_dofs = sdm_.GetNumLocalDOFs(uk_man_);
+  if (num_local_dofs != input.size())
+    throw std::invalid_argument("Vector size mismatch.");
+
+  Vec x = nullptr;
+  Vec y = nullptr;
+  OpenSnPETScCall(VecDuplicate(rhs_, &x));
+  OpenSnPETScCall(VecDuplicate(rhs_, &y));
+
+  PetscScalar* x_ptr = nullptr;
+  OpenSnPETScCall(VecGetArray(x, &x_ptr));
+  for (size_t i = 0; i < num_local_dofs; ++i)
+    x_ptr[i] = input[i];
+  OpenSnPETScCall(VecRestoreArray(x, &x_ptr));
+
+  OpenSnPETScCall(MatMult(A_, x, y));
+  sdm_.LocalizePETScVector(y, output, uk_man_);
+
+  OpenSnPETScCall(VecDestroy(&x));
+  OpenSnPETScCall(VecDestroy(&y));
+}
+
+void
 DiffusionSolver::AddToMatrix(const std::vector<PetscInt>& rows,
                              const std::vector<PetscInt>& cols,
                              const std::vector<double>& vals)

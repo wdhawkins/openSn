@@ -30,6 +30,7 @@
 #include "modules/linear_boltzmann_solvers/lbs_problem/groupset/lbs_groupset.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/acceleration/wgdsa.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/acceleration/tgdsa.h"
+#include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/acceleration/udsa.h"
 #include "framework/mesh/mesh_continuum/mesh_continuum.h"
 #include "framework/field_functions/field_function.h"
 #include "framework/field_functions/field_function_grid_based.h"
@@ -146,6 +147,9 @@ DiscreteOrdinatesProblem::DiscreteOrdinatesProblem(const InputParameters& params
   }
   else
     SetSweepChunkMode(SweepChunkMode::STEADY_STATE);
+
+  if (options_.apply_udsa)
+    options_.save_angular_flux = true;
 
   if (params.Has("boundary_conditions"))
   {
@@ -285,6 +289,13 @@ DiscreteOrdinatesProblem::GetWGSContext(int groupset_id)
   auto& wgs_context_ptr = wgs_contexts_.at(groupset_id);
   assert(wgs_context_ptr and "Null WGS context.");
   return *wgs_context_ptr;
+}
+
+void
+DiscreteOrdinatesProblem::ApplyUDSAAcceleration()
+{
+  if (udsa_acceleration_)
+    udsa_acceleration_->Apply();
 }
 
 const std::map<uint64_t, std::shared_ptr<SweepBoundary>>&
@@ -601,6 +612,12 @@ DiscreteOrdinatesProblem::BuildRuntime()
     WGDSA::Init(*this, groupset);
     TGDSA::Init(*this, groupset);
   }
+  udsa_acceleration_.reset();
+  if (options_.apply_udsa)
+  {
+    udsa_acceleration_ = std::make_shared<UDSAAcceleration>(*this);
+    udsa_acceleration_->Initialize();
+  }
   log.Log() << program_timer.GetTimeString() << " Initialized angle aggregation.";
   InitializeSolverSchemes();
 }
@@ -628,7 +645,7 @@ DiscreteOrdinatesProblem::InitializeSolverSchemes()
   InitializeWGSSolvers();
 
   ags_solver_ = std::make_shared<AGSLinearSolver>(*this, wgs_solvers_);
-  if (groupsets_.size() == 1)
+  if (groupsets_.size() == 1 and not options_.apply_udsa)
   {
     ags_solver_->SetMaxIterations(1);
     ags_solver_->SetVerbosity(false);
@@ -887,6 +904,12 @@ DiscreteOrdinatesProblem::SetBlockID2XSMap(const BlockID2XSMap& xs_map)
     TGDSA::CleanUp(groupset);
     WGDSA::Init(*this, groupset);
     TGDSA::Init(*this, groupset);
+  }
+  udsa_acceleration_.reset();
+  if (options_.apply_udsa)
+  {
+    udsa_acceleration_ = std::make_shared<UDSAAcceleration>(*this);
+    udsa_acceleration_->Initialize();
   }
 
   ReinitializeSolverSchemes();

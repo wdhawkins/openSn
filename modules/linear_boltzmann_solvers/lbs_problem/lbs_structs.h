@@ -53,6 +53,12 @@ struct LBSOptions
   unsigned int max_ags_iterations = 100;
   double ags_tolerance = 1.0e-6;
 
+  bool apply_udsa = false;
+  unsigned int udsa_max_iters = 30;
+  double udsa_tol = 1.0e-4;
+  bool udsa_verbose = false;
+  std::string udsa_string;
+
   double power_default_kappa = 3.20435e-11; // 200MeV to Joule
 
   std::string field_function_prefix_option = "prefix";

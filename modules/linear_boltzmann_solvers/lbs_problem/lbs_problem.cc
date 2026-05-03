@@ -536,6 +536,16 @@ LBSProblem::GetOptionsBlock()
                               "l2",
                               "Type of convergence check for AGS iterations. Valid values are "
                               "`\"l2\"` and '\"pointwise\"'");
+  params.AddOptionalParameter("apply_udsa",
+                              false,
+                              "Flag to turn on problem-level universal Diffusion Synthetic "
+                              "Acceleration after each across-groupset iteration.");
+  params.AddOptionalParameter("udsa_l_abs_tol", 1.0e-4, "UDSA linear absolute tolerance.");
+  params.AddOptionalParameter("udsa_l_max_its", 30, "UDSA linear maximum iterations.");
+  params.AddOptionalParameter(
+    "udsa_verbose", false, "If true, UDSA routines will print verbosely.");
+  params.AddOptionalParameter(
+    "udsa_petsc_options", "", "PETSc options to pass to the UDSA solver.");
   params.AddOptionalParameter("power_default_kappa",
                               3.20435e-11,
                               "Default `kappa` value (Energy released per fission) to use for "
@@ -564,6 +574,8 @@ LBSProblem::GetOptionsBlock()
   params.ConstrainParameterRange("write_restart_time_interval", AllowableRangeLowLimit::New(0));
   params.ConstrainParameterRange("max_ags_iterations", AllowableRangeLowLimit::New(0));
   params.ConstrainParameterRange("ags_tolerance", AllowableRangeLowLimit::New(1.0e-18));
+  params.ConstrainParameterRange("udsa_l_abs_tol", AllowableRangeLowLimit::New(1.0e-18));
+  params.ConstrainParameterRange("udsa_l_max_its", AllowableRangeLowLimit::New(0));
   params.ConstrainParameterRange("power_default_kappa", AllowableRangeLowLimit::New(0.0, false));
 
   return params;
@@ -624,6 +636,16 @@ LBSProblem::ParseOptions(const InputParameters& input)
     {"ags_convergence_check",
      [this](const ParameterBlock& spec)
      { options_.ags_pointwise_convergence = (spec.GetValue<std::string>() == "pointwise"); }},
+    {"apply_udsa",
+     [this](const ParameterBlock& spec) { options_.apply_udsa = spec.GetValue<bool>(); }},
+    {"udsa_l_abs_tol",
+     [this](const ParameterBlock& spec) { options_.udsa_tol = spec.GetValue<double>(); }},
+    {"udsa_l_max_its",
+     [this](const ParameterBlock& spec) { options_.udsa_max_iters = spec.GetValue<int>(); }},
+    {"udsa_verbose",
+     [this](const ParameterBlock& spec) { options_.udsa_verbose = spec.GetValue<bool>(); }},
+    {"udsa_petsc_options",
+     [this](const ParameterBlock& spec) { options_.udsa_string = spec.GetValue<std::string>(); }},
     {"verbose_outer_iterations",
      [this](const ParameterBlock& spec)
      { options_.verbose_outer_iterations = spec.GetValue<bool>(); }},

@@ -10,14 +10,17 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/acceleration/smm_acceleration.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_curvilinear_problem/discrete_ordinates_curvilinear_problem.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/discrete_ordinates_problem.h"
+#include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/iterative_methods/ags_linear_solver.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/io/discrete_ordinates_problem_io.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/solvers/transient_solver.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/solvers/steady_state_solver.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/solvers/nl_keigen_solver.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/solvers/pi_keigen_solver.h"
+#include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/iterative_methods/wgs_context.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/io/lbs_problem_io.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_problem.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/compute/lbs_compute.h"
+#include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/iteration_logging.h"
 #include "modules/solver.h"
 #include <pybind11/numpy.h>
 #include <algorithm>
@@ -30,6 +33,23 @@
 
 namespace opensn
 {
+
+namespace
+{
+
+py::dict
+IterationSummaryToDict(const IterationSummary& summary)
+{
+  py::dict values;
+  values["num_iterations"] = summary.num_iterations;
+  values["status"] = IterationStatusName(summary.status);
+  values["detail"] = summary.detail;
+  values["metric_name"] = summary.metric_name;
+  values["metric_value"] = summary.metric_value;
+  return values;
+}
+
+} // namespace
 
 // Wrap problem
 void
@@ -832,6 +852,44 @@ WrapLBS(py::module& slv)
     R"(
     Return ``True`` if the problem is currently in time-dependent mode.
     )"
+  );
+  do_problem.def(
+    "GetAGSSolveSummary",
+    [](DiscreteOrdinatesProblem& self)
+    {
+      return IterationSummaryToDict(self.GetAGSSolver()->GetLastSolveSummary());
+    },
+    R"(
+    Return the most recent across-groupset solve summary.
+
+    Returns
+    -------
+    dict
+        Contains ``num_iterations``, ``status``, ``detail``, ``metric_name``, and
+        ``metric_value`` for the last AGS solve.
+    )"
+  );
+  do_problem.def(
+    "GetWGSSolveSummary",
+    [](DiscreteOrdinatesProblem& self, const int groupset_id)
+    {
+      return IterationSummaryToDict(self.GetWGSContext(groupset_id).last_solve);
+    },
+    R"(
+    Return the most recent within-groupset solve summary.
+
+    Parameters
+    ----------
+    groupset_id : int
+        Groupset identifier.
+
+    Returns
+    -------
+    dict
+        Contains ``num_iterations``, ``status``, ``detail``, ``metric_name``, and
+        ``metric_value`` for the last WGS solve.
+    )",
+    py::arg("groupset_id")
   );
   do_problem.def(
     "SetBoundaryOptions",

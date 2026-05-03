@@ -82,6 +82,9 @@ public:
   /// Adds to the right-hand side without applying spatial discretization.
   void AddToRHS(const std::vector<double>& values);
 
+  /// Applies the assembled diffusion operator to a local vector.
+  void ApplyOperator(const std::vector<double>& input, std::vector<double>& output) const;
+
   /// Adds to the entries into the matrix without applying spatial discretization.
   void AddToMatrix(const std::vector<PetscInt>& rows,
                    const std::vector<PetscInt>& cols,

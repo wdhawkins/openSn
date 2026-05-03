@@ -1,0 +1,124 @@
+[
+  {
+    "file": "transport_3d_ags_upscatter_udsa.py",
+    "comment": "3D, multiple groupsets, groupset-to-groupset upscattering, UDSA",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "IntCompareCheck",
+        "key": "Unaccelerated-iterations",
+        "wordnum": 1,
+        "gold": 16
+      },
+      {
+        "type": "IntCompareCheck",
+        "key": "UDSA-iterations",
+        "wordnum": 1,
+        "gold": 10
+      },
+      {
+        "type": "IntCompareCheck",
+        "key": "UDSA-iteration-reduction",
+        "wordnum": 1,
+        "gold": 6
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Unaccelerated-Max-value1=",
+        "goldvalue": 1.4745,
+        "abs_tol": 1e-05
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Unaccelerated-Max-value2=",
+        "goldvalue": 1.4745,
+        "abs_tol": 1e-05
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Unaccelerated-Max-value3=",
+        "goldvalue": 1.4745,
+        "abs_tol": 1e-05
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "UDSA-Max-value1=",
+        "goldvalue": 1.4745,
+        "abs_tol": 1e-05
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "UDSA-Max-value2=",
+        "goldvalue": 1.4745,
+        "abs_tol": 1e-05
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "UDSA-Max-value3=",
+        "goldvalue": 1.4745,
+        "abs_tol": 1e-05
+      }
+    ]
+  },
+  {
+    "file": "transport_3d_ags_upscatter_udsa_single_gs.py",
+    "comment": "3D, single groupset, upscattering, UDSA",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "IntCompareCheck",
+        "key": "Unaccelerated-iterations",
+        "wordnum": 1,
+        "gold": 6
+      },
+      {
+        "type": "IntCompareCheck",
+        "key": "UDSA-iterations",
+        "wordnum": 1,
+        "gold": 3
+      },
+      {
+        "type": "IntCompareCheck",
+        "key": "UDSA-iteration-reduction",
+        "wordnum": 1,
+        "gold": 3
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Unaccelerated-Max-value1=",
+        "goldvalue": 1.4745,
+        "abs_tol": 1e-05
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Unaccelerated-Max-value2=",
+        "goldvalue": 1.4745,
+        "abs_tol": 1e-05
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Unaccelerated-Max-value3=",
+        "goldvalue": 1.4745,
+        "abs_tol": 1e-05
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "UDSA-Max-value1=",
+        "goldvalue": 1.4745,
+        "abs_tol": 1e-05
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "UDSA-Max-value2=",
+        "goldvalue": 1.4745,
+        "abs_tol": 1e-05
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "UDSA-Max-value3=",
+        "goldvalue": 1.4745,
+        "abs_tol": 1e-05
+      }
+    ]
+  }
+]

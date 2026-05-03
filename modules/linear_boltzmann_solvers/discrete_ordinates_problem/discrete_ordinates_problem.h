@@ -17,6 +17,7 @@ class FieldFunctionGridBased;
 class DiscreteOrdinatesProblemIO;
 class AGSLinearSolver;
 class LinearSolver;
+class UDSAAcceleration;
 struct BalanceTable;
 struct WGSContext;
 
@@ -74,6 +75,8 @@ public:
   size_t GetNumWGSSolvers();
 
   WGSContext& GetWGSContext(int groupset_id);
+
+  void ApplyUDSAAcceleration();
 
   /// Read/write access to newest updated angular flux vector.
   std::vector<std::vector<double>>& GetPsiNewLocal();
@@ -208,6 +211,7 @@ protected:
   std::vector<std::vector<double>> psi_old_local_;
   std::optional<SweepChunkMode> sweep_chunk_mode_;
   std::shared_ptr<AGSLinearSolver> ags_solver_;
+  std::shared_ptr<UDSAAcceleration> udsa_acceleration_;
   std::vector<std::shared_ptr<WGSContext>> wgs_contexts_;
   std::vector<std::shared_ptr<LinearSolver>> wgs_solvers_;
 

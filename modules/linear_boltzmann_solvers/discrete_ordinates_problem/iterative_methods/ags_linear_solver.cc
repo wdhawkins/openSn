@@ -3,6 +3,7 @@
 
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/iterative_methods/ags_linear_solver.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/iterative_methods/convergence.h"
+#include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/discrete_ordinates_problem.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/iterative_methods/sweep_wgs_context.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/iteration_logging.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_problem.h"
@@ -18,8 +19,9 @@ void
 AGSLinearSolver::Solve()
 {
   CALI_CXX_MARK_SCOPE("AGSLinearSolver::Solve");
+  const bool apply_udsa = lbs_problem_.GetOptions().apply_udsa;
   const bool is_multi_groupset = wgs_solvers_.size() > 1;
-  const bool print_ags_stats = verbose_ and is_multi_groupset;
+  const bool print_ags_stats = verbose_ and (is_multi_groupset or apply_udsa);
   last_solve_ = {};
 
   phi_old_ = lbs_problem_.GetPhiOldLocal();
@@ -34,7 +36,7 @@ AGSLinearSolver::Solve()
   bool failed = false;
   bool child_limited = false;
   unsigned int num_iterations = 0;
-  const bool reports_as_iteration = is_multi_groupset;
+  const bool reports_as_iteration = is_multi_groupset or apply_udsa;
   for (unsigned int iter = 0; iter < max_iterations_; ++iter)
   {
     num_iterations = iter + 1;
@@ -54,12 +56,25 @@ AGSLinearSolver::Solve()
     }
     const auto wgs_status = MostSevereIterationStatus(wgs_summaries);
 
+    if (wgs_status == IterationStatus::FAILED)
+      failed = true;
+    else if (wgs_status == IterationStatus::LIMIT)
+      child_limited = true;
+
+    // Restore qmoms before applying problem-level acceleration so the next
+    // source update is formed from the corrected scalar flux iterate.
+    lbs_problem_.SetQMomentsFrom(saved_qmoms);
+
+    if (not failed and not child_limited and apply_udsa)
+      if (auto* do_problem = dynamic_cast<DiscreteOrdinatesProblem*>(&lbs_problem_))
+        do_problem->ApplyUDSAAcceleration();
+
     std::stringstream iter_stats;
     iter_stats << program_timer.GetTimeString() << " AGS iteration = " << iter;
 
     if (lbs_problem_.GetOptions().ags_pointwise_convergence)
     {
-      double pw_change = ComputePointwisePhiChange(lbs_problem_, phi_old_);
+      double pw_change = ComputePointwisePhiChange(lbs_problem_, std::ref(phi_old_));
       last_error = pw_change;
       double rho = (iter == 0) ? 0.0 : sqrt(pw_change / pw_change_prev);
       pw_change_prev = pw_change;
@@ -72,7 +87,7 @@ AGSLinearSolver::Solve()
     }
     else
     {
-      double norm = ComputeL2PhiChange(lbs_problem_, phi_old_);
+      double norm = ComputeL2PhiChange(lbs_problem_, std::ref(phi_old_));
       last_error = norm;
 
       AppendNumericField(iter_stats, "l2_change", norm, Scientific(6));
@@ -89,19 +104,10 @@ AGSLinearSolver::Solve()
     if (print_ags_stats)
       log.Log() << iter_stats.str();
 
-    // Restore qmoms
-    lbs_problem_.SetQMomentsFrom(saved_qmoms);
-
-    if (wgs_status == IterationStatus::FAILED)
-    {
-      failed = true;
+    if (failed)
       break;
-    }
-    else if (wgs_status == IterationStatus::LIMIT)
-    {
-      child_limited = true;
+    else if (child_limited)
       break;
-    }
     else if (converged)
       break;
     else
