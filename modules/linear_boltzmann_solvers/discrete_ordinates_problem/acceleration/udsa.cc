@@ -39,18 +39,17 @@ MakeUDSABoundaryConditions(
 
 } // namespace
 
-UDSAAcceleration::UDSAAcceleration(DiscreteOrdinatesProblem& do_problem) : do_problem_(do_problem)
+UDSADiffusionAcceleration::UDSADiffusionAcceleration(DiscreteOrdinatesProblem& do_problem)
+  : do_problem_(do_problem)
 {
 }
 
 void
-UDSAAcceleration::Initialize()
+UDSADiffusionAcceleration::Initialize()
 {
-  CALI_CXX_MARK_SCOPE("UDSAAcceleration::Initialize");
+  CALI_CXX_MARK_SCOPE("UDSADiffusionAcceleration::Initialize");
 
   const auto& options = do_problem_.GetOptions();
-  if (not options.apply_udsa)
-    return;
 
   UnknownManager uk_man;
   uk_man.AddUnknown(UnknownType::VECTOR_N, do_problem_.GetNumGroups());
@@ -80,65 +79,35 @@ UDSAAcceleration::Initialize()
 
   sweep_residual_evaluator_ = std::make_shared<SweepResidualEvaluator>(do_problem_);
 
-  q0_.assign(sdm.GetNumLocalDOFs(uk_man), 0.0);
-  diffusion_solver_->AssembleAand_b(q0_);
-  phi0_.assign(q0_.size(), 0.0);
-  phi0_old_.assign(q0_.size(), 0.0);
-  fixed_source_moments_.assign(do_problem_.GetPhiNewLocal().size(), 0.0);
-  boundary_source_.assign(q0_.size(), 0.0);
-  current_correction_.assign(q0_.size(), 0.0);
+  std::vector<double> dummy_rhs(sdm.GetNumLocalDOFs(uk_man), 0.0);
+  diffusion_solver_->AssembleAand_b(dummy_rhs);
 }
 
-void
-UDSAAcceleration::Apply()
+const UnknownManager&
+UDSADiffusionAcceleration::GetUnknownManager() const
 {
-  CALI_CXX_MARK_SCOPE("UDSAAcceleration::Apply");
-
-  if (not diffusion_solver_)
-    return;
-
-  const auto& options = do_problem_.GetOptions();
-  if (options.udsa_max_iters == 0)
-    return;
-
-  CopyScalarFlux(do_problem_.GetPhiNewLocal(), phi0_);
-  BuildFixedSourceMoments(fixed_source_moments_);
-  BuildBoundarySource(boundary_source_);
-  BuildCurrentCorrection(current_correction_);
-
-  double change = 0.0;
-  unsigned int iter = 0;
-  for (; iter < options.udsa_max_iters; ++iter)
-  {
-    phi0_old_ = phi0_;
-    BuildDiffusionSource(phi0_old_, q0_);
-    diffusion_solver_->Assemble_b(q0_);
-    diffusion_solver_->AddToRHS(boundary_source_);
-    diffusion_solver_->AddToRHS(current_correction_);
-    diffusion_solver_->Solve(phi0_, iter > 0);
-
-    change = ComputeL2Change(phi0_, phi0_old_);
-    if (change < options.udsa_tol)
-      break;
-  }
-
-  if (options.udsa_verbose)
-  {
-    std::stringstream out;
-    out << program_timer.GetTimeString() << " UDSA final";
-    out << ", iterations = " << (iter + 1);
-    out << ", l2_change = " << std::scientific << change;
-    log.Log() << out.str();
-  }
-
-  auto& phi_new = do_problem_.GetPhiNewLocal();
-  auto& phi_old = do_problem_.GetPhiOldLocal();
-  ProjectScalarFlux(phi0_, phi_new);
-  ProjectScalarFlux(phi0_, phi_old);
+  OpenSnLogicalErrorIf(not diffusion_solver_,
+                       "UDSADiffusionAcceleration: requested unknown manager before Initialize.");
+  return diffusion_solver_->GetUnknownStructure();
 }
 
 void
-UDSAAcceleration::CopyScalarFlux(const std::vector<double>& phi_in, std::vector<double>& phi0) const
+UDSADiffusionAcceleration::SetSolverOptions(const double residual_tolerance,
+                                            const unsigned int max_iters,
+                                            const bool verbose,
+                                            const std::string& petsc_options)
+{
+  OpenSnLogicalErrorIf(not diffusion_solver_,
+                       "UDSADiffusionAcceleration: requested solver options before Initialize.");
+  diffusion_solver_->options.residual_tolerance = residual_tolerance;
+  diffusion_solver_->options.max_iters = max_iters;
+  diffusion_solver_->options.verbose = verbose;
+  diffusion_solver_->options.additional_options_string = petsc_options;
+}
+
+void
+UDSADiffusionAcceleration::CopyScalarFlux(const std::vector<double>& phi_in,
+                                          std::vector<double>& phi0) const
 {
   const auto grid = do_problem_.GetGrid();
   const auto& sdm = do_problem_.GetSpatialDiscretization();
@@ -162,8 +131,8 @@ UDSAAcceleration::CopyScalarFlux(const std::vector<double>& phi_in, std::vector<
 }
 
 void
-UDSAAcceleration::ProjectScalarFlux(const std::vector<double>& phi0,
-                                    std::vector<double>& phi_out) const
+UDSADiffusionAcceleration::ProjectScalarFlux(const std::vector<double>& phi0,
+                                             std::vector<double>& phi_out) const
 {
   const auto grid = do_problem_.GetGrid();
   const auto& sdm = do_problem_.GetSpatialDiscretization();
@@ -186,7 +155,7 @@ UDSAAcceleration::ProjectScalarFlux(const std::vector<double>& phi0,
 }
 
 void
-UDSAAcceleration::BuildFixedSourceMoments(std::vector<double>& source_moments) const
+UDSADiffusionAcceleration::BuildFixedSourceMoments(std::vector<double>& source_moments) const
 {
   source_moments.assign(do_problem_.GetPhiNewLocal().size(), 0.0);
   const std::vector<double> zero_phi(do_problem_.GetPhiNewLocal().size(), 0.0);
@@ -196,8 +165,9 @@ UDSAAcceleration::BuildFixedSourceMoments(std::vector<double>& source_moments) c
 }
 
 void
-UDSAAcceleration::BuildDiffusionSource(const std::vector<double>& phi0,
-                                       std::vector<double>& q0) const
+UDSADiffusionAcceleration::BuildDiffusionSource(const std::vector<double>& phi0,
+                                                const std::vector<double>& fixed_source_moments,
+                                                std::vector<double>& q0) const
 {
   const auto grid = do_problem_.GetGrid();
   const auto& sdm = do_problem_.GetSpatialDiscretization();
@@ -220,7 +190,7 @@ UDSAAcceleration::BuildDiffusionSource(const std::vector<double>& phi0,
 
       for (unsigned int g = 0; g < num_groups; ++g)
       {
-        q0[udsa_map + g] = fixed_source_moments_[phi_map + g];
+        q0[udsa_map + g] = fixed_source_moments[phi_map + g];
         if (S0 == nullptr)
           continue;
 
@@ -236,7 +206,7 @@ UDSAAcceleration::BuildDiffusionSource(const std::vector<double>& phi0,
 }
 
 void
-UDSAAcceleration::BuildBoundarySource(std::vector<double>& boundary_source) const
+UDSADiffusionAcceleration::BuildBoundarySource(std::vector<double>& boundary_source) const
 {
   const auto grid = do_problem_.GetGrid();
   const auto& sdm = do_problem_.GetSpatialDiscretization();
@@ -299,23 +269,41 @@ UDSAAcceleration::BuildBoundarySource(std::vector<double>& boundary_source) cons
 }
 
 void
-UDSAAcceleration::BuildCurrentCorrection(std::vector<double>& correction)
+UDSADiffusionAcceleration::BuildCurrentCorrection(const std::vector<double>& phi0,
+                                                  const std::vector<double>& boundary_source,
+                                                  std::vector<double>& correction)
 {
   const auto& udsa_uk_man = diffusion_solver_->GetUnknownStructure();
 
   OpenSnLogicalErrorIf(not do_problem_.GetOptions().save_angular_flux,
                        do_problem_.GetName() + ": UDSA requires options.save_angular_flux=true.");
 
-  diffusion_solver_->ApplyOperator(phi0_, correction);
+  diffusion_solver_->ApplyOperator(phi0, correction);
   for (size_t i = 0; i < correction.size(); ++i)
-    correction[i] -= boundary_source_[i];
+    correction[i] -= boundary_source[i];
 
-  sweep_residual_evaluator_->AddStreamingResidual(udsa_uk_man, phi0_, correction);
+  sweep_residual_evaluator_->AddStreamingResidual(udsa_uk_man, phi0, correction);
+}
+
+void
+UDSADiffusionAcceleration::AssembleRHS(const std::vector<double>& q0,
+                                       const std::vector<double>& boundary_source,
+                                       const std::vector<double>& current_correction)
+{
+  diffusion_solver_->Assemble_b(q0);
+  diffusion_solver_->AddToRHS(boundary_source);
+  diffusion_solver_->AddToRHS(current_correction);
+}
+
+void
+UDSADiffusionAcceleration::Solve(std::vector<double>& phi0, const bool use_initial_guess)
+{
+  diffusion_solver_->Solve(phi0, use_initial_guess);
 }
 
 double
-UDSAAcceleration::ComputeL2Change(const std::vector<double>& current,
-                                  const std::vector<double>& previous) const
+UDSADiffusionAcceleration::ComputeL2Change(const std::vector<double>& current,
+                                           const std::vector<double>& previous) const
 {
   double local_delta = 0.0;
   double local_ref = 0.0;
@@ -332,6 +320,82 @@ UDSAAcceleration::ComputeL2Change(const std::vector<double>& current,
   opensn::mpi_comm.all_reduce(&local_ref, 1, &global_ref, mpi::op::sum<double>());
 
   return std::sqrt(global_delta) / std::max(std::sqrt(global_ref), 1.0e-16);
+}
+
+size_t
+UDSADiffusionAcceleration::GetNumLocalDOFs() const
+{
+  return do_problem_.GetSpatialDiscretization().GetNumLocalDOFs(GetUnknownManager());
+}
+
+UDSAAcceleration::UDSAAcceleration(DiscreteOrdinatesProblem& do_problem)
+  : do_problem_(do_problem), diffusion_acceleration_(do_problem)
+{
+}
+
+void
+UDSAAcceleration::Initialize()
+{
+  CALI_CXX_MARK_SCOPE("UDSAAcceleration::Initialize");
+
+  diffusion_acceleration_.Initialize();
+
+  if (not diffusion_acceleration_.IsInitialized())
+    return;
+
+  const auto num_local_dofs = diffusion_acceleration_.GetNumLocalDOFs();
+  q0_.assign(num_local_dofs, 0.0);
+  phi0_.assign(num_local_dofs, 0.0);
+  phi0_old_.assign(num_local_dofs, 0.0);
+  fixed_source_moments_.assign(do_problem_.GetPhiNewLocal().size(), 0.0);
+  boundary_source_.assign(num_local_dofs, 0.0);
+  current_correction_.assign(num_local_dofs, 0.0);
+}
+
+void
+UDSAAcceleration::Apply()
+{
+  CALI_CXX_MARK_SCOPE("UDSAAcceleration::Apply");
+
+  if (not diffusion_acceleration_.IsInitialized())
+    return;
+
+  const auto& options = do_problem_.GetOptions();
+  if (options.udsa_max_iters == 0)
+    return;
+
+  diffusion_acceleration_.CopyScalarFlux(do_problem_.GetPhiNewLocal(), phi0_);
+  diffusion_acceleration_.BuildFixedSourceMoments(fixed_source_moments_);
+  diffusion_acceleration_.BuildBoundarySource(boundary_source_);
+  diffusion_acceleration_.BuildCurrentCorrection(phi0_, boundary_source_, current_correction_);
+
+  double change = 0.0;
+  unsigned int iter = 0;
+  for (; iter < options.udsa_max_iters; ++iter)
+  {
+    phi0_old_ = phi0_;
+    diffusion_acceleration_.BuildDiffusionSource(phi0_old_, fixed_source_moments_, q0_);
+    diffusion_acceleration_.AssembleRHS(q0_, boundary_source_, current_correction_);
+    diffusion_acceleration_.Solve(phi0_, iter > 0);
+
+    change = diffusion_acceleration_.ComputeL2Change(phi0_, phi0_old_);
+    if (change < options.udsa_tol)
+      break;
+  }
+
+  if (options.udsa_verbose)
+  {
+    std::stringstream out;
+    out << program_timer.GetTimeString() << " UDSA final";
+    out << ", iterations = " << (iter + 1);
+    out << ", l2_change = " << std::scientific << change;
+    log.Log() << out.str();
+  }
+
+  auto& phi_new = do_problem_.GetPhiNewLocal();
+  auto& phi_old = do_problem_.GetPhiOldLocal();
+  diffusion_acceleration_.ProjectScalarFlux(phi0_, phi_new);
+  diffusion_acceleration_.ProjectScalarFlux(phi0_, phi_old);
 }
 
 } // namespace opensn
