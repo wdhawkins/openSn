@@ -63,6 +63,30 @@ UDSADiffusionAcceleration::Initialize()
 
   auto matid_2_mgxs_map =
     PackGroupsetXS(do_problem_.GetBlockID2XSMap(), 0, do_problem_.GetNumGroups() - 1);
+  if (scatter_coupling_mode_ == ScatterCouplingMode::Operator)
+  {
+    const auto num_groups = do_problem_.GetNumGroups();
+    for (const auto& [mat_id, xs] : do_problem_.GetBlockID2XSMap())
+    {
+      auto& xs_data = matid_2_mgxs_map.at(mat_id);
+      xs_data.sigS.assign(num_groups, std::vector<double>(num_groups, 0.0));
+      if (xs->GetTransferMatrices().empty())
+        continue;
+
+      const auto& S0 = xs->GetTransferMatrix(0);
+      for (unsigned int g = 0; g < num_groups; ++g)
+      {
+        for (const auto& entry : S0.Row(g))
+        {
+          const auto gp = static_cast<unsigned int>(entry.column_index);
+          if (gp == g)
+            continue;
+
+          xs_data.sigS[g][gp] = entry.value;
+        }
+      }
+    }
+  }
 
   const auto& sdm = do_problem_.GetSpatialDiscretization();
   diffusion_solver_ = std::make_shared<DiffusionMIPSolver>(do_problem_.GetName() + "_UDSA",
@@ -85,8 +109,6 @@ UDSADiffusionAcceleration::Initialize()
 
   std::vector<double> dummy_rhs(sdm.GetNumLocalDOFs(uk_man), 0.0);
   diffusion_solver_->AssembleAand_b(dummy_rhs);
-  if (scatter_coupling_mode_ == ScatterCouplingMode::Operator)
-    AddScatterCouplingToOperator();
 }
 
 const UnknownManager&
@@ -169,59 +191,6 @@ UDSADiffusionAcceleration::BuildFixedSourceMoments(std::vector<double>& source_m
   const auto set_source_function = do_problem_.GetActiveSetSourceFunction();
   for (const auto& groupset : do_problem_.GetGroupsets())
     set_source_function(groupset, source_moments, zero_phi, APPLY_FIXED_SOURCES);
-}
-
-void
-UDSADiffusionAcceleration::AddScatterCouplingToOperator()
-{
-  // The k-eigenvalue low-order equation uses (A - S_off) on the left-hand side.
-  // Fixed-source UDSA keeps this coupling on the RHS instead.
-  const auto grid = do_problem_.GetGrid();
-  const auto& sdm = do_problem_.GetSpatialDiscretization();
-  const auto& udsa_uk_man = diffusion_solver_->GetUnknownStructure();
-  const auto& block_id_to_xs = do_problem_.GetBlockID2XSMap();
-  const auto& unit_cell_matrices = do_problem_.GetUnitCellMatrices();
-  const auto num_groups = do_problem_.GetNumGroups();
-
-  std::vector<PetscInt> rows;
-  std::vector<PetscInt> cols;
-  std::vector<PetscScalar> vals;
-
-  for (const auto& cell : grid->local_cells)
-  {
-    const auto& cell_mapping = sdm.GetCellMapping(cell);
-    const auto num_nodes = cell_mapping.GetNumNodes();
-    const auto& xs = *block_id_to_xs.at(cell.block_id);
-    const auto* S0 = xs.GetTransferMatrices().empty() ? nullptr : &xs.GetTransferMatrix(0);
-    if (S0 == nullptr)
-      continue;
-
-    const auto& mass = unit_cell_matrices[cell.local_id].intV_shapeI_shapeJ;
-    for (size_t i = 0; i < num_nodes; ++i)
-    {
-      for (unsigned int g = 0; g < num_groups; ++g)
-      {
-        const auto row = sdm.MapDOF(cell, i, udsa_uk_man, 0, g);
-
-        for (const auto& entry : S0->Row(g))
-        {
-          const auto gp = static_cast<unsigned int>(entry.column_index);
-          if (gp == g)
-            continue;
-
-          for (size_t j = 0; j < num_nodes; ++j)
-          {
-            const auto col = sdm.MapDOF(cell, j, udsa_uk_man, 0, gp);
-            rows.push_back(static_cast<PetscInt>(row));
-            cols.push_back(static_cast<PetscInt>(col));
-            vals.push_back(static_cast<PetscScalar>(-entry.value * mass(i, j)));
-          }
-        }
-      }
-    }
-  }
-
-  diffusion_solver_->AddToMatrix(rows, cols, vals);
 }
 
 void

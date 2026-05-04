@@ -355,6 +355,29 @@ DiffusionMIPSolver::AssembleAand_b_wQpoints(const std::vector<double>& q_vector)
       auto nn = static_cast<PetscInt>(num_nodes);
       OpenSnPETScCall(
         MatSetValues(A_, nn, cell_idxs.data(), nn, cell_idxs.data(), cell_A.data(), ADD_VALUES));
+      if (not xs.sigS.empty())
+      {
+        DenseMatrix<double> scatter_A(num_nodes, num_nodes);
+        Vector<PetscInt> scatter_idxs(num_nodes);
+        for (unsigned int gp = 0; gp < num_groups; ++gp)
+        {
+          if (gp == g or xs.sigS[g][gp] == 0.0)
+            continue;
+
+          scatter_A.Set(0.0);
+          for (size_t i = 0; i < num_nodes; ++i)
+          {
+            scatter_idxs(i) = static_cast<PetscInt>(sdm_.MapDOF(cell, i, uk_man_, 0, gp));
+            for (size_t j = 0; j < num_nodes; ++j)
+              for (size_t qp : fe_vol_data.GetQuadraturePointIndices())
+                scatter_A(i, j) += -xs.sigS[g][gp] * fe_vol_data.ShapeValue(i, qp) *
+                                   fe_vol_data.ShapeValue(j, qp) * fe_vol_data.JxW(qp);
+          }
+
+          OpenSnPETScCall(MatSetValues(
+            A_, nn, cell_idxs.data(), nn, scatter_idxs.data(), scatter_A.data(), ADD_VALUES));
+        }
+      }
       OpenSnPETScCall(VecSetValues(rhs_, nn, cell_idxs.data(), cell_rhs.data(), ADD_VALUES));
     } // for g
   } // for cell
@@ -839,6 +862,27 @@ DiffusionMIPSolver::AssembleAand_b(const std::vector<double>& q_vector)
       auto nn = static_cast<PetscInt>(num_nodes);
       OpenSnPETScCall(
         MatSetValues(A_, nn, cell_idxs.data(), nn, cell_idxs.data(), cell_A.data(), ADD_VALUES));
+      if (not xs.sigS.empty())
+      {
+        DenseMatrix<double> scatter_A(num_nodes, num_nodes);
+        Vector<PetscInt> scatter_idxs(num_nodes);
+        for (unsigned int gp = 0; gp < num_groups; ++gp)
+        {
+          if (gp == g or xs.sigS[g][gp] == 0.0)
+            continue;
+
+          scatter_A.Set(0.0);
+          for (size_t i = 0; i < num_nodes; ++i)
+          {
+            scatter_idxs(i) = static_cast<PetscInt>(sdm_.MapDOF(cell, i, uk_man_, 0, gp));
+            for (size_t j = 0; j < num_nodes; ++j)
+              scatter_A(i, j) = -xs.sigS[g][gp] * intV_shapeI_shapeJ(i, j);
+          }
+
+          OpenSnPETScCall(MatSetValues(
+            A_, nn, cell_idxs.data(), nn, scatter_idxs.data(), scatter_A.data(), ADD_VALUES));
+        }
+      }
       OpenSnPETScCall(VecSetValues(rhs_, nn, cell_idxs.data(), cell_rhs.data(), ADD_VALUES));
     } // for g
   } // for cell

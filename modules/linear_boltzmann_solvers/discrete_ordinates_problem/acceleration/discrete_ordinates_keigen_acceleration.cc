@@ -24,7 +24,7 @@ DiscreteOrdinatesKEigenAcceleration::GetInputParameters()
   params.AddOptionalParameter("l_abs_tol", 1.0e-10, "Absolute residual tolerance");
   params.AddOptionalParameter("max_iters", 100, "Maximum allowable iterations");
   params.AddOptionalParameter("verbose", false, "If true, enables verbose output");
-  params.AddOptionalParameter("petsc_options", std::string("ssss"), "Additional PETSc options");
+  params.AddOptionalParameter("petsc_options", std::string(""), "Additional PETSc options");
   params.AddOptionalParameter(
     "pi_max_its", 50, "Maximum allowable iterations for inner power iterations");
   params.AddOptionalParameter(

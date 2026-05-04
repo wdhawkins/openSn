@@ -25,7 +25,7 @@ private:
                           double lambda,
                           std::vector<double>& q0) const;
 
-  double production_ell_ = 1.0;
+  double production_old_ = 1.0;
 
   UDSADiffusionAcceleration diffusion_acceleration_;
 
@@ -35,10 +35,10 @@ private:
   std::vector<double> phi0_m_;
   std::vector<double> phi0_kp1_;
   std::vector<double> q0_;
+  std::vector<double> sweep_source_;
+  std::vector<double> source_correction_;
   std::vector<double> boundary_source_;
   std::vector<double> current_correction_;
-  std::vector<double> sweep_source_;
-  std::vector<double> sweep_rhs_;
   std::vector<double> operator_phi_;
   std::vector<double> phi_temp_;
 

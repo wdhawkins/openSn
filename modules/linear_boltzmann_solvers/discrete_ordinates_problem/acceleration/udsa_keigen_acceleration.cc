@@ -7,6 +7,7 @@
 #include "modules/diffusion/diffusion_mip_solver.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/compute/lbs_compute.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/iteration_logging.h"
+#include "modules/linear_boltzmann_solvers/lbs_problem/source_functions/source_flags.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/vecops/lbs_vecops.h"
 #include "framework/object_factory.h"
 #include "framework/logging/log.h"
@@ -22,6 +23,16 @@ namespace opensn
 
 namespace
 {
+
+bool
+HasOnlyReflectingBoundaries(const DiscreteOrdinatesProblem& do_problem)
+{
+  for (const auto& [bid, boundary] : do_problem.GetSweepBoundaries())
+    if (boundary->GetType() != LBSBoundaryType::REFLECTING)
+      return false;
+
+  return true;
+}
 
 double
 GlobalL2Norm(const std::vector<double>& values)
@@ -86,7 +97,12 @@ UDSAKEigenAcceleration::Initialize()
                              "boundaries.");
 
   diffusion_acceleration_.Initialize();
-  diffusion_acceleration_.SetSolverOptions(l_abs_tol_, max_iters_, verbose_, petsc_options_);
+  const auto petsc_options =
+    petsc_options_.empty()
+      ? "-" + do_problem_.GetName() + "_UDSAksp_type gmres -" + do_problem_.GetName() +
+          "_UDSApc_type hypre"
+      : petsc_options_;
+  diffusion_acceleration_.SetSolverOptions(l_abs_tol_, max_iters_, verbose_, petsc_options);
 
   const auto num_local_dofs = diffusion_acceleration_.GetNumLocalDOFs();
   phi0_.assign(num_local_dofs, 0.0);
@@ -95,10 +111,10 @@ UDSAKEigenAcceleration::Initialize()
   phi0_m_.assign(num_local_dofs, 0.0);
   phi0_kp1_.assign(num_local_dofs, 0.0);
   q0_.assign(num_local_dofs, 0.0);
+  sweep_source_.assign(num_local_dofs, 0.0);
+  source_correction_.assign(num_local_dofs, 0.0);
   boundary_source_.assign(num_local_dofs, 0.0);
   current_correction_.assign(num_local_dofs, 0.0);
-  sweep_source_.assign(num_local_dofs, 0.0);
-  sweep_rhs_.assign(num_local_dofs, 0.0);
   operator_phi_.assign(num_local_dofs, 0.0);
   phi_temp_.assign(phi_new_local_.size(), 0.0);
 }
@@ -111,7 +127,7 @@ UDSAKEigenAcceleration::PreExecute()
 void
 UDSAKEigenAcceleration::PrePowerIteration()
 {
-  production_ell_ = ComputeFissionProduction(do_problem_, phi_old_local_);
+  production_old_ = ComputeFissionProduction(do_problem_, phi_old_local_);
   diffusion_acceleration_.CopyScalarFlux(phi_old_local_, phi0_ell_);
 }
 
@@ -120,36 +136,17 @@ UDSAKEigenAcceleration::BuildFissionSource(const std::vector<double>& phi0,
                                            const double lambda,
                                            std::vector<double>& q0) const
 {
-  const auto grid = do_problem_.GetGrid();
-  const auto& sdm = do_problem_.GetSpatialDiscretization();
-  const auto& udsa_uk_man = diffusion_acceleration_.GetUnknownManager();
-  const auto& block_id_to_xs = do_problem_.GetBlockID2XSMap();
-  const auto num_groups = do_problem_.GetNumGroups();
-
-  q0.assign(sdm.GetNumLocalDOFs(udsa_uk_man), 0.0);
-  for (const auto& cell : grid->local_cells)
-  {
-    const auto& cell_mapping = sdm.GetCellMapping(cell);
-    const auto num_nodes = cell_mapping.GetNumNodes();
-    const auto& xs = *block_id_to_xs.at(cell.block_id);
-    if (not xs.IsFissionable())
-      continue;
-
-    const auto& F = xs.GetProductionMatrix();
-    for (size_t i = 0; i < num_nodes; ++i)
-    {
-      const auto udsa_map = sdm.MapDOFLocal(cell, i, udsa_uk_man, 0, 0);
-
-      for (unsigned int g = 0; g < num_groups; ++g)
-      {
-        double source = 0.0;
-        for (unsigned int gp = 0; gp < num_groups; ++gp)
-          source += F[g][gp] * phi0[udsa_map + gp] / lambda;
-
-        q0[udsa_map + g] = source;
-      }
-    }
-  }
+  std::vector<double> phi(do_problem_.GetPhiNewLocal().size(), 0.0);
+  std::vector<double> source_moments(phi.size(), 0.0);
+  diffusion_acceleration_.ProjectScalarFlux(phi0, phi);
+  const auto set_source_function = do_problem_.GetActiveSetSourceFunction();
+  set_source_function(front_gs_,
+                      source_moments,
+                      phi,
+                      APPLY_AGS_FISSION_SOURCES | APPLY_WGS_FISSION_SOURCES);
+  diffusion_acceleration_.CopyScalarFlux(source_moments, q0);
+  for (auto& value : q0)
+    value /= lambda;
 }
 
 double
@@ -160,23 +157,32 @@ UDSAKEigenAcceleration::PostPowerIteration()
   diffusion_acceleration_.CopyScalarFlux(phi_new_local_, phi0_star_);
   const double lambda = solver_->GetEigenvalue();
   const double transport_production = ComputeFissionProduction(do_problem_, phi_new_local_);
-  OpenSnLogicalErrorIf(production_ell_ == 0.0,
+  OpenSnLogicalErrorIf(production_old_ == 0.0,
                        "UDSA k-eigenvalue acceleration encountered zero previous production.");
-  const double transport_lambda = transport_production / production_ell_ * lambda;
+  const double transport_lambda = transport_production / production_old_ * lambda;
+  const bool solve_total_flux = HasOnlyReflectingBoundaries(do_problem_);
 
   diffusion_acceleration_.BuildBoundarySource(boundary_source_);
-  std::fill(current_correction_.begin(), current_correction_.end(), 0.0);
-  BuildFissionSource(phi0_ell_, lambda, sweep_source_);
-  diffusion_acceleration_.AssembleRHS(sweep_source_, boundary_source_, current_correction_);
-  CopyLocalPetscVector(diffusion_acceleration_.diffusion_solver_->GetRHS(), sweep_rhs_);
+  if (solve_total_flux)
+  {
+    std::fill(current_correction_.begin(), current_correction_.end(), 0.0);
+    phi0_m_ = phi0_star_;
+  }
+  else
+  {
+    std::fill(current_correction_.begin(), current_correction_.end(), 0.0);
+    BuildFissionSource(phi0_ell_, lambda, sweep_source_);
+    diffusion_acceleration_.AssembleRHS(sweep_source_, boundary_source_, current_correction_);
+    CopyLocalPetscVector(diffusion_acceleration_.diffusion_solver_->GetRHS(), source_correction_);
+    diffusion_acceleration_.diffusion_solver_->ApplyOperator(phi0_star_, operator_phi_);
 
-  diffusion_acceleration_.diffusion_solver_->ApplyOperator(phi0_star_, operator_phi_);
-  for (size_t i = 0; i < current_correction_.size(); ++i)
-    current_correction_[i] = operator_phi_[i] - sweep_rhs_[i];
+    for (size_t i = 0; i < source_correction_.size(); ++i)
+      source_correction_[i] = operator_phi_[i] - source_correction_[i];
 
-  phi0_m_ = phi0_star_;
+    phi0_m_ = phi0_star_;
+  }
   double production_m = transport_production;
-  double lambda_m = transport_lambda;
+  double lambda_m = solve_total_flux ? lambda : transport_lambda;
 
   double change = 0.0;
   unsigned int iter = 0;
@@ -184,6 +190,8 @@ UDSAKEigenAcceleration::PostPowerIteration()
   {
     BuildFissionSource(phi0_m_, lambda_m, q0_);
     diffusion_acceleration_.AssembleRHS(q0_, boundary_source_, current_correction_);
+    if (not solve_total_flux)
+      diffusion_acceleration_.diffusion_solver_->AddToRHS(source_correction_);
 
     phi0_kp1_ = phi0_m_;
     diffusion_acceleration_.Solve(phi0_kp1_, false);

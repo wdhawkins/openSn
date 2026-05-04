@@ -53,6 +53,7 @@ struct Multigroup_D_and_sigR
 {
   std::vector<double> Dg;
   std::vector<double> sigR;
+  std::vector<std::vector<double>> sigS;
 };
 
 enum class EnergyCollapseScheme

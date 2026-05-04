@@ -69,7 +69,6 @@ public:
   std::shared_ptr<SweepResidualEvaluator> sweep_residual_evaluator_;
 
 private:
-  void AddScatterCouplingToOperator();
   void AddScatterCouplingSource(const std::vector<double>& phi0,
                                 std::vector<double>& source) const;
   ScatterCouplingMode scatter_coupling_mode_ = ScatterCouplingMode::RHS;
