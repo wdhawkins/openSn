@@ -22,10 +22,9 @@ public:
   /**
    * Selects where the off-diagonal group-to-group scatter coupling lives.
    *
-   * RHS is the fixed-source UDSA form: the diffusion matrix remains block diagonal
-   * in group and the off-diagonal scatter source is lagged inside the UDSA source
-   * iteration. Operator is the k-eigenvalue split form: the low-order operator is
-   * assembled as A - S_off and the right-hand side is fission-only.
+   * RHS keeps the off-diagonal scatter source lagged on the right-hand side.
+   * Operator assembles A - S_off and leaves only true external/eigenvalue
+   * sources on the right-hand side.
    */
   enum class ScatterCouplingMode
   {

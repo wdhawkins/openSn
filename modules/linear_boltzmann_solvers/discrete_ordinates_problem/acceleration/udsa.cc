@@ -13,7 +13,6 @@
 #include "framework/runtime.h"
 #include "framework/utils/timer.h"
 #include "caliper/cali.h"
-#include <algorithm>
 #include <cmath>
 #include <sstream>
 
@@ -101,7 +100,11 @@ UDSADiffusionAcceleration::Initialize()
   diffusion_solver_->options.residual_tolerance = options.udsa_tol;
   diffusion_solver_->options.max_iters = options.udsa_max_iters;
   diffusion_solver_->options.verbose = options.udsa_verbose;
-  diffusion_solver_->options.additional_options_string = options.udsa_string;
+  diffusion_solver_->options.additional_options_string =
+    options.udsa_string.empty()
+      ? "-" + do_problem_.GetName() + "_UDSAksp_type gmres -" + do_problem_.GetName() +
+          "_UDSApc_type hypre"
+      : options.udsa_string;
 
   diffusion_solver_->Initialize();
 
@@ -198,10 +201,6 @@ UDSADiffusionAcceleration::BuildDiffusionSource(const std::vector<double>& phi0,
                                                 const std::vector<double>& fixed_source_moments,
                                                 std::vector<double>& q0) const
 {
-  OpenSnLogicalErrorIf(scatter_coupling_mode_ != ScatterCouplingMode::RHS,
-                       "BuildDiffusionSource is only valid when UDSA scatter coupling is on the "
-                       "right-hand side.");
-
   const auto grid = do_problem_.GetGrid();
   const auto& sdm = do_problem_.GetSpatialDiscretization();
   const auto& phi_uk_man = do_problem_.GetUnknownManager();
@@ -224,6 +223,9 @@ UDSADiffusionAcceleration::BuildDiffusionSource(const std::vector<double>& phi0,
       for (unsigned int g = 0; g < num_groups; ++g)
       {
         q0[udsa_map + g] = fixed_source_moments[phi_map + g];
+        if (scatter_coupling_mode_ == ScatterCouplingMode::Operator)
+          continue;
+
         if (S0 == nullptr)
           continue;
 
