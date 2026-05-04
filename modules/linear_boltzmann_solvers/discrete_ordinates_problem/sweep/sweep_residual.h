@@ -23,6 +23,12 @@ public:
                             const std::vector<double>& phi0,
                             std::vector<double>& residual);
 
+  void AddStreamingResidualComponents(const UnknownManager& residual_uk_man,
+                                      const std::vector<double>& phi0,
+                                      std::vector<double>& removal,
+                                      std::vector<double>& volume_streaming,
+                                      std::vector<double>& face_streaming);
+
 private:
   DiscreteOrdinatesProblem& do_problem_;
   std::vector<std::shared_ptr<VectorGhostCommunicator>> psi_ghost_communicators_;

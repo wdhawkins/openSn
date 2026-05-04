@@ -22,6 +22,8 @@ public:
   void Execute() override;
   /// Return the current k-eigenvalue
   double GetEigenvalue() const { return k_eff_; }
+  /// Return the number of power iterations used by the most recent execution.
+  unsigned int GetNumIterations() const { return num_iterations_; }
 
   BalanceTable ComputeBalanceTable() const;
 
@@ -42,6 +44,7 @@ protected:
   double k_tolerance_;
   double F_prev_;
   bool reset_phi0_;
+  unsigned int num_iterations_ = 0;
 
   std::vector<double>& q_moments_local_;
   std::vector<double>& phi_old_local_;

@@ -53,6 +53,7 @@ DiffusionMIPSolver::AssembleAand_b_wQpoints(const std::vector<double>& q_vector)
 
   const unsigned int num_groups = uk_man_.unknowns.front().num_components;
 
+  OpenSnPETScCall(MatZeroEntries(A_));
   OpenSnPETScCall(VecSet(rhs_, 0.0));
 
   for (const auto& cell : grid_->local_cells)
@@ -595,6 +596,7 @@ DiffusionMIPSolver::AssembleAand_b(const std::vector<double>& q_vector)
 
   const unsigned int num_groups = uk_man_.unknowns.front().num_components;
 
+  OpenSnPETScCall(MatZeroEntries(A_));
   OpenSnPETScCall(VecSet(rhs_, 0.0));
   for (const auto& cell : grid_->local_cells)
   {

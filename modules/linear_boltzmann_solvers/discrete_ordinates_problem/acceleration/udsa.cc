@@ -103,6 +103,7 @@ UDSADiffusionAcceleration::SetSolverOptions(const double residual_tolerance,
   diffusion_solver_->options.max_iters = max_iters;
   diffusion_solver_->options.verbose = verbose;
   diffusion_solver_->options.additional_options_string = petsc_options;
+  diffusion_solver_->ApplyOptions();
 }
 
 void
@@ -282,7 +283,13 @@ UDSADiffusionAcceleration::BuildCurrentCorrection(const std::vector<double>& phi
   for (size_t i = 0; i < correction.size(); ++i)
     correction[i] -= boundary_source[i];
 
-  sweep_residual_evaluator_->AddStreamingResidual(udsa_uk_man, phi0, correction);
+  std::vector<double> removal;
+  std::vector<double> volume_streaming;
+  std::vector<double> face_streaming;
+  sweep_residual_evaluator_->AddStreamingResidualComponents(
+    udsa_uk_man, phi0, removal, volume_streaming, face_streaming);
+  for (size_t i = 0; i < correction.size(); ++i)
+    correction[i] += removal[i] + volume_streaming[i];
 }
 
 void

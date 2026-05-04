@@ -69,6 +69,23 @@ SweepResidualEvaluator::AddStreamingResidual(const UnknownManager& residual_uk_m
                                              const std::vector<double>& phi0,
                                              std::vector<double>& residual)
 {
+  std::vector<double> removal;
+  std::vector<double> volume_streaming;
+  std::vector<double> face_streaming;
+  AddStreamingResidualComponents(
+    residual_uk_man, phi0, removal, volume_streaming, face_streaming);
+
+  for (size_t i = 0; i < residual.size(); ++i)
+    residual[i] += removal[i] + volume_streaming[i] + face_streaming[i];
+}
+
+void
+SweepResidualEvaluator::AddStreamingResidualComponents(const UnknownManager& residual_uk_man,
+                                                       const std::vector<double>& phi0,
+                                                       std::vector<double>& removal,
+                                                       std::vector<double>& volume_streaming,
+                                                       std::vector<double>& face_streaming)
+{
   const auto grid = do_problem_.GetGrid();
   const auto& sdm = do_problem_.GetSpatialDiscretization();
   const auto& block_id_to_xs = do_problem_.GetBlockID2XSMap();
@@ -78,6 +95,11 @@ SweepResidualEvaluator::AddStreamingResidual(const UnknownManager& residual_uk_m
   OpenSnLogicalErrorIf(not do_problem_.GetOptions().save_angular_flux,
                        do_problem_.GetName() +
                          ": sweep residual evaluation requires saved angular fluxes.");
+
+  const auto num_local_dofs = sdm.GetNumLocalDOFs(residual_uk_man);
+  removal.assign(num_local_dofs, 0.0);
+  volume_streaming.assign(num_local_dofs, 0.0);
+  face_streaming.assign(num_local_dofs, 0.0);
 
   for (const auto& groupset : do_problem_.GetGroupsets())
   {
@@ -111,23 +133,21 @@ SweepResidualEvaluator::AddStreamingResidual(const UnknownManager& residual_uk_m
         for (size_t i = 0; i < num_nodes; ++i)
         {
           const auto residual_i = sdm.MapDOFLocal(cell, i, residual_uk_man, 0, g);
-          double rhs_i = 0.0;
 
           for (size_t j = 0; j < num_nodes; ++j)
           {
             const auto residual_j = sdm.MapDOFLocal(cell, j, residual_uk_man, 0, g);
-            rhs_i -= sigma_removal[g] * intV_shapeI_shapeJ(i, j) * phi0[residual_j];
+            removal[residual_i] -= sigma_removal[g] * intV_shapeI_shapeJ(i, j) *
+                                   phi0[residual_j];
             for (size_t n = 0; n < quadrature.omegas.size(); ++n)
             {
               const auto psi_j = sdm.MapDOFLocal(cell, j, psi_uk_man, n, 0);
               const double streaming = quadrature.weights[n] *
                                        intV_shapeI_gradshapeJ(i, j).Dot(quadrature.omegas[n]) *
                                        psi[psi_j + gsg];
-              rhs_i -= streaming;
+              volume_streaming[residual_i] -= streaming;
             }
           }
-
-          residual[residual_i] += rhs_i;
         }
 
         for (size_t f = 0; f < cell.faces.size(); ++f)
@@ -146,7 +166,6 @@ SweepResidualEvaluator::AddStreamingResidual(const UnknownManager& residual_uk_m
           {
             const int i = cell_mapping.MapFaceNode(f, fi);
             const auto residual_i = sdm.MapDOFLocal(cell, i, residual_uk_man, 0, g);
-            double rhs_i = 0.0;
 
             for (size_t fj = 0; fj < num_face_nodes; ++fj)
             {
@@ -189,11 +208,9 @@ SweepResidualEvaluator::AddStreamingResidual(const UnknownManager& residual_uk_m
                 const double jump_streaming = quadrature.weights[n] * (-mu) *
                                               intS_shapeI_shapeJ[f](i, j) *
                                               (psi[psi_cell_j + gsg] - psi_upwind);
-                rhs_i -= jump_streaming;
+                face_streaming[residual_i] -= jump_streaming;
               }
             }
-
-            residual[residual_i] += rhs_i;
           }
         }
       }

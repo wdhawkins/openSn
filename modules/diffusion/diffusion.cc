@@ -166,8 +166,8 @@ DiffusionSolver::AddToMatrix(const std::vector<PetscInt>& rows,
                                 "entries do not agree.");
   for (int i = 0; i < vals.size(); ++i)
     OpenSnPETScCall(MatSetValue(A_, rows[i], cols[i], vals[i], ADD_VALUES));
-  OpenSnPETScCall(MatAssemblyBegin(A_, MAT_FLUSH_ASSEMBLY));
-  OpenSnPETScCall(MatAssemblyEnd(A_, MAT_FLUSH_ASSEMBLY));
+  OpenSnPETScCall(MatAssemblyBegin(A_, MAT_FINAL_ASSEMBLY));
+  OpenSnPETScCall(MatAssemblyEnd(A_, MAT_FINAL_ASSEMBLY));
 }
 
 void
@@ -245,6 +245,21 @@ DiffusionSolver::Initialize()
 
   OpenSnPETScCall(PetscOptionsInsertString(nullptr, options.additional_options_string.c_str()));
 
+  OpenSnPETScCall(PCSetFromOptions(pc));
+  OpenSnPETScCall(KSPSetFromOptions(ksp_));
+}
+
+void
+DiffusionSolver::ApplyOptions()
+{
+  OpenSnLogicalErrorIf(ksp_ == nullptr, "DiffusionSolver options cannot be applied before Initialize.");
+
+  OpenSnPETScCall(
+    KSPSetTolerances(ksp_, 1.0e-50, options.residual_tolerance, 1.0e50, options.max_iters));
+  OpenSnPETScCall(PetscOptionsInsertString(nullptr, options.additional_options_string.c_str()));
+
+  PC pc = nullptr;
+  OpenSnPETScCall(KSPGetPC(ksp_, &pc));
   OpenSnPETScCall(PCSetFromOptions(pc));
   OpenSnPETScCall(KSPSetFromOptions(ksp_));
 }

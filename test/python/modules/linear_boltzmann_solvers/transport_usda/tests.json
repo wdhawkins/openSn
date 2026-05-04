@@ -120,5 +120,44 @@
         "abs_tol": 1e-05
       }
     ]
+  },
+  {
+    "file": "keigenvalue_transport_2d_1c_qblock.py",
+    "comment": "2D 2G KEigenvalue::Solver test using Power Iteration with UDSA",
+    "num_procs": 1,
+    "checks": [
+      {
+        "type": "FloatCompare",
+        "key": "qblock_unaccelerated_k:",
+        "wordnum": 1,
+        "gold": 0.5969127,
+        "abs_tol": 1e-07
+      },
+      {
+        "type": "IntCompareCheck",
+        "key": "qblock_unaccelerated_iterations:",
+        "wordnum": 1,
+        "gold": 16
+      },
+      {
+        "type": "FloatCompare",
+        "key": "qblock_udsa_k:",
+        "wordnum": 1,
+        "gold": 0.5969127,
+        "abs_tol": 1e-07
+      },
+      {
+        "type": "IntCompareCheck",
+        "key": "qblock_udsa_iterations:",
+        "wordnum": 1,
+        "gold": 6
+      },
+      {
+        "type": "IntCompareCheck",
+        "key": "qblock_udsa_iteration_reduction:",
+        "wordnum": 1,
+        "gold": 10
+      }
+    ]
   }
 ]

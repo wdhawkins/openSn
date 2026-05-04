@@ -85,6 +85,9 @@ public:
   /// Applies the assembled diffusion operator to a local vector.
   void ApplyOperator(const std::vector<double>& input, std::vector<double>& output) const;
 
+  /// Applies the current runtime solver options to the PETSc KSP.
+  void ApplyOptions();
+
   /// Adds to the entries into the matrix without applying spatial discretization.
   void AddToMatrix(const std::vector<PetscInt>& rows,
                    const std::vector<PetscInt>& cols,

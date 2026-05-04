@@ -124,6 +124,7 @@ PowerIterationKEigenSolver::Execute()
 
   // Start power iterations
   unsigned int nit = 0;
+  num_iterations_ = 0;
   bool converged = false;
   while (nit < max_iters_)
   {
@@ -166,6 +167,7 @@ PowerIterationKEigenSolver::Execute()
     k_eff_change = std::fabs(k_eff_ - k_eff_prev) / k_eff_;
     k_eff_prev = k_eff_;
     nit += 1;
+    num_iterations_ = nit;
 
     converged = k_eff_change < std::max(k_tolerance_, 1.0e-12);
 

@@ -8,6 +8,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/acceleration/discrete_ordinates_keigen_acceleration.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/acceleration/scdsa_acceleration.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/acceleration/smm_acceleration.h"
+#include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/acceleration/udsa_keigen_acceleration.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_curvilinear_problem/discrete_ordinates_curvilinear_problem.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/discrete_ordinates_problem.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/iterative_methods/ags_linear_solver.h"
@@ -1786,6 +1787,13 @@ WrapPIteration(py::module& slv)
     )"
   );
   pi_k_eigen_solver.def(
+    "GetNumIterations",
+    &PowerIterationKEigenSolver::GetNumIterations,
+    R"(
+    Return the number of power iterations used by the most recent execution.
+    )"
+  );
+  pi_k_eigen_solver.def(
     "ComputeBalanceTable",
     [balance_table_to_dict](const PowerIterationKEigenSolver& self)
     {
@@ -1883,6 +1891,44 @@ WrapDiscreteOrdinatesKEigenAcceleration(py::module& slv)
         Spatial discretization method to use for the diffusion solver. Valid choices are:
             - 'pwld' : Piecewise Linear Discontinuous
             - 'pwlc' : Piecewise Linear Continuous
+    )"
+  );
+  // UDSA acceleration
+  auto udsa_k_acceleration = py::class_<UDSAKEigenAcceleration,
+                                        std::shared_ptr<UDSAKEigenAcceleration>,
+                                        DiscreteOrdinatesKEigenAcceleration>(
+    slv,
+    "UDSAKEigenAcceleration",
+    R"(
+    Construct a UDSA accelerator for the power iteration k-eigenvalue solver.
+
+    Wrapper of :cpp:class:`opensn::UDSAKEigenAcceleration`.
+    )"
+  );
+  udsa_k_acceleration.def(
+    py::init(
+      [](py::kwargs& params)
+      {
+        return UDSAKEigenAcceleration::Create(kwargs_to_param_block(params));
+      }
+    ),
+    R"(
+    UDSA acceleration for the power iteration k-eigenvalue solver.
+
+    Parameters
+    ----------
+    problem: pyopensn.solver.DiscreteOrdinatesProblem
+        Existing DiscreteOrdinatesProblem instance.
+    l_abs_tol: float, default=1.0e-10
+        Absolute residual tolerance.
+    max_iters: int, default=100
+        Maximum allowable iterations.
+    verbose: bool, default=False
+        If true, enables verbose output.
+    petsc_options: str, default="ssss"
+        Additional PETSc options.
+    relaxation_factor: float, default=0.05
+        Relaxation factor applied to the diffusion update.
     )"
   );
   // SMM acceleration
