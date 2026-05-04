@@ -76,7 +76,7 @@ public:
 
   WGSContext& GetWGSContext(int groupset_id);
 
-  void ApplyUDSAAcceleration();
+  void ApplyUDSAAcceleration(const std::vector<double>& phi_old);
 
   /// Read/write access to newest updated angular flux vector.
   std::vector<std::vector<double>>& GetPsiNewLocal();

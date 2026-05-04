@@ -14,13 +14,13 @@
         "type": "IntCompareCheck",
         "key": "UDSA-iterations",
         "wordnum": 1,
-        "gold": 10
+        "gold": 12
       },
       {
         "type": "IntCompareCheck",
         "key": "UDSA-iteration-reduction",
         "wordnum": 1,
-        "gold": 6
+        "gold": 4
       },
       {
         "type": "KeyValuePair",
@@ -75,13 +75,13 @@
         "type": "IntCompareCheck",
         "key": "UDSA-iterations",
         "wordnum": 1,
-        "gold": 3
+        "gold": 4
       },
       {
         "type": "IntCompareCheck",
         "key": "UDSA-iteration-reduction",
         "wordnum": 1,
-        "gold": 3
+        "gold": 2
       },
       {
         "type": "KeyValuePair",
@@ -118,6 +118,91 @@
         "key": "UDSA-Max-value3=",
         "goldvalue": 1.4745,
         "abs_tol": 1e-05
+      }
+    ]
+  },
+  {
+    "file": "transport_3d_5g_downscatter_udsa.py",
+    "comment": "3D, single groupset, asymmetric downscatter, UDSA",
+    "num_procs": 1,
+    "checks": [
+      {
+        "type": "IntCompareCheck",
+        "key": "Downscatter-Unaccelerated-iterations",
+        "wordnum": 1,
+        "gold": 8
+      },
+      {
+        "type": "IntCompareCheck",
+        "key": "Downscatter-UDSA-iterations",
+        "wordnum": 1,
+        "gold": 2
+      },
+      {
+        "type": "IntCompareCheck",
+        "key": "Downscatter-UDSA-iteration-reduction",
+        "wordnum": 1,
+        "gold": 6
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Downscatter-Unaccelerated-Max-value1=",
+        "goldvalue": 1.104309,
+        "abs_tol": 1e-06
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Downscatter-Unaccelerated-Max-value2=",
+        "goldvalue": 0.1907567,
+        "abs_tol": 1e-06
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Downscatter-Unaccelerated-Max-value3=",
+        "goldvalue": 0.1135358,
+        "abs_tol": 1e-06
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Downscatter-Unaccelerated-Max-value4=",
+        "goldvalue": 0.02444998,
+        "abs_tol": 1e-06
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Downscatter-Unaccelerated-Max-value5=",
+        "goldvalue": 0.007901954,
+        "abs_tol": 1e-06
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Downscatter-UDSA-Max-value1=",
+        "goldvalue": 1.104309,
+        "abs_tol": 1e-06
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Downscatter-UDSA-Max-value2=",
+        "goldvalue": 0.1907567,
+        "abs_tol": 1e-06
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Downscatter-UDSA-Max-value3=",
+        "goldvalue": 0.1135358,
+        "abs_tol": 1e-06
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Downscatter-UDSA-Max-value4=",
+        "goldvalue": 0.02444998,
+        "abs_tol": 1e-06
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Downscatter-UDSA-Max-value5=",
+        "goldvalue": 0.007901954,
+        "abs_tol": 1e-06
       }
     ]
   },

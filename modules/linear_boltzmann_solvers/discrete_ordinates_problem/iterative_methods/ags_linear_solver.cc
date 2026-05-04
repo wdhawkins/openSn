@@ -67,7 +67,7 @@ AGSLinearSolver::Solve()
 
     if (not failed and not child_limited and apply_udsa)
       if (auto* do_problem = dynamic_cast<DiscreteOrdinatesProblem*>(&lbs_problem_))
-        do_problem->ApplyUDSAAcceleration();
+        do_problem->ApplyUDSAAcceleration(phi_old_);
 
     std::stringstream iter_stats;
     iter_stats << program_timer.GetTimeString() << " AGS iteration = " << iter;

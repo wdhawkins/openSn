@@ -292,10 +292,10 @@ DiscreteOrdinatesProblem::GetWGSContext(int groupset_id)
 }
 
 void
-DiscreteOrdinatesProblem::ApplyUDSAAcceleration()
+DiscreteOrdinatesProblem::ApplyUDSAAcceleration(const std::vector<double>& phi_old)
 {
   if (udsa_acceleration_)
-    udsa_acceleration_->Apply();
+    udsa_acceleration_->Apply(phi_old);
 }
 
 const std::map<uint64_t, std::shared_ptr<SweepBoundary>>&

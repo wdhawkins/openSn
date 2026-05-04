@@ -13,6 +13,7 @@
 #include "framework/runtime.h"
 #include "framework/utils/timer.h"
 #include "caliper/cali.h"
+#include <algorithm>
 #include <cmath>
 #include <sstream>
 
@@ -243,6 +244,45 @@ UDSADiffusionAcceleration::BuildDiffusionSource(const std::vector<double>& phi0,
 }
 
 void
+UDSADiffusionAcceleration::BuildScatterDeltaSource(const std::vector<double>& phi0,
+                                                   const std::vector<double>& phi_old,
+                                                   std::vector<double>& q0) const
+{
+  const auto grid = do_problem_.GetGrid();
+  const auto& sdm = do_problem_.GetSpatialDiscretization();
+  const auto& phi_uk_man = do_problem_.GetUnknownManager();
+  const auto& udsa_uk_man = diffusion_solver_->GetUnknownStructure();
+  const auto& block_id_to_xs = do_problem_.GetBlockID2XSMap();
+  const auto num_groups = do_problem_.GetNumGroups();
+
+  q0.assign(sdm.GetNumLocalDOFs(udsa_uk_man), 0.0);
+  for (const auto& cell : grid->local_cells)
+  {
+    const auto& cell_mapping = sdm.GetCellMapping(cell);
+    const auto num_nodes = cell_mapping.GetNumNodes();
+    const auto& xs = *block_id_to_xs.at(cell.block_id);
+    if (xs.GetTransferMatrices().empty())
+      continue;
+
+    const auto& S0 = xs.GetTransferMatrix(0);
+    for (size_t i = 0; i < num_nodes; ++i)
+    {
+      const auto phi_map = sdm.MapDOFLocal(cell, i, phi_uk_man, 0, 0);
+      const auto udsa_map = sdm.MapDOFLocal(cell, i, udsa_uk_man, 0, 0);
+
+      for (unsigned int g = 0; g < num_groups; ++g)
+      {
+        for (const auto& entry : S0.Row(g))
+        {
+          const auto gp = static_cast<unsigned int>(entry.column_index);
+          q0[udsa_map + g] += entry.value * (phi0[udsa_map + gp] - phi_old[phi_map + gp]);
+        }
+      }
+    }
+  }
+}
+
+void
 UDSADiffusionAcceleration::AddScatterCouplingSource(const std::vector<double>& phi0,
                                                     std::vector<double>& source) const
 {
@@ -421,7 +461,8 @@ UDSADiffusionAcceleration::GetNumLocalDOFs() const
 }
 
 UDSAAcceleration::UDSAAcceleration(DiscreteOrdinatesProblem& do_problem)
-  : do_problem_(do_problem), diffusion_acceleration_(do_problem)
+  : do_problem_(do_problem),
+    diffusion_acceleration_(do_problem, UDSADiffusionAcceleration::ScatterCouplingMode::Operator)
 {
 }
 
@@ -439,13 +480,14 @@ UDSAAcceleration::Initialize()
   q0_.assign(num_local_dofs, 0.0);
   phi0_.assign(num_local_dofs, 0.0);
   phi0_old_.assign(num_local_dofs, 0.0);
+  delta_phi0_.assign(num_local_dofs, 0.0);
   fixed_source_moments_.assign(do_problem_.GetPhiNewLocal().size(), 0.0);
   boundary_source_.assign(num_local_dofs, 0.0);
   current_correction_.assign(num_local_dofs, 0.0);
 }
 
 void
-UDSAAcceleration::Apply()
+UDSAAcceleration::Apply(const std::vector<double>& lagged_phi)
 {
   CALI_CXX_MARK_SCOPE("UDSAAcceleration::Apply");
 
@@ -455,31 +497,25 @@ UDSAAcceleration::Apply()
   const auto& options = do_problem_.GetOptions();
   if (options.udsa_max_iters == 0)
     return;
+  if (do_problem_.GetGroupsets().size() < 2)
+    return;
 
   diffusion_acceleration_.CopyScalarFlux(do_problem_.GetPhiNewLocal(), phi0_);
-  diffusion_acceleration_.BuildFixedSourceMoments(fixed_source_moments_);
-  diffusion_acceleration_.BuildBoundarySource(boundary_source_);
-  diffusion_acceleration_.BuildCurrentCorrection(phi0_, boundary_source_, current_correction_);
+  diffusion_acceleration_.BuildScatterDeltaSource(phi0_, lagged_phi, q0_);
 
-  double change = 0.0;
-  unsigned int iter = 0;
-  for (; iter < options.udsa_max_iters; ++iter)
-  {
-    phi0_old_ = phi0_;
-    diffusion_acceleration_.BuildDiffusionSource(phi0_old_, fixed_source_moments_, q0_);
-    diffusion_acceleration_.AssembleRHS(q0_, boundary_source_, current_correction_);
-    diffusion_acceleration_.Solve(phi0_, iter > 0);
+  phi0_old_ = phi0_;
+  std::fill(delta_phi0_.begin(), delta_phi0_.end(), 0.0);
+  diffusion_acceleration_.AssembleRHS(q0_, boundary_source_, current_correction_);
+  diffusion_acceleration_.Solve(delta_phi0_, false);
+  for (size_t i = 0; i < phi0_.size(); ++i)
+    phi0_[i] += delta_phi0_[i];
 
-    change = diffusion_acceleration_.ComputeL2Change(phi0_, phi0_old_);
-    if (change < options.udsa_tol)
-      break;
-  }
+  const double change = diffusion_acceleration_.ComputeL2Change(phi0_, phi0_old_);
 
   if (options.udsa_verbose)
   {
     std::stringstream out;
     out << program_timer.GetTimeString() << " UDSA final";
-    out << ", iterations = " << (iter + 1);
     out << ", l2_change = " << std::scientific << change;
     log.Log() << out.str();
   }

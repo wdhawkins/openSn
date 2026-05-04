@@ -52,6 +52,9 @@ public:
   void BuildDiffusionSource(const std::vector<double>& phi0,
                             const std::vector<double>& fixed_source_moments,
                             std::vector<double>& q0) const;
+  void BuildScatterDeltaSource(const std::vector<double>& phi0,
+                               const std::vector<double>& phi_old,
+                               std::vector<double>& q0) const;
   void BuildCurrentCorrection(const std::vector<double>& phi0,
                               const std::vector<double>& boundary_source,
                               std::vector<double>& correction);
@@ -80,13 +83,14 @@ public:
   explicit UDSAAcceleration(DiscreteOrdinatesProblem& do_problem);
 
   void Initialize();
-  void Apply();
+  void Apply(const std::vector<double>& phi_old);
 
 private:
   DiscreteOrdinatesProblem& do_problem_;
   UDSADiffusionAcceleration diffusion_acceleration_;
   std::vector<double> phi0_;
   std::vector<double> phi0_old_;
+  std::vector<double> delta_phi0_;
   std::vector<double> q0_;
   std::vector<double> fixed_source_moments_;
   std::vector<double> boundary_source_;
