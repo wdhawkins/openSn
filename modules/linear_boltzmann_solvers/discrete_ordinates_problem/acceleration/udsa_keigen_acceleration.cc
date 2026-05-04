@@ -70,7 +70,8 @@ UDSAKEigenAcceleration::Create(const ParameterBlock& params)
 
 UDSAKEigenAcceleration::UDSAKEigenAcceleration(const InputParameters& params)
   : DiscreteOrdinatesKEigenAcceleration(params),
-    diffusion_acceleration_(do_problem_, true)
+    diffusion_acceleration_(do_problem_,
+                            UDSADiffusionAcceleration::ScatterCouplingMode::Operator)
 {
 }
 

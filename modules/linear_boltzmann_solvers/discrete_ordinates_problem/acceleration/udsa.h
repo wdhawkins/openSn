@@ -19,8 +19,23 @@ class SweepResidualEvaluator;
 class UDSADiffusionAcceleration
 {
 public:
+  /**
+   * Selects where the off-diagonal group-to-group scatter coupling lives.
+   *
+   * RHS is the fixed-source UDSA form: the diffusion matrix remains block diagonal
+   * in group and the off-diagonal scatter source is lagged inside the UDSA source
+   * iteration. Operator is the k-eigenvalue split form: the low-order operator is
+   * assembled as A - S_off and the right-hand side is fission-only.
+   */
+  enum class ScatterCouplingMode
+  {
+    RHS,
+    Operator
+  };
+
   explicit UDSADiffusionAcceleration(DiscreteOrdinatesProblem& do_problem,
-                                     bool split_scatter_coupling = false);
+                                     ScatterCouplingMode scatter_coupling_mode =
+                                       ScatterCouplingMode::RHS);
 
   void Initialize();
 
@@ -57,7 +72,7 @@ private:
   void AddScatterCouplingToOperator();
   void AddScatterCouplingSource(const std::vector<double>& phi0,
                                 std::vector<double>& source) const;
-  bool split_scatter_coupling_ = false;
+  ScatterCouplingMode scatter_coupling_mode_ = ScatterCouplingMode::RHS;
 };
 
 /** Problem-level all-groups diffusion acceleration applied after an AGS iteration. */

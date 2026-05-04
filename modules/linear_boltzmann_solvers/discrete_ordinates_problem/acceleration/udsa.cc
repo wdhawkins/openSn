@@ -41,8 +41,8 @@ MakeUDSABoundaryConditions(
 } // namespace
 
 UDSADiffusionAcceleration::UDSADiffusionAcceleration(DiscreteOrdinatesProblem& do_problem,
-                                                     const bool split_scatter_coupling)
-  : do_problem_(do_problem), split_scatter_coupling_(split_scatter_coupling)
+                                                     const ScatterCouplingMode scatter_coupling_mode)
+  : do_problem_(do_problem), scatter_coupling_mode_(scatter_coupling_mode)
 {
 }
 
@@ -55,6 +55,8 @@ UDSADiffusionAcceleration::Initialize()
 
   UnknownManager uk_man;
   uk_man.AddUnknown(UnknownType::VECTOR_N, do_problem_.GetNumGroups());
+  if (scatter_coupling_mode_ == ScatterCouplingMode::Operator)
+    uk_man.SetUnknownNumOffBlockConnections(0, do_problem_.GetNumGroups() - 1);
 
   const auto& sweep_boundaries = do_problem_.GetSweepBoundaries();
   auto bcs = MakeUDSABoundaryConditions(sweep_boundaries);
@@ -83,7 +85,7 @@ UDSADiffusionAcceleration::Initialize()
 
   std::vector<double> dummy_rhs(sdm.GetNumLocalDOFs(uk_man), 0.0);
   diffusion_solver_->AssembleAand_b(dummy_rhs);
-  if (split_scatter_coupling_)
+  if (scatter_coupling_mode_ == ScatterCouplingMode::Operator)
     AddScatterCouplingToOperator();
 }
 
@@ -172,6 +174,8 @@ UDSADiffusionAcceleration::BuildFixedSourceMoments(std::vector<double>& source_m
 void
 UDSADiffusionAcceleration::AddScatterCouplingToOperator()
 {
+  // The k-eigenvalue low-order equation uses (A - S_off) on the left-hand side.
+  // Fixed-source UDSA keeps this coupling on the RHS instead.
   const auto grid = do_problem_.GetGrid();
   const auto& sdm = do_problem_.GetSpatialDiscretization();
   const auto& udsa_uk_man = diffusion_solver_->GetUnknownStructure();
@@ -225,6 +229,10 @@ UDSADiffusionAcceleration::BuildDiffusionSource(const std::vector<double>& phi0,
                                                 const std::vector<double>& fixed_source_moments,
                                                 std::vector<double>& q0) const
 {
+  OpenSnLogicalErrorIf(scatter_coupling_mode_ != ScatterCouplingMode::RHS,
+                       "BuildDiffusionSource is only valid when UDSA scatter coupling is on the "
+                       "right-hand side.");
+
   const auto grid = do_problem_.GetGrid();
   const auto& sdm = do_problem_.GetSpatialDiscretization();
   const auto& phi_uk_man = do_problem_.GetUnknownManager();
@@ -267,6 +275,9 @@ void
 UDSADiffusionAcceleration::AddScatterCouplingSource(const std::vector<double>& phi0,
                                                     std::vector<double>& source) const
 {
+  // BuildCurrentCorrection applies the runtime operator. In Operator mode that
+  // operator contains -S_off, so add S_off phi here to recover the unsplit
+  // diffusion/removal contribution used by the transport residual correction.
   const auto grid = do_problem_.GetGrid();
   const auto& sdm = do_problem_.GetSpatialDiscretization();
   const auto& udsa_uk_man = diffusion_solver_->GetUnknownStructure();
@@ -381,7 +392,7 @@ UDSADiffusionAcceleration::BuildCurrentCorrection(const std::vector<double>& phi
                        do_problem_.GetName() + ": UDSA requires options.save_angular_flux=true.");
 
   diffusion_solver_->ApplyOperator(phi0, correction);
-  if (split_scatter_coupling_)
+  if (scatter_coupling_mode_ == ScatterCouplingMode::Operator)
     AddScatterCouplingSource(phi0, correction);
   for (size_t i = 0; i < correction.size(); ++i)
     correction[i] -= boundary_source[i];

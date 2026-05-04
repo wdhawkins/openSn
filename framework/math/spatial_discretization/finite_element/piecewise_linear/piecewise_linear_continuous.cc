@@ -378,6 +378,10 @@ PieceWiseLinearContinuous::BuildSparsityPattern(std::vector<int64_t>& nodal_nnz_
   auto backup_nnz_off_diag = nodal_nnz_off_diag;
 
   unsigned int N = unknown_manager.GetTotalUnknownStructureSize();
+  std::vector<int> num_off_block_connections(N, 0);
+  for (const auto& unknown : unknown_manager.unknowns)
+    for (unsigned int c = 0; c < unknown.num_components; ++c)
+      num_off_block_connections[unknown.GetMap(c)] = unknown.num_off_block_connections[c];
 
   nodal_nnz_in_diag.clear();
   nodal_nnz_off_diag.clear();
@@ -393,8 +397,8 @@ PieceWiseLinearContinuous::BuildSparsityPattern(std::vector<int64_t>& nodal_nnz_
       for (unsigned int j = 0; j < N; ++j)
       {
         ++ir;
-        nodal_nnz_in_diag[ir] = backup_nnz_in_diag[i];
-        nodal_nnz_off_diag[ir] = backup_nnz_off_diag[i];
+        nodal_nnz_in_diag[ir] = backup_nnz_in_diag[i] * (1 + num_off_block_connections[j]);
+        nodal_nnz_off_diag[ir] = backup_nnz_off_diag[i] * (1 + num_off_block_connections[j]);
       } // for j
     } // for i
   }
@@ -406,8 +410,8 @@ PieceWiseLinearContinuous::BuildSparsityPattern(std::vector<int64_t>& nodal_nnz_
       for (uint64_t i = 0; i < local_base_block_size_; ++i)
       {
         ++ir;
-        nodal_nnz_in_diag[ir] = backup_nnz_in_diag[i];
-        nodal_nnz_off_diag[ir] = backup_nnz_off_diag[i];
+        nodal_nnz_in_diag[ir] = backup_nnz_in_diag[i] * (1 + num_off_block_connections[j]);
+        nodal_nnz_off_diag[ir] = backup_nnz_off_diag[i] * (1 + num_off_block_connections[j]);
       } // for i
     } // for j
   }
