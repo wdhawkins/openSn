@@ -21,8 +21,6 @@ public:
   double PostPowerIteration() final;
 
 private:
-  void AddScatterCouplingToOperator();
-
   void BuildFissionSource(const std::vector<double>& phi0,
                           double lambda,
                           std::vector<double>& q0) const;

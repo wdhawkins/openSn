@@ -70,7 +70,7 @@ UDSAKEigenAcceleration::Create(const ParameterBlock& params)
 
 UDSAKEigenAcceleration::UDSAKEigenAcceleration(const InputParameters& params)
   : DiscreteOrdinatesKEigenAcceleration(params),
-    diffusion_acceleration_(do_problem_)
+    diffusion_acceleration_(do_problem_, true)
 {
 }
 
@@ -86,7 +86,6 @@ UDSAKEigenAcceleration::Initialize()
 
   diffusion_acceleration_.Initialize();
   diffusion_acceleration_.SetSolverOptions(l_abs_tol_, max_iters_, verbose_, petsc_options_);
-  AddScatterCouplingToOperator();
 
   const auto num_local_dofs = diffusion_acceleration_.GetNumLocalDOFs();
   phi0_.assign(num_local_dofs, 0.0);
@@ -113,58 +112,6 @@ UDSAKEigenAcceleration::PrePowerIteration()
 {
   production_ell_ = ComputeFissionProduction(do_problem_, phi_old_local_);
   diffusion_acceleration_.CopyScalarFlux(phi_old_local_, phi0_ell_);
-}
-
-void
-UDSAKEigenAcceleration::AddScatterCouplingToOperator()
-{
-  const auto grid = do_problem_.GetGrid();
-  const auto& sdm = do_problem_.GetSpatialDiscretization();
-  const auto& udsa_uk_man = diffusion_acceleration_.GetUnknownManager();
-  const auto& block_id_to_xs = do_problem_.GetBlockID2XSMap();
-  const auto& unit_cell_matrices = do_problem_.GetUnitCellMatrices();
-  const auto num_groups = do_problem_.GetNumGroups();
-
-  std::vector<PetscInt> rows;
-  std::vector<PetscInt> cols;
-  std::vector<PetscScalar> vals;
-
-  for (const auto& cell : grid->local_cells)
-  {
-    const auto& cell_mapping = sdm.GetCellMapping(cell);
-    const auto num_nodes = cell_mapping.GetNumNodes();
-    const auto& xs = *block_id_to_xs.at(cell.block_id);
-    const auto* S0 = xs.GetTransferMatrices().empty() ? nullptr : &xs.GetTransferMatrix(0);
-    if (S0 == nullptr)
-      continue;
-
-    for (size_t i = 0; i < num_nodes; ++i)
-    {
-      for (unsigned int g = 0; g < num_groups; ++g)
-      {
-        const auto row = sdm.MapDOF(cell, i, udsa_uk_man, 0, g);
-
-        for (const auto& entry : S0->Row(g))
-        {
-          const auto gp = static_cast<unsigned int>(entry.column_index);
-          if (gp == g)
-            continue;
-
-          for (size_t j = 0; j < num_nodes; ++j)
-          {
-            const auto col = sdm.MapDOF(cell, j, udsa_uk_man, 0, gp);
-            const auto& mass = unit_cell_matrices[cell.local_id].intV_shapeI_shapeJ;
-            rows.push_back(static_cast<PetscInt>(row));
-            cols.push_back(static_cast<PetscInt>(col));
-            vals.push_back(static_cast<PetscScalar>(-entry.value * mass(i, j)));
-          }
-        }
-      }
-    }
-  }
-
-  if (not rows.empty())
-    diffusion_acceleration_.diffusion_solver_->AddToMatrix(rows, cols, vals);
 }
 
 void

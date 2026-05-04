@@ -19,7 +19,8 @@ class SweepResidualEvaluator;
 class UDSADiffusionAcceleration
 {
 public:
-  explicit UDSADiffusionAcceleration(DiscreteOrdinatesProblem& do_problem);
+  explicit UDSADiffusionAcceleration(DiscreteOrdinatesProblem& do_problem,
+                                     bool split_scatter_coupling = false);
 
   void Initialize();
 
@@ -51,6 +52,12 @@ public:
   DiscreteOrdinatesProblem& do_problem_;
   std::shared_ptr<DiffusionMIPSolver> diffusion_solver_;
   std::shared_ptr<SweepResidualEvaluator> sweep_residual_evaluator_;
+
+private:
+  void AddScatterCouplingToOperator();
+  void AddScatterCouplingSource(const std::vector<double>& phi0,
+                                std::vector<double>& source) const;
+  bool split_scatter_coupling_ = false;
 };
 
 /** Problem-level all-groups diffusion acceleration applied after an AGS iteration. */

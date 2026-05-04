@@ -9,6 +9,7 @@
 #include "framework/logging/log.h"
 #include "framework/runtime.h"
 #include "framework/utils/timer.h"
+#include <map>
 #include <sstream>
 
 namespace opensn
@@ -164,8 +165,27 @@ DiffusionSolver::AddToMatrix(const std::vector<PetscInt>& rows,
   if (rows.size() != cols.size() or rows.size() != vals.size())
     throw std::invalid_argument("The number of row entries, column entries, and value "
                                 "entries do not agree.");
-  for (int i = 0; i < vals.size(); ++i)
-    OpenSnPETScCall(MatSetValue(A_, rows[i], cols[i], vals[i], ADD_VALUES));
+
+  std::map<PetscInt, std::vector<std::pair<PetscInt, PetscScalar>>> row_entries;
+  for (size_t i = 0; i < vals.size(); ++i)
+    row_entries[rows[i]].emplace_back(cols[i], vals[i]);
+
+  for (const auto& [row, entries] : row_entries)
+  {
+    std::vector<PetscInt> row_cols;
+    std::vector<PetscScalar> row_vals;
+    row_cols.reserve(entries.size());
+    row_vals.reserve(entries.size());
+    for (const auto& [col, val] : entries)
+    {
+      row_cols.push_back(col);
+      row_vals.push_back(val);
+    }
+
+    OpenSnPETScCall(MatSetValues(
+      A_, 1, &row, static_cast<PetscInt>(row_cols.size()), row_cols.data(), row_vals.data(), ADD_VALUES));
+  }
+
   OpenSnPETScCall(MatAssemblyBegin(A_, MAT_FINAL_ASSEMBLY));
   OpenSnPETScCall(MatAssemblyEnd(A_, MAT_FINAL_ASSEMBLY));
 }
