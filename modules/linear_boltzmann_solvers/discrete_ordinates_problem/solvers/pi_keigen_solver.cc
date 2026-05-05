@@ -186,12 +186,8 @@ PowerIterationKEigenSolver::Execute()
       }
 
       const auto ags_summary = ags_solver->GetLastSolveSummary();
-      const auto ags_status =
-        HasIterationStatus(ags_summary) ? ags_summary.status : IterationStatus::NONE;
-      const auto inner_status =
-        MostSevereIterationStatus(ags_status, MostSevereIterationStatus(wgs_summaries));
       const auto outer_status =
-        IterationStatusFromSolve(converged, nit >= max_iters_, inner_status);
+        IterationStatusFromSolve(converged, nit >= max_iters_);
       log.Log() << program_timer.GetTimeString() << " "
                 << FormatKEigenOuterIteration("PI",
                                               nit,

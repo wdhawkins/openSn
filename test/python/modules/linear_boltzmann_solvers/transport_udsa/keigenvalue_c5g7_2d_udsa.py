@@ -79,9 +79,7 @@ def make_problem(mesh_type):
         ],
         options={
             "verbose_outer_iterations": True,
-            "verbose_inner_iterations": bool(
-                int(os.environ.get("OPENSN_C5G7_VERBOSE_INNER", "0"))
-            ),
+            "verbose_inner_iterations": True,
             "save_angular_flux": True,
             "power_default_kappa": 1.0,
         },
@@ -90,21 +88,18 @@ def make_problem(mesh_type):
 
 
 if __name__ == "__main__":
-    expected_procs = int(os.environ.get("OPENSN_C5G7_NUM_PROCS", "1"))
-    if size != expected_procs:
-        sys.exit(
-            f"Incorrect number of processors. Expected {expected_procs} "
-            f"processors but got {size}."
-        )
-
     mesh_type = os.environ.get("OPENSN_C5G7_MESH_TYPE", "coarse")
     problem = make_problem(mesh_type)
     acceleration = UDSAKEigenAcceleration(
         problem=problem,
         verbose=bool(int(os.environ.get("OPENSN_C5G7_UDSA_VERBOSE", "0"))),
         max_iters=int(os.environ.get("OPENSN_C5G7_UDSA_MAX_ITERS", "200")),
+        petsc_options=os.environ.get("OPENSN_C5G7_UDSA_PETSC_OPTIONS", ""),
         pi_max_its=int(os.environ.get("OPENSN_C5G7_UDSA_PI_MAX_ITS", "30")),
         pi_k_tol=1.0e-8,
+        use_transport_eigenvalue=bool(
+            int(os.environ.get("OPENSN_C5G7_UDSA_TRANSPORT_K", "1"))
+        ),
     )
     solver = PowerIterationKEigenSolver(
         problem=problem,

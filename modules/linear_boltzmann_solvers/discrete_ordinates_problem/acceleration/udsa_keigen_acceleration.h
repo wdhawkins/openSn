@@ -26,6 +26,7 @@ private:
                           std::vector<double>& q0) const;
 
   double production_old_ = 1.0;
+  bool use_transport_eigenvalue_ = true;
 
   UDSADiffusionAcceleration diffusion_acceleration_;
 

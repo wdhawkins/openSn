@@ -24,16 +24,6 @@ namespace opensn
 namespace
 {
 
-bool
-HasOnlyReflectingBoundaries(const DiscreteOrdinatesProblem& do_problem)
-{
-  for (const auto& [bid, boundary] : do_problem.GetSweepBoundaries())
-    if (boundary->GetType() != LBSBoundaryType::REFLECTING)
-      return false;
-
-  return true;
-}
-
 double
 GlobalL2Norm(const std::vector<double>& values)
 {
@@ -46,20 +36,6 @@ GlobalL2Norm(const std::vector<double>& values)
   return std::sqrt(global_sum);
 }
 
-void
-CopyLocalPetscVector(const Vec& petsc_vector, std::vector<double>& values)
-{
-  PetscInt local_size = 0;
-  OpenSnPETScCall(VecGetLocalSize(petsc_vector, &local_size));
-  values.assign(static_cast<size_t>(local_size), 0.0);
-
-  const PetscScalar* data = nullptr;
-  OpenSnPETScCall(VecGetArrayRead(petsc_vector, &data));
-  for (PetscInt i = 0; i < local_size; ++i)
-    values[static_cast<size_t>(i)] = data[i];
-  OpenSnPETScCall(VecRestoreArrayRead(petsc_vector, &data));
-}
-
 } // namespace
 
 OpenSnRegisterObjectInNamespace(lbs, UDSAKEigenAcceleration);
@@ -69,6 +45,11 @@ UDSAKEigenAcceleration::GetInputParameters()
 {
   auto params = DiscreteOrdinatesKEigenAcceleration::GetInputParameters();
   params.ChangeExistingParamToOptional("name", "UDSAKEigenAcceleration");
+  params.AddOptionalParameter("use_transport_eigenvalue",
+                              true,
+                              "If true, UDSA corrects the fission-source shape but returns the "
+                              "transport power-iteration eigenvalue. If false, UDSA returns the "
+                              "low-order diffusion eigenvalue estimate.");
   return params;
 }
 
@@ -81,6 +62,7 @@ UDSAKEigenAcceleration::Create(const ParameterBlock& params)
 
 UDSAKEigenAcceleration::UDSAKEigenAcceleration(const InputParameters& params)
   : DiscreteOrdinatesKEigenAcceleration(params),
+    use_transport_eigenvalue_(params.GetParamValue<bool>("use_transport_eigenvalue")),
     diffusion_acceleration_(do_problem_,
                             UDSADiffusionAcceleration::ScatterCouplingMode::Operator)
 {
@@ -160,41 +142,32 @@ UDSAKEigenAcceleration::PostPowerIteration()
   OpenSnLogicalErrorIf(production_old_ == 0.0,
                        "UDSA k-eigenvalue acceleration encountered zero previous production.");
   const double transport_lambda = transport_production / production_old_ * lambda;
-  const bool solve_total_flux = HasOnlyReflectingBoundaries(do_problem_);
 
-  diffusion_acceleration_.BuildBoundarySource(boundary_source_);
-  if (solve_total_flux)
-  {
-    std::fill(current_correction_.begin(), current_correction_.end(), 0.0);
-    phi0_m_ = phi0_star_;
-  }
-  else
-  {
-    std::fill(current_correction_.begin(), current_correction_.end(), 0.0);
-    BuildFissionSource(phi0_ell_, lambda, sweep_source_);
-    diffusion_acceleration_.AssembleRHS(sweep_source_, boundary_source_, current_correction_);
-    CopyLocalPetscVector(diffusion_acceleration_.diffusion_solver_->GetRHS(), source_correction_);
-    diffusion_acceleration_.diffusion_solver_->ApplyOperator(phi0_star_, operator_phi_);
-
-    for (size_t i = 0; i < source_correction_.size(); ++i)
-      source_correction_[i] = operator_phi_[i] - source_correction_[i];
-
-    phi0_m_ = phi0_star_;
-  }
+  BuildFissionSource(phi0_ell_, lambda, sweep_source_);
+  std::fill(boundary_source_.begin(), boundary_source_.end(), 0.0);
+  std::fill(current_correction_.begin(), current_correction_.end(), 0.0);
+  std::fill(source_correction_.begin(), source_correction_.end(), 0.0);
+  phi0_m_ = phi0_star_;
   double production_m = transport_production;
-  double lambda_m = solve_total_flux ? lambda : transport_lambda;
+  double lambda_m = transport_lambda;
 
   double change = 0.0;
   unsigned int iter = 0;
+  unsigned int iteration_count = 0;
   for (; iter < static_cast<unsigned int>(std::max(pi_max_its_, 1)); ++iter)
   {
+    iteration_count = iter + 1;
     BuildFissionSource(phi0_m_, lambda_m, q0_);
-    diffusion_acceleration_.AssembleRHS(q0_, boundary_source_, current_correction_);
-    if (not solve_total_flux)
-      diffusion_acceleration_.diffusion_solver_->AddToRHS(source_correction_);
+    for (size_t i = 0; i < q0_.size(); ++i)
+      q0_[i] -= sweep_source_[i];
+    source_correction_ = q0_;
 
-    phi0_kp1_ = phi0_m_;
-    diffusion_acceleration_.Solve(phi0_kp1_, false);
+    std::fill(operator_phi_.begin(), operator_phi_.end(), 0.0);
+    diffusion_acceleration_.AssembleRHS(q0_, boundary_source_, current_correction_);
+    diffusion_acceleration_.Solve(operator_phi_, false);
+
+    for (size_t i = 0; i < phi0_kp1_.size(); ++i)
+      phi0_kp1_[i] = phi0_star_[i] + operator_phi_[i];
     diffusion_acceleration_.ProjectScalarFlux(phi0_kp1_, phi_temp_);
 
     const double production_kp1 = ComputeFissionProduction(do_problem_, phi_temp_);
@@ -214,23 +187,30 @@ UDSAKEigenAcceleration::PostPowerIteration()
 
   if (verbose_)
   {
+    for (size_t i = 0; i < operator_phi_.size(); ++i)
+      operator_phi_[i] = phi0_[i] - phi0_star_[i];
+
     std::ostringstream out;
-    out << "PIUDSA split solve";
-    AppendNumericField(out, "iterations", iter + 1);
+    out << "PIUDSA delta solve";
+    AppendNumericField(out, "iterations", iteration_count);
     AppendNumericField(out, "change", change, Scientific(6));
-    AppendNumericField(out, "correction_l2", GlobalL2Norm(current_correction_), Scientific(6));
+    AppendNumericField(out, "transport_k", transport_lambda, Fixed(7));
+    AppendNumericField(out, "low_order_k", lambda_m, Fixed(7));
+    AppendNumericField(out, "flux_correction_l2", GlobalL2Norm(operator_phi_), Scientific(6));
+    AppendNumericField(out, "fission_delta_l2", GlobalL2Norm(source_correction_), Scientific(6));
     log.Log() << program_timer.GetTimeString() << " " << out.str();
   }
 
   diffusion_acceleration_.ProjectScalarFlux(phi0_, phi_new_local_);
   const double production = ComputeFissionProduction(do_problem_, phi_new_local_);
+  const double output_lambda = use_transport_eigenvalue_ ? transport_lambda : lambda_m;
   if (production > 0.0)
-    LBSVecOps::ScalePhiVector(do_problem_, PhiSTLOption::PHI_NEW, lambda_m / production);
+    LBSVecOps::ScalePhiVector(do_problem_, PhiSTLOption::PHI_NEW, output_lambda / production);
 
   LBSVecOps::GSScopedCopyPrimarySTLvectors(
     do_problem_, front_gs_, PhiSTLOption::PHI_NEW, PhiSTLOption::PHI_OLD);
 
-  return lambda_m;
+  return output_lambda;
 }
 
 } // namespace opensn
