@@ -40,12 +40,23 @@ LogDiffusionSolveFinal(const std::string& name, KSP ksp, Vec x)
   OpenSnPETScCall(KSPGetConvergedReason(ksp, &reason));
   PetscInt iterations = 0;
   OpenSnPETScCall(KSPGetIterationNumber(ksp, &iterations));
+  PetscReal absolute_residual = 0.0;
+  OpenSnPETScCall(KSPGetResidualNorm(ksp, &absolute_residual));
+  PetscReal relative_tolerance = 0.0;
+  PetscReal absolute_tolerance = 0.0;
+  PetscReal divergence_tolerance = 0.0;
+  PetscInt max_iterations = 0;
+  OpenSnPETScCall(KSPGetTolerances(
+    ksp, &relative_tolerance, &absolute_tolerance, &divergence_tolerance, &max_iterations));
 
   const auto status = KSPReasonToPETScSolverStatus(reason);
 
   std::ostringstream out;
   out << name << " final, status = " << PETScSolverStatusName(status);
   AppendNumericField(out, "iterations", static_cast<std::size_t>(iterations));
+  AppendNumericField(out, "absolute_residual", absolute_residual, Scientific(6));
+  AppendNumericField(out, "absolute_tolerance", absolute_tolerance, Scientific(6));
+  AppendNumericField(out, "relative_tolerance", relative_tolerance, Scientific(6));
   AppendNumericField(out, "solution_norm", solution_norm, Scientific(6));
   if (log.GetVerbosity() >= 2)
     out << ", detail = " << GetPETScConvergedReasonstring(reason);
@@ -297,8 +308,8 @@ DiffusionSolver::Solve(std::vector<double>& solution, bool use_initial_guess)
   else
     OpenSnPETScCall(KSPSetInitialGuessNonzero(ksp_, PETSC_TRUE));
 
-  OpenSnPETScCall(KSPSetTolerances(
-    ksp_, options.residual_tolerance, options.residual_tolerance, 1.0e50, options.max_iters));
+  OpenSnPETScCall(
+    KSPSetTolerances(ksp_, 1.0e-50, options.residual_tolerance, 1.0e50, options.max_iters));
 
   if (options.perform_symmetry_check)
   {
@@ -357,8 +368,8 @@ DiffusionSolver::Solve(Vec petsc_solution, bool use_initial_guess)
   else
     OpenSnPETScCall(KSPSetInitialGuessNonzero(ksp_, PETSC_TRUE));
 
-  OpenSnPETScCall(KSPSetTolerances(
-    ksp_, options.residual_tolerance, options.residual_tolerance, 1.0e50, options.max_iters));
+  OpenSnPETScCall(
+    KSPSetTolerances(ksp_, 1.0e-50, options.residual_tolerance, 1.0e50, options.max_iters));
 
   if (options.perform_symmetry_check)
   {

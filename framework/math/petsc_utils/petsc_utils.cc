@@ -262,7 +262,8 @@ KSPMonitorRelativeToRHS(KSP ksp, PetscInt n, PetscReal rnorm, void* /* context *
   // Print message
   std::stringstream buff;
   buff << program_timer.GetTimeString() << " " << ksp_name << " iteration = " << n;
-  AppendNumericField(buff, "residual", rnorm / rhs_norm, Scientific(6));
+  AppendNumericField(buff, "relative_residual", rnorm / rhs_norm, Scientific(6));
+  AppendNumericField(buff, "absolute_residual", rnorm, Scientific(6));
 
   log.Log() << buff.str();
 

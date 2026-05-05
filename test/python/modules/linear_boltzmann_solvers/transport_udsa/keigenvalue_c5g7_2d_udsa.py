@@ -93,6 +93,7 @@ if __name__ == "__main__":
     acceleration = UDSAKEigenAcceleration(
         problem=problem,
         verbose=bool(int(os.environ.get("OPENSN_C5G7_UDSA_VERBOSE", "0"))),
+        l_abs_tol=float(os.environ.get("OPENSN_C5G7_UDSA_L_ABS_TOL", "1.0e-10")),
         max_iters=int(os.environ.get("OPENSN_C5G7_UDSA_MAX_ITERS", "200")),
         petsc_options=os.environ.get("OPENSN_C5G7_UDSA_PETSC_OPTIONS", ""),
         pi_max_its=int(os.environ.get("OPENSN_C5G7_UDSA_PI_MAX_ITS", "30")),
