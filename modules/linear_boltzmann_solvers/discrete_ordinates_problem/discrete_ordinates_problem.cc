@@ -302,6 +302,26 @@ DiscreteOrdinatesProblem::GetBoundaryDefinitions() const
 void
 DiscreteOrdinatesProblem::SetBoundaryOptions(const InputParameters& params)
 {
+  SetBoundaryOptionsImpl(params, true);
+}
+
+void
+DiscreteOrdinatesProblem::SetBoundaryOptions(const std::vector<InputParameters>& boundary_params,
+                                             bool clear_existing)
+{
+  if (clear_existing)
+    boundary_definitions_.clear();
+
+  for (const auto& params : boundary_params)
+    SetBoundaryOptionsImpl(params, false);
+
+  RebuildBoundaryRuntimeData();
+}
+
+void
+DiscreteOrdinatesProblem::SetBoundaryOptionsImpl(const InputParameters& params,
+                                                 bool rebuild_runtime_data)
+{
   const auto boundary_name = params.GetParamValue<std::string>("name");
   const auto coord_sys = grid_->GetCoordinateSystem();
   const auto bnd_name_map = grid_->GetBoundaryNameMap();
@@ -345,7 +365,8 @@ DiscreteOrdinatesProblem::SetBoundaryOptions(const InputParameters& params)
   }
   const auto bid = it->second;
   boundary_definitions_[bid] = CreateBoundaryFromParams(params);
-  RebuildBoundaryRuntimeData();
+  if (rebuild_runtime_data)
+    RebuildBoundaryRuntimeData();
 }
 
 void
@@ -555,7 +576,7 @@ DiscreteOrdinatesProblem::BuildRuntime()
     {
       auto bndry_params = GetBoundaryOptionsBlock();
       bndry_params.AssignParameters(bcs.GetParam(b));
-      SetBoundaryOptions(bndry_params);
+      SetBoundaryOptionsImpl(bndry_params, false);
     }
   }
 
@@ -603,6 +624,7 @@ DiscreteOrdinatesProblem::BuildRuntime()
   }
   log.Log() << program_timer.GetTimeString() << " Initialized angle aggregation.";
   InitializeSolverSchemes();
+  boundary_runtime_data_initialized_ = true;
 }
 
 void
@@ -620,14 +642,19 @@ DiscreteOrdinatesProblem::SetSweepChunkMode(SweepChunkMode mode)
 void
 DiscreteOrdinatesProblem::RebuildBoundaryRuntimeData()
 {
-  if (not grid_face_histogram_)
+  if (not boundary_runtime_data_initialized_)
     return;
+
+  ags_solver_.reset();
+  wgs_solvers_.clear();
+  wgs_contexts_.clear();
 
   InitializeBoundaries();
   for (auto& groupset : groupsets_)
   {
     WGDSA::CleanUp(groupset);
     TGDSA::CleanUp(groupset);
+    InitFluxDataStructures(groupset);
     WGDSA::Init(*this, groupset);
     TGDSA::Init(*this, groupset);
   }

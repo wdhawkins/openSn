@@ -1451,5 +1451,24 @@
         "abs_tol": 1e-8
       }
     ]
+  },
+  {
+    "file": "boundary_mutation_rebuild.py",
+    "comment": "Runtime boundary-condition mutation rebuild regression",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "BOUNDARY_MUTATION_MATCH=",
+        "goldvalue": 1,
+        "abs_tol": 0
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "BOUNDARY_MUTATION_MAX_DIFF=",
+        "goldvalue": 0.0,
+        "abs_tol": 5.0e-8
+      }
+    ]
   }
 ]

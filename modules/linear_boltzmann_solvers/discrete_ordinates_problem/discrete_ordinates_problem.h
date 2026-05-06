@@ -35,7 +35,10 @@ public:
     TIME_DEPENDENT = 2
   };
 
-  /// Construction and transport-mode controls.
+  /**
+   * @name Construction and transport-mode controls
+   * @{
+   */
   bool IsTimeDependent() const override
   {
     return sweep_chunk_mode_.value_or(SweepChunkMode::DEFAULT) == SweepChunkMode::TIME_DEPENDENT;
@@ -44,12 +47,16 @@ public:
   void SetTimeDependentMode() override;
 
   void SetSteadyStateMode() override;
+  /** @} */
 
   ~DiscreteOrdinatesProblem() override;
 
   using BoundaryDefinition = std::pair<LBSBoundaryType, std::shared_ptr<SweepBoundary>>;
 
-  /// Problem metadata and solver access.
+  /**
+   * @name Problem metadata and solver access
+   * @{
+   */
   const std::string& GetSweepType() const { return sweep_type_; }
 
   std::pair<size_t, size_t> GetNumPhiIterativeUnknowns() override;
@@ -60,6 +67,7 @@ public:
   size_t GetNumWGSSolvers();
 
   WGSContext& GetWGSContext(int groupset_id);
+  /** @} */
 
   /**
    * Internal angular-flux state access.
@@ -93,7 +101,10 @@ public:
   /// Copy psi_new to psi_old
   void UpdatePsiOld();
 
-  /// Balance and output helpers.
+  /**
+   * @name Balance and output helpers
+   * @{
+   */
   BalanceTable ComputeBalanceTable(double scaling_factor = 1.0);
 
   void ComputeBalance(double scaling_factor = 1.0);
@@ -119,6 +130,7 @@ public:
   std::vector<std::shared_ptr<FieldFunctionGridBased>>
   CreateAngularFluxFieldFunctionList(const std::vector<unsigned int>& groups,
                                      const std::vector<size_t>& angles);
+  /** @} */
 
   /**
    * Supported runtime discrete-ordinates reconfiguration.
@@ -132,12 +144,18 @@ public:
   void SetBlockID2XSMap(const BlockID2XSMap& xs_map) override;
 
   void SetBoundaryOptions(const InputParameters& params) override;
+  void SetBoundaryOptions(const std::vector<InputParameters>& boundary_params, bool clear_existing);
   void ClearBoundaries() override;
 
   void CopyPhiAndSrcToDevice();
   void CopyPhiAndOutflowBackToHost();
 
 protected:
+  /**
+   * @name Construction and setup
+   * @{
+   */
+
   /// Factory-only constructor.
   explicit DiscreteOrdinatesProblem(const InputParameters& params);
 
@@ -145,6 +163,12 @@ protected:
   void BuildRuntime();
 
   void InitializeBoundaries() override;
+  /** @} */
+
+  /**
+   * @name Solver and sweep state
+   * @{
+   */
 
   void InitializeSolverSchemes();
   /// Rebuild WGS/AGS solver schemes after runtime configuration changes.
@@ -186,14 +210,27 @@ protected:
   {
     return SetSweepChunk(groupset);
   }
+  /** @} */
+
+  /**
+   * @name Restart and runtime reconfiguration
+   * @{
+   */
 
   bool ReadProblemRestartData(hid_t file_id) override;
   bool WriteProblemRestartData(hid_t file_id) const override;
   void ResetDerivedSolutionVectors() override;
+  void SetBoundaryOptionsImpl(const InputParameters& params, bool rebuild_runtime_data);
   void RebuildBoundaryRuntimeData();
 
   BoundaryDefinition CreateBoundaryFromParams(const InputParameters& params) const;
   std::shared_ptr<SweepBoundary> CreateSweepBoundary(uint64_t boundary_id) const;
+  /** @} */
+
+  /**
+   * @name Sweep dependency data
+   * @{
+   */
 
   std::map<std::shared_ptr<AngularQuadrature>, SweepOrderGroupingInfo>
     quadrature_unq_so_grouping_map_;
@@ -207,6 +244,13 @@ protected:
   std::map<uint64_t, std::shared_ptr<SweepBoundary>> sweep_boundaries_;
   std::map<uint64_t, BoundaryDefinition> boundary_definitions_;
   std::optional<ParameterBlock> boundary_conditions_block_;
+  bool boundary_runtime_data_initialized_ = false;
+  /** @} */
+
+  /**
+   * @name Sweep size metadata
+   * @{
+   */
 
   /// Max level size.
   std::size_t max_level_size_ = 0;
@@ -223,8 +267,14 @@ protected:
   std::shared_ptr<AGSLinearSolver> ags_solver_;
   std::vector<std::shared_ptr<WGSContext>> wgs_contexts_;
   std::vector<std::shared_ptr<LinearSolver>> wgs_solvers_;
+  /** @} */
 
 private:
+  /**
+   * @name Angular flux field-function helpers
+   * @{
+   */
+
   std::string
   MakeAngularFieldFunctionName(size_t groupset_id, unsigned int group, size_t angle) const;
   std::vector<double>
@@ -279,11 +329,18 @@ private:
                                       size_t groupset_id,
                                       unsigned int group,
                                       size_t angle);
+  /** @} */
 
 public:
+  /**
+   * @name Factory interface
+   * @{
+   */
+
   static InputParameters GetInputParameters();
   static InputParameters GetBoundaryOptionsBlock();
   static std::shared_ptr<DiscreteOrdinatesProblem> Create(const ParameterBlock& params);
+  /** @} */
 };
 
 } // namespace opensn
