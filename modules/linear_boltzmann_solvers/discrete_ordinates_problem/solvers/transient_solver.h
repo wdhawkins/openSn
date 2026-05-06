@@ -39,6 +39,7 @@ public:
 
 private:
   bool ReadRestartData();
+  bool ReadInitialConditionData();
   bool WriteRestartData();
 
   std::shared_ptr<DiscreteOrdinatesProblem> do_problem_;

@@ -8,6 +8,7 @@
 #include <optional>
 #include <vector>
 #include <functional>
+#include <filesystem>
 
 namespace opensn
 {
@@ -18,7 +19,9 @@ class LBSSolverIO
 {
 public:
   static bool ReadRestartData(LBSProblem& lbs_problem,
-                              const std::function<bool(hid_t)>& extra_reader = {});
+                              const std::function<bool(hid_t)>& extra_reader = {},
+                              const std::filesystem::path& read_path = {},
+                              bool allow_transient_initialization_from_steady = false);
 
   static bool WriteRestartData(LBSProblem& lbs_problem,
                                const std::function<bool(hid_t)>& extra_writer = {});

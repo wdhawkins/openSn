@@ -217,7 +217,8 @@ protected:
    * @{
    */
 
-  bool ReadProblemRestartData(hid_t file_id) override;
+  bool ReadProblemRestartData(hid_t file_id,
+                              bool allow_transient_initialization_from_steady) override;
   bool WriteProblemRestartData(hid_t file_id) const override;
   void ResetDerivedSolutionVectors() override;
   void SetBoundaryOptionsImpl(const InputParameters& params, bool rebuild_runtime_data);

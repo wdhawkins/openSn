@@ -34,7 +34,9 @@ struct LBSRestartOptions
 {
   bool writes_enabled = false;
   bool write_delayed_psi = true;
+  bool write_angular_flux = true;
   std::filesystem::path read_path;
+  std::filesystem::path read_initial_condition_path;
   std::filesystem::path write_path;
   std::chrono::time_point<std::chrono::system_clock> last_write_time;
   std::chrono::seconds write_time_interval = std::chrono::seconds(0);

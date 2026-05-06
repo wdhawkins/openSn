@@ -72,11 +72,11 @@ SteadyStateSourceSolver::Execute()
   auto& ags_solver = *do_problem_->GetAGSSolver();
   ags_solver.Solve();
 
-  if (options.restart.writes_enabled)
-    do_problem_->WriteRestartData();
-
   if (options.use_precursors)
     ComputePrecursors(*do_problem_);
+
+  if (options.restart.writes_enabled)
+    do_problem_->WriteRestartData();
 
   if (options.adjoint)
     do_problem_->ReorientAdjointSolution();

@@ -17,7 +17,9 @@ class DiscreteOrdinatesProblem;
 class DiscreteOrdinatesProblemIO
 {
 public:
-  static bool ReadRestartData(DiscreteOrdinatesProblem& do_problem, hid_t file_id);
+  static bool ReadRestartData(DiscreteOrdinatesProblem& do_problem,
+                              hid_t file_id,
+                              bool allow_transient_initialization_from_steady);
 
   static bool WriteRestartData(const DiscreteOrdinatesProblem& do_problem, hid_t file_id);
 

@@ -501,8 +501,16 @@ LBSProblem::GetOptionsBlock()
   params.AddOptionalParameter("write_delayed_psi_to_restart",
                               true,
                               "Flag that controls writing of delayed angular fluxes to restarts.");
+  params.AddOptionalParameter("write_angular_flux_to_restart",
+                              true,
+                              "Flag that controls writing angular fluxes to restart dumps when "
+                              "`save_angular_flux` is enabled.");
   params.AddOptionalParameter(
     "read_restart_path", "", "Full path for reading restart dumps including file stem.");
+  params.AddOptionalParameter(
+    "read_initial_condition_path",
+    "",
+    "Full path for reading restart data as an initial condition, including file stem.");
   params.AddOptionalParameter(
     "write_restart_path", "", "Full path for writing restart dumps including file stem.");
   params.AddOptionalParameter("write_restart_time_interval",
@@ -593,9 +601,18 @@ LBSProblem::ParseOptions(const InputParameters& input)
     {"write_delayed_psi_to_restart",
      [this](const ParameterBlock& spec)
      { options_.restart.write_delayed_psi = spec.GetValue<bool>(); }},
+    {"write_angular_flux_to_restart",
+     [this](const ParameterBlock& spec)
+     { options_.restart.write_angular_flux = spec.GetValue<bool>(); }},
     {"read_restart_path",
      [this](const ParameterBlock& spec)
      { options_.restart.read_path = BuildRestartPath(spec.GetValue<std::string>()); }},
+    {"read_initial_condition_path",
+     [this](const ParameterBlock& spec)
+     {
+       options_.restart.read_initial_condition_path =
+         BuildRestartPath(spec.GetValue<std::string>());
+     }},
     {"write_restart_path",
      [this](const ParameterBlock& spec)
      { options_.restart.write_path = BuildRestartPath(spec.GetValue<std::string>()); }},
@@ -694,7 +711,8 @@ LBSProblem::BuildRestartPath(const std::string& path_stem)
 }
 
 bool
-LBSProblem::ReadProblemRestartData(hid_t /*file_id*/)
+LBSProblem::ReadProblemRestartData(hid_t /*file_id*/,
+                                   bool /*allow_transient_initialization_from_steady*/)
 {
   return true;
 }

@@ -101,6 +101,7 @@ TransientSolver::Initialize()
 
   const auto& options = do_problem_->GetOptions();
   bool restart_successful = false;
+  bool initial_condition_successful = false;
   do_problem_->SetTime(current_time_);
 
   const std::string& init_state = initial_state_;
@@ -111,17 +112,19 @@ TransientSolver::Initialize()
                        GetName() + ": Problem must be fully constructed before "
                                    "TransientSolver initialization.");
 
+  if (not options.restart.read_path.empty())
+    restart_successful = ReadRestartData();
+  else if (not options.restart.read_initial_condition_path.empty())
+    initial_condition_successful = ReadInitialConditionData();
+
   OpenSnInvalidArgumentIf(not do_problem_->IsTimeDependent(),
                           GetName() + ": Problem is in steady-state mode. Call problem."
                                       "SetTimeDependentMode() before initializing this solver.");
 
-  if (not options.restart.read_path.empty())
-    restart_successful = ReadRestartData();
-
-  if (not restart_successful)
+  if (not restart_successful and not initial_condition_successful)
     do_problem_->SetTime(current_time_);
 
-  if (initial_state_ == "zero" and not restart_successful)
+  if (initial_state_ == "zero" and not restart_successful and not initial_condition_successful)
   {
     do_problem_->ZeroPhi();
     do_problem_->ZeroPrecursors();
@@ -379,6 +382,34 @@ TransientSolver::StepPrecursors()
   for (size_t i = 0; i < precursor_new_local.size(); ++i)
     precursor_new_local[i] =
       inv_theta * (precursor_new_local[i] + (theta - 1.0) * precursor_prev_local_[i]);
+}
+
+bool
+TransientSolver::ReadInitialConditionData()
+{
+  OpenSnInvalidArgumentIf(
+    do_problem_->IsTimeDependent(),
+    GetName() +
+      ": `read_initial_condition_path` must be used with a problem that has not already been "
+      "placed in time-dependent mode. The transient solver loads the initial condition and "
+      "then switches the problem to time-dependent mode.");
+
+  const double requested_dt = do_problem_->GetTimeStep();
+  const double requested_theta = do_problem_->GetTheta();
+
+  bool success = do_problem_->ReadRestartData(
+    {}, do_problem_->GetOptions().restart.read_initial_condition_path, true);
+  OpenSnInvalidArgumentIf(
+    not success, GetName() + ": failed to read transient initial condition from restart data.");
+
+  do_problem_->SetTimeStep(requested_dt);
+  do_problem_->SetTheta(requested_theta);
+  current_time_ = do_problem_->GetTime();
+  step_ = 0;
+
+  do_problem_->SetTimeDependentMode();
+
+  return success;
 }
 
 bool

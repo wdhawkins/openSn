@@ -760,9 +760,27 @@ WrapLBS(py::module& slv)
         A block of optional configuration parameters, including:
           - max_mpi_message_size: int, default=32768
           - restart_writes_enabled: bool, default=False
+              Enable restart dump writes for solvers that support restart output.
           - write_delayed_psi_to_restart: bool, default=True
+              Include delayed sweep angular-flux buffers. Full continuation restarts require
+              these buffers whenever the problem has delayed sweep angular state, including
+              partitioned parallel, reflected-boundary, and cyclic-sweep cases. These buffers
+              are optional when a steady-state restart is used only as a transient initial
+              condition because the transient initialization can reconstruct angular state
+              from the flux moments.
+          - write_angular_flux_to_restart: bool, default=True
+              Include stored angular fluxes in restart dumps when ``save_angular_flux=True``.
+              This is required for continuing a time-dependent restart, but optional when a
+              steady-state restart is used only as a transient initial condition.
           - read_restart_path: str, default=''
+              File stem for reading a full restart. The number of MPI ranks and partitioned
+              state layout must match the run that wrote the restart files.
+          - read_initial_condition_path: str, default=''
+              File stem for reading restart data as an initial condition. A steady-state
+              restart may be used by ``TransientSolver`` through this option.
           - write_restart_path: str, default=''
+              File stem for restart dump writes. OpenSn appends the MPI rank and
+              ``.restart.h5`` to this stem.
           - write_restart_time_interval: int, default=0
             (must be 0 or >=30)
           - use_precursors: bool, default=True
@@ -1202,9 +1220,27 @@ WrapLBS(py::module& slv)
         A block of optional configuration parameters applied at problem creation, including:
           - max_mpi_message_size: int, default=32768
           - restart_writes_enabled: bool, default=False
+              Enable restart dump writes for solvers that support restart output.
           - write_delayed_psi_to_restart: bool, default=True
+              Include delayed sweep angular-flux buffers. Full continuation restarts require
+              these buffers whenever the problem has delayed sweep angular state, including
+              partitioned parallel, reflected-boundary, and cyclic-sweep cases. These buffers
+              are optional when a steady-state restart is used only as a transient initial
+              condition because the transient initialization can reconstruct angular state
+              from the flux moments.
+          - write_angular_flux_to_restart: bool, default=True
+              Include stored angular fluxes in restart dumps when ``save_angular_flux=True``.
+              This is required for continuing a time-dependent restart, but optional when a
+              steady-state restart is used only as a transient initial condition.
           - read_restart_path: str, default=''
+              File stem for reading a full restart. The number of MPI ranks and partitioned
+              state layout must match the run that wrote the restart files.
+          - read_initial_condition_path: str, default=''
+              File stem for reading restart data as an initial condition. A steady-state
+              restart may be used by ``TransientSolver`` through this option.
           - write_restart_path: str, default=''
+              File stem for restart dump writes. OpenSn appends the MPI rank and
+              ``.restart.h5`` to this stem.
           - write_restart_time_interval: int, default=0
           - use_precursors: bool, default=True
             Enable delayed-neutron precursor treatment. This remains active across later
@@ -1291,6 +1327,10 @@ WrapSteadyState(py::module& slv)
     restart data is read during :meth:`Initialize`. If it was constructed with
     ``options={'restart_writes_enabled': True, ...}``, a restart dump is written
     after :meth:`Execute` completes.
+
+    Restart files are rank-layout specific. A restart written with ``N`` MPI
+    ranks must be read with the same rank count and a compatible problem
+    definition.
     )"
   );
   steady_state_solver.def(
@@ -1400,9 +1440,26 @@ WrapTransient(py::module& slv)
 
     If the problem was constructed with ``options={'read_restart_path': ...}``,
     restart data is read during :meth:`Initialize`. If it was constructed with
+    ``options={'read_initial_condition_path': ...}``, restart data is read as a
+    transient initial condition during :meth:`Initialize`, then the problem is
+    switched to time-dependent mode; a steady-state restart may be used in this
+    mode. In this initial-condition path, stored angular fluxes and delayed
+    sweep angular-flux buffers are optional in the steady-state restart; the
+    transient solver reconstructs angular state from the loaded flux moments.
+    If it was constructed with
     ``options={'restart_writes_enabled': True, ...}``, timed restart dumps may
     be written during :meth:`Execute` and a final restart dump is written when
     execution completes.
+
+    A full transient continuation restart read with ``read_restart_path`` is
+    different from a steady-state initial-condition restart read with
+    ``read_initial_condition_path``. Full transient continuation restarts require
+    angular flux state in the restart file; if the problem has delayed sweep
+    angular state, including partitioned parallel, reflected-boundary, or
+    cyclic-sweep cases, continuation also requires delayed sweep angular-flux
+    buffers in the restart. Restart files are rank-layout specific: use the same MPI rank
+    count and compatible problem definition when reading files written by a
+    previous run.
     )"
   );
   transient_solver.def(

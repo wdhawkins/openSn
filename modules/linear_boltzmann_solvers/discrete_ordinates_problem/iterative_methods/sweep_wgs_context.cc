@@ -60,9 +60,12 @@ SweepWGSContext::SweepWGSContext(DiscreteOrdinatesProblem& do_problem,
 }
 
 void
-SweepWGSContext::RebuildAngularFluxFromConvergedPhi(bool include_rhs_time_term)
+SweepWGSContext::RebuildAngularFluxFromConvergedPhi(bool include_rhs_time_term,
+                                                    bool zero_incoming_delayed_psi)
 {
-  const auto scope = lhs_src_scope | rhs_src_scope;
+  auto scope = lhs_src_scope | rhs_src_scope;
+  if (zero_incoming_delayed_psi)
+    scope |= ZERO_INCOMING_DELAYED_PSI;
   set_source_function(groupset, do_problem.GetQMomentsLocal(), do_problem.GetPhiOldLocal(), scope);
 
   sweep_chunk->IncludeRHSTimeTerm(include_rhs_time_term);
