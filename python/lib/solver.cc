@@ -838,11 +838,13 @@ WrapLBS(py::module& slv)
     "SetBoundaryOptions",
     [](DiscreteOrdinatesProblem& self, py::kwargs& params)
     {
+      bool clear_boundary_conditions = false;
+      std::vector<InputParameters> boundary_params;
       for (auto [key, value] : params)
       {
         auto c_key = key.cast<std::string>();
         if (c_key == "clear_boundary_conditions")
-          self.ClearBoundaries();
+          clear_boundary_conditions = value.cast<bool>();
         else if (c_key == "boundary_conditions")
         {
           auto boundaries = value.cast<py::list>();
@@ -850,12 +852,14 @@ WrapLBS(py::module& slv)
           {
             InputParameters input = DiscreteOrdinatesProblem::GetBoundaryOptionsBlock();
             input.AssignParameters(pyobj_to_param_block("", boundary.cast<py::dict>()));
-            self.SetBoundaryOptions(input);
+            boundary_params.push_back(std::move(input));
           }
         }
         else
           throw std::runtime_error("Invalid argument provided to SetBoundaryOptions.\n");
       }
+      if (clear_boundary_conditions or not boundary_params.empty())
+        self.SetBoundaryOptions(boundary_params, clear_boundary_conditions);
     },
     R"(
     Set or clear boundary conditions.
@@ -899,16 +903,17 @@ WrapLBS(py::module& slv)
       py::list psi_list;
       for (const auto& vec : psi)
       {
-        auto array = py::array_t<double>(static_cast<py::ssize_t>(vec.size()),
-                                         vec.data(),
-                                         py::cast(self));
+        auto array = py::array_t<double>(static_cast<py::ssize_t>(vec.size()));
+        std::copy(vec.begin(), vec.end(), static_cast<double*>(array.mutable_data()));
         psi_list.append(array);
       }
       return psi_list;
     },
     R"(
-    Return psi as a list of NumPy arrays (float64), using zero-copy views into the
-    underlying data.
+    Return psi as a list of NumPy arrays (float64).
+
+    The arrays are copies of the current angular-flux state. Mutating them does not
+    mutate the problem.
     )"
   );
   do_problem.def(
@@ -1277,16 +1282,15 @@ WrapSteadyState(py::module& slv)
 
     Parameters
     ----------
-    problem : pyopensn.solver.LBSProblem
-        Existing LBSProblem instance.
+    problem : pyopensn.solver.DiscreteOrdinatesProblem
+        Existing discrete ordinates problem instance.
 
     Notes
     -----
-    If ``problem.options.read_restart_path`` is set, restart data is read
-    during :meth:`Initialize`. If ``problem.options.restart_writes_enabled`` is
-    true, a restart dump is written after :meth:`Execute` completes.
-    problem : pyopensn.solver.DiscreteOrdinatesProblem
-        Existing discrete ordinates problem instance.
+    If the problem was constructed with ``options={'read_restart_path': ...}``,
+    restart data is read during :meth:`Initialize`. If it was constructed with
+    ``options={'restart_writes_enabled': True, ...}``, a restart dump is written
+    after :meth:`Execute` completes.
     )"
   );
   steady_state_solver.def(
@@ -1394,10 +1398,11 @@ WrapTransient(py::module& slv)
     The associated problem must have ``save_angular_flux=True`` enabled. This
     is required for transient problems.
 
-    If ``problem.options.read_restart_path`` is set, restart data is read
-    during :meth:`Initialize`. If ``problem.options.restart_writes_enabled`` is
-    true, timed restart dumps may be written during :meth:`Execute` and a final
-    restart dump is written when execution completes.
+    If the problem was constructed with ``options={'read_restart_path': ...}``,
+    restart data is read during :meth:`Initialize`. If it was constructed with
+    ``options={'restart_writes_enabled': True, ...}``, timed restart dumps may
+    be written during :meth:`Execute` and a final restart dump is written when
+    execution completes.
     )"
   );
   transient_solver.def(
@@ -1715,10 +1720,11 @@ WrapPIteration(py::module& slv)
 
     Notes
     -----
-    If ``problem.options.read_restart_path`` is set, restart data is read
-    during :meth:`Initialize`. If ``problem.options.restart_writes_enabled`` is
-    true, timed restart dumps may be written during the outer iteration loop
-    and a final restart dump is written when execution completes.
+    If the problem was constructed with ``options={'read_restart_path': ...}``,
+    restart data is read during :meth:`Initialize`. If it was constructed with
+    ``options={'restart_writes_enabled': True, ...}``, timed restart dumps may
+    be written during the outer iteration loop and a final restart dump is
+    written when execution completes.
     )"
   );
   pi_k_eigen_solver.def(
