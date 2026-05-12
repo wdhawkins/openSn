@@ -27,6 +27,7 @@ public:
 protected:
   void PreSetupCallback() override;
   void SetConvergenceTest() override;
+  void SetMonitor() override;
   void SetSystemSize() override;
   void SetSystem() override;
   void SetPreconditioner() override;
@@ -38,6 +39,10 @@ protected:
 
   std::vector<double> saved_q_moments_local_;
   Vec rhs_preconditioned_work_;
+
+private:
+  void CommitCurrentPETScSolution(Vec solution);
+  static PetscErrorCode IterationMonitor(KSP ksp, PetscInt iteration, PetscReal residual, void* ctx);
 };
 
 } // namespace opensn

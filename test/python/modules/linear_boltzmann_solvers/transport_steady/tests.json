@@ -1165,6 +1165,25 @@
     ]
   },
   {
+    "file": "steady_state_restart_wgs_ags.py",
+    "comment": "Steady-state restart continuation for single-groupset WGS and multi-groupset AGS",
+    "num_procs": 1,
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "STEADY_SINGLE_GROUPSET_RESTART_PASS=",
+        "goldvalue": 1,
+        "abs_tol": 0
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "STEADY_MULTI_GROUPSET_RESTART_PASS=",
+        "goldvalue": 1,
+        "abs_tol": 0
+      }
+    ]
+  },
+  {
     "file": "transport_3d_2_unstructured_restart.py",
     "comment": "3D Unstructured problem with restart",
     "num_procs": 4,

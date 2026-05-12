@@ -5,6 +5,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/discrete_ordinates_problem.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/compute/discrete_ordinates_compute.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/iterative_methods/ags_linear_solver.h"
+#include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/iterative_methods/wgs_context.h"
 #include "framework/logging/log.h"
 #include "framework/object_factory.h"
 #include "framework/utils/error.h"
@@ -69,8 +70,30 @@ SteadyStateSourceSolver::Execute()
 
   const auto& options = do_problem_->GetOptions();
 
+  auto restart_callback = [this, &options]() {
+    if (options.restart.writes_enabled and do_problem_->TriggerRestartDump())
+      do_problem_->WriteRestartData();
+  };
+  if (options.restart.writes_enabled)
+    for (size_t gsid = 0; gsid < do_problem_->GetNumWGSSolvers(); ++gsid)
+      do_problem_->GetWGSSolver(gsid)->SetRestartCallback(restart_callback);
+
   auto& ags_solver = *do_problem_->GetAGSSolver();
-  ags_solver.Solve();
+  try
+  {
+    ags_solver.Solve();
+  }
+  catch (...)
+  {
+    if (options.restart.writes_enabled)
+      for (size_t gsid = 0; gsid < do_problem_->GetNumWGSSolvers(); ++gsid)
+        do_problem_->GetWGSSolver(gsid)->SetRestartCallback(nullptr);
+    throw;
+  }
+
+  if (options.restart.writes_enabled)
+    for (size_t gsid = 0; gsid < do_problem_->GetNumWGSSolvers(); ++gsid)
+      do_problem_->GetWGSSolver(gsid)->SetRestartCallback(nullptr);
 
   if (options.use_precursors)
     ComputePrecursors(*do_problem_);
@@ -85,6 +108,32 @@ SteadyStateSourceSolver::Execute()
     ComputeBalance(*do_problem_);
 
   log.Log() << program_timer.GetTimeString() << " Finished solver execution " << GetName() << ".";
+}
+
+unsigned int
+SteadyStateSourceSolver::GetLastAGSSolveIterations() const
+{
+  OpenSnLogicalErrorIf(not initialized_, GetName() + ": Solver has not been initialized.");
+  auto ags_solver = do_problem_->GetAGSSolver();
+  OpenSnLogicalErrorIf(not ags_solver, GetName() + ": AGS solver not available.");
+  return ags_solver->GetLastSolveSummary().num_iterations;
+}
+
+std::vector<unsigned int>
+SteadyStateSourceSolver::GetLastWGSSolveIterations() const
+{
+  OpenSnLogicalErrorIf(not initialized_, GetName() + ": Solver has not been initialized.");
+
+  std::vector<unsigned int> iterations;
+  iterations.reserve(do_problem_->GetNumWGSSolvers());
+  for (size_t gsid = 0; gsid < do_problem_->GetNumWGSSolvers(); ++gsid)
+  {
+    auto context =
+      std::dynamic_pointer_cast<WGSContext>(do_problem_->GetWGSSolver(gsid)->GetContext());
+    OpenSnLogicalErrorIf(not context, GetName() + ": Cast to WGSContext failed.");
+    iterations.push_back(context->last_solve.num_iterations);
+  }
+  return iterations;
 }
 
 BalanceTable

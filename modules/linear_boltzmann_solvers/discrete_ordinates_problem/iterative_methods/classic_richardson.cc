@@ -94,13 +94,9 @@ ClassicRichardson::Solve()
     psi_new_ = groupset.angle_agg->GetNewDelayedAngularDOFsAsSTLVector();
     double pw_psi_change = ComputePointwiseChange(psi_new_, psi_old_);
 
-    if ((pw_phi_change < std::max(groupset.residual_tolerance * (1.0 - rho), 1.0e-10)) &&
-        (pw_psi_change < std::max(groupset.residual_tolerance, 1.0e-10)))
-    {
-      converged = true;
-    }
-    else
-      SyncLaggedStateToLatestIterate(*gs_context_ptr);
+    converged =
+      (pw_phi_change < std::max(groupset.residual_tolerance * (1.0 - rho), 1.0e-10)) &&
+      (pw_psi_change < std::max(groupset.residual_tolerance, 1.0e-10));
 
     if (verbose_)
     {
@@ -121,7 +117,15 @@ ClassicRichardson::Solve()
     if (converged)
     {
       SyncLaggedStateToLatestIterate(*gs_context_ptr);
+      do_problem.SetQMomentsFrom(saved_q_moments_local_);
+      ExecuteRestartCallback();
       break;
+    }
+    else
+    {
+      SyncLaggedStateToLatestIterate(*gs_context_ptr);
+      do_problem.SetQMomentsFrom(saved_q_moments_local_);
+      ExecuteRestartCallback();
     }
   }
 

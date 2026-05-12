@@ -5,6 +5,7 @@
 
 #include "modules/solver.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/compute/discrete_ordinates_compute.h"
+#include <vector>
 
 namespace opensn
 {
@@ -19,6 +20,10 @@ public:
   void Initialize() override;
 
   void Execute() override;
+
+  unsigned int GetLastAGSSolveIterations() const;
+
+  std::vector<unsigned int> GetLastWGSSolveIterations() const;
 
   BalanceTable ComputeBalanceTable() const;
 

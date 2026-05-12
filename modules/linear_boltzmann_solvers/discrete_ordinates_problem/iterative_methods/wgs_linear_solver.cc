@@ -47,6 +47,12 @@ WGSLinearSolver::SetConvergenceTest()
 }
 
 void
+WGSLinearSolver::SetMonitor()
+{
+  OpenSnPETScCall(KSPMonitorSet(ksp_, &WGSLinearSolver::IterationMonitor, this, nullptr));
+}
+
+void
 WGSLinearSolver::SetSystemSize()
 {
   auto gs_context_ptr = std::dynamic_pointer_cast<WGSContext>(context_ptr_);
@@ -247,6 +253,42 @@ WGSLinearSolver::PostSolveCallback()
 
   // Context specific callback
   gs_context_ptr->PostSolveCallback();
+
+  ExecuteRestartCallback();
+}
+
+void
+WGSLinearSolver::CommitCurrentPETScSolution(Vec solution)
+{
+  auto gs_context_ptr = std::dynamic_pointer_cast<WGSContext>(context_ptr_);
+  auto& groupset = gs_context_ptr->groupset;
+  auto& do_problem = gs_context_ptr->do_problem;
+
+  LBSVecOps::SetPrimarySTLvectorFromGSPETScVec(
+    do_problem, groupset, solution, PhiSTLOption::PHI_NEW);
+  LBSVecOps::SetPrimarySTLvectorFromGSPETScVec(
+    do_problem, groupset, solution, PhiSTLOption::PHI_OLD);
+  do_problem.SetQMomentsFrom(saved_q_moments_local_);
+}
+
+PetscErrorCode
+WGSLinearSolver::IterationMonitor(KSP ksp, PetscInt iteration, PetscReal /*residual*/, void* ctx)
+{
+  if (iteration <= 0)
+    return PETSC_SUCCESS;
+
+  auto* solver = static_cast<WGSLinearSolver*>(ctx);
+  if (not solver->restart_callback_)
+    return PETSC_SUCCESS;
+
+  Vec solution = nullptr;
+  PetscErrorCode ierr = KSPBuildSolution(ksp, nullptr, &solution);
+  if (ierr != PETSC_SUCCESS)
+    return ierr;
+
+  solver->CommitCurrentPETScSolution(solution);
+  solver->ExecuteRestartCallback();
+  return PETSC_SUCCESS;
 }
 
 } // namespace opensn

@@ -3,6 +3,7 @@
 
 #include "python/lib/py_wrappers.h"
 #include <pybind11/functional.h>
+#include <pybind11/stl.h>
 #include "framework/logging/log.h"
 #include "framework/runtime.h"
 #include "framework/field_functions/field_function_grid_based.h"
@@ -1368,6 +1369,16 @@ WrapSteadyState(py::module& slv)
     ranks must be read with the same rank count and a compatible problem
     definition.
     )"
+  );
+  steady_state_solver.def(
+    "GetLastAGSSolveIterations",
+    &SteadyStateSourceSolver::GetLastAGSSolveIterations,
+    "Return the number of AGS iterations reported by the last Execute call."
+  );
+  steady_state_solver.def(
+    "GetLastWGSSolveIterations",
+    &SteadyStateSourceSolver::GetLastWGSSolveIterations,
+    "Return WGS iteration counts, one entry per groupset, from the last Execute call."
   );
   steady_state_solver.def(
     "ComputeBalanceTable",
