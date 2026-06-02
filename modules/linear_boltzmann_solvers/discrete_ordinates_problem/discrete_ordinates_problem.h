@@ -249,7 +249,6 @@ protected:
   std::map<std::shared_ptr<AngularQuadrature>, std::vector<std::unique_ptr<FLUDSCommonData>>>
     quadrature_fluds_commondata_map_;
 
-  std::vector<int> verbose_sweep_angles_;
   const std::string sweep_type_;
   /** @} */
 
@@ -277,9 +276,6 @@ protected:
   std::size_t max_angleset_size_ = 0;
   /// Max group-set size.
   unsigned int max_groupset_size_ = 0;
-
-  std::shared_ptr<GridFaceHistogram> grid_face_histogram_ = nullptr;
-
   std::vector<std::vector<double>> psi_new_local_;
   std::vector<std::vector<double>> psi_old_local_;
   std::optional<SweepChunkMode> sweep_chunk_mode_;
@@ -333,16 +329,6 @@ private:
                       std::map<uint64_t, std::shared_ptr<SweepBoundary>>& boundaries,
                       const MPICommunicatorSet& in_comm_set);
   std::shared_ptr<SweepChunk> CreateCBCDSweepChunk(LBSGroupset& groupset);
-
-  /**
-   * This routine groups angle-indices to groups sharing the same sweep ordering. It also takes
-   * geometry into account.
-   */
-  std::pair<UniqueSOGroupings, DirIDToSOMap>
-  AssociateSOsAndDirections(std::shared_ptr<MeshContinuum> grid,
-                            const AngularQuadrature& quadrature,
-                            AngleAggregationType agg_type,
-                            GeometryType lbs_geo_type);
 
   void UpdateAngularFluxStorage();
   void UpdateAngularFluxFieldFunction(FieldFunctionGridBased& ff,
