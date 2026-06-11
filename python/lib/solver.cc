@@ -1713,8 +1713,7 @@ WrapTransient(py::module& slv)
     )");
   transient_solver.def(
     "SetPreAdvanceCallback",
-    static_cast<void (TransientSolver::*)(std::nullptr_t)>(
-      &TransientSolver::SetPreAdvanceCallback),
+    py::overload_cast<std::nullptr_t>(&TransientSolver::SetPreAdvanceCallback),
     "Clear the PreAdvance callback by passing None.");
   transient_solver.def(
     "SetPostAdvanceCallback",
@@ -1730,8 +1729,7 @@ WrapTransient(py::module& slv)
     )");
   transient_solver.def(
     "SetPostAdvanceCallback",
-    static_cast<void (TransientSolver::*)(std::nullptr_t)>(
-      &TransientSolver::SetPostAdvanceCallback),
+    py::overload_cast<std::nullptr_t>(&TransientSolver::SetPostAdvanceCallback),
     "Clear the PostAdvance callback by passing None.");
   transient_solver.def(
     "ComputeBalanceTable",
