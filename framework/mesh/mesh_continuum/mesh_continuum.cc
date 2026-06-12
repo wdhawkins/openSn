@@ -146,6 +146,8 @@ MeshContinuum::ClearCellReferences()
   ghost_cells_.clear();
   global_cell_id_to_local_id_map_.clear();
   global_cell_id_to_nonlocal_id_map_.clear();
+  cells.local_fast_.clear();
+  cells.ghost_fast_.clear();
   vertices.Clear();
 }
 
@@ -395,7 +397,7 @@ MeshContinuum::FindAssociatedCellVertices(const CellFace& cur_face,
 size_t
 MeshContinuum::MapCellGlobalID2LocalID(const uint64_t global_id) const
 {
-  return global_cell_id_to_local_id_map_.at(global_id);
+  return cells.local_fast_.at(global_id);
 }
 
 size_t

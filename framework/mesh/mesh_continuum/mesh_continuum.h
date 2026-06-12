@@ -93,7 +93,7 @@ public:
   /// Returns whether the cell with the given global id is locally owned.
   bool IsCellLocal(uint64_t global_id) const noexcept
   {
-    return global_cell_id_to_local_id_map_.contains(global_id);
+    return cells.local_fast_.count(global_id) != 0;
   }
 
   /**

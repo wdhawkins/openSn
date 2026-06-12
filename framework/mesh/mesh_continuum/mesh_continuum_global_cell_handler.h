@@ -5,6 +5,7 @@
 
 #include "framework/mesh/cell/cell.h"
 #include <map>
+#include <unordered_map>
 
 namespace opensn
 {
@@ -58,10 +59,14 @@ private:
   std::vector<std::shared_ptr<Cell>>& local_cells_ref_;
   std::vector<std::shared_ptr<Cell>>& ghost_cells_ref_;
 
-  /// Global to local ID map
+  /// Global to local ID map (ordered, authoritative for iteration)
   std::map<uint64_t, uint64_t>& global_to_local_map_;
-  /// Global to ghost ID map
+  /// Global to ghost ID map (ordered, authoritative for iteration)
   std::map<uint64_t, uint64_t>& global_to_ghost_map_;
+
+  /// O(1) parallel lookup maps — kept in sync with the ordered maps above
+  std::unordered_map<uint64_t, uint64_t> local_fast_;
+  std::unordered_map<uint64_t, uint64_t> ghost_fast_;
 };
 
 } // namespace opensn
