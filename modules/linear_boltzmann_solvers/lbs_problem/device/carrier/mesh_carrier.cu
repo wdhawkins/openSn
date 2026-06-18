@@ -7,12 +7,15 @@
 namespace opensn
 {
 
-MeshCarrier::MeshCarrier(LBSProblem& lbs_problem, TotalXSCarrier& xs, OutflowCarrier& outflow)
+MeshCarrier::MeshCarrier(LBSProblem& lbs_problem,
+                         TotalXSCarrier& xs,
+                         SourceXSCarrier& source_xs,
+                         OutflowCarrier& outflow)
 {
   std::uint64_t size = ComputeSize(lbs_problem);
   host_memory_.reserve(size);
   host_memory_.resize(size);
-  Assemble(lbs_problem, xs, outflow);
+  Assemble(lbs_problem, xs, source_xs, outflow);
   device_memory_ = crb::DeviceMemory<char>(size);
   crb::copy(device_memory_, host_memory_, size);
 }
@@ -35,6 +38,8 @@ MeshCarrier::ComputeSize(LBSProblem& lbs_problem)
     // number of faces and nodes
     alloc_size += 2 * sizeof(std::uint32_t);
     // pointer to total cross sections
+    alloc_size += sizeof(std::uintptr_t);
+    // pointer to source cross sections
     alloc_size += sizeof(std::uintptr_t);
     // phi address
     alloc_size += sizeof(std::uint64_t);
@@ -72,7 +77,10 @@ MeshCarrier::ComputeSize(LBSProblem& lbs_problem)
 }
 
 void
-MeshCarrier::Assemble(LBSProblem& lbs_problem, TotalXSCarrier& xs, OutflowCarrier& outflow)
+MeshCarrier::Assemble(LBSProblem& lbs_problem,
+                      TotalXSCarrier& xs,
+                      SourceXSCarrier& source_xs,
+                      OutflowCarrier& outflow)
 {
   // get information
   MeshContinuum& mesh = *(lbs_problem.GetGrid());
@@ -115,6 +123,11 @@ MeshCarrier::Assemble(LBSProblem& lbs_problem, TotalXSCarrier& xs, OutflowCarrie
     double** total_xs_data = reinterpret_cast<double**>(cell_data);
     *(total_xs_data++) = xs.GetXSGPUData(cell.block_id);
     cell_data = reinterpret_cast<char*>(total_xs_data);
+    // pointer to source cross section
+    SourceXSCarrier::BlockData** source_xs_data =
+      reinterpret_cast<SourceXSCarrier::BlockData**>(cell_data);
+    *(source_xs_data++) = source_xs.GetXSGPUData(cell.block_id);
+    cell_data = reinterpret_cast<char*>(source_xs_data);
     // phi address
     std::uint64_t* phi_address_data = reinterpret_cast<std::uint64_t*>(cell_data);
     const CellLBSView& cell_transport_view = cell_transport_views[cell.local_id];

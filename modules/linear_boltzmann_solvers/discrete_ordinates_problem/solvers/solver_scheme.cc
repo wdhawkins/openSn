@@ -5,6 +5,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/discrete_ordinates_problem.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/iterative_methods/ags_linear_solver.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/iterative_methods/classic_richardson.h"
+#include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/iterative_methods/device_classic_richardson.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/iterative_methods/sweep_wgs_context.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/iterative_methods/wgs_linear_solver.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/angle_set/angle_set.h"
@@ -59,6 +60,14 @@ MakeWGSSolver(LBSGroupset& groupset,
 {
   if (groupset.iterative_method == LinearSystemSolver::IterativeMethod::CLASSIC_RICHARDSON)
     return std::make_shared<ClassicRichardson>(wgs_context, verbose_inner_iterations);
+
+  if (groupset.iterative_method == LinearSystemSolver::IterativeMethod::DEVICE_CLASSIC_RICHARDSON)
+  {
+    auto sweep_context = std::dynamic_pointer_cast<SweepWGSContext>(wgs_context);
+    OpenSnLogicalErrorIf(not sweep_context,
+                         "device_classic_richardson requires a sweep WGS context.");
+    return std::make_shared<DeviceClassicRichardson>(sweep_context, verbose_inner_iterations);
+  }
 
   return std::make_shared<WGSLinearSolver>(wgs_context);
 }

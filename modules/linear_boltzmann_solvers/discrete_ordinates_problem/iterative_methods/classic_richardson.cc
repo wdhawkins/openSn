@@ -14,6 +14,7 @@
 #include "framework/math/math.h"
 #include "framework/logging/log.h"
 #include "framework/utils/caliper_scopes.h"
+#include "framework/utils/error.h"
 #include "framework/utils/timer.h"
 #include "framework/runtime.h"
 #include "caliper/cali.h"
@@ -22,10 +23,10 @@
 
 namespace opensn
 {
-
 ClassicRichardson::ClassicRichardson(const std::shared_ptr<WGSContext>& gs_context_ptr,
                                      bool verbose = true)
-  : LinearSystemSolver(IterativeMethod::CLASSIC_RICHARDSON, gs_context_ptr), verbose_(verbose)
+  : LinearSystemSolver(gs_context_ptr->groupset.iterative_method, gs_context_ptr),
+    verbose_(verbose)
 {
 }
 
@@ -68,11 +69,13 @@ ClassicRichardson::Solve()
     CALI_CXX_MARK_LOOP_ITERATION(wgs_iteration, k);
 
     num_iterations = k + 1;
-    do_problem.SetQMomentsFrom(saved_q_moments_local_);
     {
-      CALI_CXX_MARK_SCOPE("Source");
-      gs_context_ptr->set_source_function(
-        groupset, do_problem.GetQMomentsLocal(), do_problem.GetPhiOldLocal(), scope);
+      do_problem.SetQMomentsFrom(saved_q_moments_local_);
+      {
+        CALI_CXX_MARK_SCOPE("Source");
+        gs_context_ptr->set_source_function(
+          groupset, do_problem.GetQMomentsLocal(), do_problem.GetPhiOldLocal(), scope);
+      }
     }
     gs_context_ptr->ApplyInverseTransportOperator(scope);
 
@@ -104,20 +107,20 @@ ClassicRichardson::Solve()
         do_problem, groupset, delta_phi, do_problem.GetPhiNewLocal());
     }
 
-    double pw_phi_change = ComputePointwisePhiChange(do_problem, groupset.id);
+    const double pw_phi_change = ComputePointwisePhiChange(do_problem, groupset.id);
     last_pw_phi_change = pw_phi_change;
-    double rho = (k == 0) ? 0.0 : sqrt(pw_phi_change / pw_phi_change_prev);
-    pw_phi_change_prev = pw_phi_change;
 
     psi_new_ = groupset.angle_agg->GetNewDelayedAngularDOFsAsSTLVector();
-    double pw_psi_change = ComputePointwiseChange(psi_new_, psi_old_);
+    const double pw_psi_change = ComputePointwiseChange(psi_new_, psi_old_);
+    const auto convergence = EvaluateRichardsonConvergence(pw_phi_change,
+                                                           pw_phi_change_prev,
+                                                           pw_psi_change,
+                                                           not psi_new_.empty(),
+                                                           groupset.residual_tolerance);
+    pw_phi_change_prev = pw_phi_change;
 
-    if ((pw_phi_change < std::max(groupset.residual_tolerance * (1.0 - rho), 1.0e-10)) &&
-        (pw_psi_change < std::max(groupset.residual_tolerance, 1.0e-10)))
-    {
-      converged = true;
-    }
-    else
+    converged = convergence.converged;
+    if (not converged)
       SyncLaggedStateToLatestIterate(*gs_context_ptr);
 
     if (verbose_)
@@ -127,9 +130,9 @@ ClassicRichardson::Solve()
                  << groupset.last_group << "]"
                  << " iteration = " << k;
       AppendNumericField(iter_stats, "phi_change", pw_phi_change, Scientific(6));
-      if (not psi_new_.empty())
+      if (convergence.psi_check_active)
         AppendNumericField(iter_stats, "psi_change", pw_psi_change, Scientific(6));
-      AppendNumericField(iter_stats, "rho_est", rho, Fixed(4));
+      AppendNumericField(iter_stats, "rho_est", convergence.rho, Fixed(4));
 
       if (converged)
         iter_stats << ", status = " << IterationStatusName(IterationStatus::CONVERGED);

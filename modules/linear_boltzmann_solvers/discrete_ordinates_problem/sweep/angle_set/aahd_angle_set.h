@@ -40,13 +40,25 @@ public:
 
   void SetMaxBufferMessages(int count) override { async_comm_.SetMaxNumMessages(count); }
 
-  void PrepostReceives();
+  void PrepostReceives(bool use_device_buffers = false, bool delayed_psi_on_device = false);
 
   bool IsReady();
 
   void WaitForDownstreamAndDelayed();
 
   AngleSetStatus AngleSetAdvance(SweepChunk& sweep_chunk, AngleSetStatus permission) override;
+
+  /// Upload non-local incoming psi, run kernel, synchronize stream. No download.
+  void SweepKernelAndSync(SweepChunk& sweep_chunk, bool incoming_psi_on_device = false);
+
+  /// Download non-local outgoing psi, signal intra-rank followers, and send downstream psi.
+  void SendAfterFirstPass(bool use_device_buffers = false);
+
+  /// Final pass: download local delayed psi + save angular flux, copy to destination psi.
+  void FinalizeAfterSweep(SweepChunk& sweep_chunk,
+                          bool use_device_buffers = false,
+                          bool final_download = true,
+                          bool download_delayed_psi = true);
 
   AngleSetStatus FlushSendBuffers() override { return AngleSetStatus::MESSAGES_SENT; }
 
@@ -79,6 +91,7 @@ protected:
 
   /// Boundary offset on GPU.
   crb::DeviceMemory<std::uint64_t> device_boundary_offsets_;
+
 };
 
 } // namespace opensn

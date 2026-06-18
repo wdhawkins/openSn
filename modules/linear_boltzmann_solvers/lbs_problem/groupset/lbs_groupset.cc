@@ -35,7 +35,6 @@ LBSGroupset::GetInputParameters()
                               "The number of subsets to apply to sets of angles that have been "
                               "aggregated. This is useful for increasing pipeline size for "
                               "parallel simulations");
-
   // Iterative method
   params.AddOptionalParameter("inner_linear_method",
                               "petsc_richardson",
@@ -47,6 +46,11 @@ LBSGroupset::GetInputParameters()
                               30,
                               "If this inner linear solver is gmres, sets the number of "
                               "iterations before a restart occurs.");
+  params.AddOptionalParameter(
+    "force_host_source",
+    false,
+    "For device_classic_richardson, rebuild the iteration source on the host instead of using "
+    "the device fast-source path.");
   params.AddOptionalParameter(
     "allow_cycles", true, "Flag indicating whether cycles are to be allowed or not");
 
@@ -95,10 +99,12 @@ LBSGroupset::GetInputParameters()
   params.ConstrainParameterRange("angle_aggregation_type",
                                  AllowableRangeList::New({"polar", "single", "azimuthal"}));
   params.ConstrainParameterRange("angle_aggregation_num_subsets", AllowableRangeLowLimit::New(1));
-  params.ConstrainParameterRange(
-    "inner_linear_method",
-    AllowableRangeList::New(
-      {"classic_richardson", "petsc_richardson", "petsc_gmres", "petsc_bicgstab"}));
+  params.ConstrainParameterRange("inner_linear_method",
+                                 AllowableRangeList::New({"classic_richardson",
+                                                          "device_classic_richardson",
+                                                          "petsc_richardson",
+                                                          "petsc_gmres",
+                                                          "petsc_bicgstab"}));
   params.ConstrainParameterRange("l_abs_tol", AllowableRangeLowLimit::New(1.0e-18));
   params.ConstrainParameterRange("l_max_its", AllowableRangeLowLimit::New(0));
   params.ConstrainParameterRange("gmres_restart_interval", AllowableRangeLowLimit::New(1));
@@ -132,6 +138,7 @@ LBSGroupset::Init(int aid)
   residual_tolerance = 1.0e-6;
   max_iterations = 200;
   gmres_restart_intvl = 30;
+  force_host_source = false;
   allow_cycles = false;
   apply_wgdsa = false;
   apply_tgdsa = false;
@@ -195,6 +202,8 @@ LBSGroupset::LBSGroupset( // NOLINT(cppcoreguidelines-pro-type-member-init)
   const auto inner_linear_method = params.GetParamValue<std::string>("inner_linear_method");
   if (inner_linear_method == "classic_richardson")
     iterative_method = LinearSystemSolver::IterativeMethod::CLASSIC_RICHARDSON;
+  else if (inner_linear_method == "device_classic_richardson")
+    iterative_method = LinearSystemSolver::IterativeMethod::DEVICE_CLASSIC_RICHARDSON;
   else if (inner_linear_method == "petsc_richardson")
     iterative_method = LinearSystemSolver::IterativeMethod::PETSC_RICHARDSON;
   else if (inner_linear_method == "petsc_gmres")
@@ -203,6 +212,7 @@ LBSGroupset::LBSGroupset( // NOLINT(cppcoreguidelines-pro-type-member-init)
     iterative_method = LinearSystemSolver::IterativeMethod::PETSC_BICGSTAB;
 
   gmres_restart_intvl = params.GetParamValue<int>("gmres_restart_interval");
+  force_host_source = params.GetParamValue<bool>("force_host_source");
   allow_cycles = params.GetParamValue<bool>("allow_cycles");
   residual_tolerance = params.GetParamValue<double>("l_abs_tol");
   max_iterations = params.GetParamValue<unsigned int>("l_max_its");

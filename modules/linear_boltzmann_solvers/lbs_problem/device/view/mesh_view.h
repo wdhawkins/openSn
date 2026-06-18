@@ -4,6 +4,7 @@
 #pragma once
 
 #include "modules/linear_boltzmann_solvers/lbs_problem/device/view/inline_macro.h"
+#include "modules/linear_boltzmann_solvers/lbs_problem/device/carrier/source_xs_carrier.h"
 #include <array>
 #include <cstdint>
 
@@ -63,6 +64,11 @@ struct CellView
     const double* const* total_xs_data = reinterpret_cast<const double* const*>(cell_data);
     total_xs = *(total_xs_data++);
     cell_data = reinterpret_cast<const char*>(total_xs_data);
+    // source cross section pointer
+    const SourceXSCarrier::BlockData* const* source_xs_data =
+      reinterpret_cast<const SourceXSCarrier::BlockData* const*>(cell_data);
+    source_xs = *(source_xs_data++);
+    cell_data = reinterpret_cast<const char*>(source_xs_data);
     // phi address
     const std::uint64_t* phi_address_data = reinterpret_cast<const std::uint64_t*>(cell_data);
     phi_address = *(phi_address_data++);
@@ -87,6 +93,7 @@ struct CellView
   std::uint32_t num_nodes;
   std::uint32_t num_faces;
   const double* total_xs;
+  const SourceXSCarrier::BlockData* source_xs;
   std::uint64_t phi_address;
   std::uint64_t save_psi_index;
   const double* GM_data;

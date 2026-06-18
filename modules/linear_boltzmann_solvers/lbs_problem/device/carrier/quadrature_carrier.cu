@@ -26,6 +26,8 @@ QuadratureCarrier::ComputeSize(const LBSGroupset& groupset)
   const AngularQuadrature& quadrature = *(groupset.quadrature);
   std::size_t num_angles = quadrature.GetNumAngles();
   auto num_moments = quadrature.GetNumMoments();
+  // moment-to-ell map, padded to keep direction data 64-bit aligned
+  alloc_size += ((num_moments + 1) & ~static_cast<std::size_t>(1)) * sizeof(std::uint32_t);
   // size of each directions
   alloc_size += num_angles * (4 * sizeof(double) + 2 * num_moments * sizeof(double));
   return alloc_size;
@@ -46,6 +48,15 @@ QuadratureCarrier::Assemble(const LBSGroupset& groupset)
   auto num_moments = quadrature.GetNumMoments();
   *(num_angles_and_moments_data++) = num_moments;
   data = reinterpret_cast<char*>(num_angles_and_moments_data);
+  // moment-to-ell map
+  const std::size_t padded_num_moments = (num_moments + 1) & ~static_cast<std::size_t>(1);
+  auto* moment_ell_data = reinterpret_cast<std::uint32_t*>(data);
+  const auto& m_to_ell_em_map = quadrature.GetMomentToHarmonicsIndexMap();
+  for (std::size_t m = 0; m < num_moments; ++m)
+    *(moment_ell_data++) = m_to_ell_em_map[m].ell;
+  for (std::size_t m = num_moments; m < padded_num_moments; ++m)
+    *(moment_ell_data++) = 0;
+  data = reinterpret_cast<char*>(moment_ell_data);
   // direction data
   for (std::size_t direction_num = 0; direction_num < num_angles; ++direction_num)
   {

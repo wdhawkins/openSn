@@ -146,6 +146,7 @@ SweepWGSContext::ApplyInverseTransportOperator(SourceFlags scope)
     static_cast<double>(duration_cast<nanoseconds>(sweep_end - sweep_start).count()) / 1.0e+9;
   sweep_stats_.total_sweep_time += sweep_time;
   ++sweep_stats_.num_sweeps;
+  ++sweep_stats_.num_sweep_passes;
 }
 
 void

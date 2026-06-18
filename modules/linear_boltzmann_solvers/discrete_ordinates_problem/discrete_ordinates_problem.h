@@ -13,6 +13,7 @@
 #include <optional>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 namespace opensn
@@ -157,6 +158,8 @@ public:
 
   void CopyPhiAndSrcToDevice();
   void CopyPhiAndOutflowBackToHost();
+  void CopyDeviceBoundaryDelayedPsiNewToOld(int groupset_id);
+  double ComputeDeviceBoundaryDelayedPsiPointwiseChange(int groupset_id);
   /**
    * Transfer data in boundary to device or vice-versa.
    * \param groupset_id Groupset ID.

@@ -29,6 +29,15 @@ public:
   /// Copy data from GPU.
   void CopyFromDevice() { crb::copy(host_, device_, host_.size()); }
 
+  /// Copy data from another device mirror.
+  void CopyDeviceFrom(const DeviceVectorMirror<T>& other)
+  {
+    crb::copy(device_, other.device_, host_.size());
+  }
+
+  /// Zero the device buffer in-place (no host transfer).
+  void ZeroOnDevice() { device_.zero_fill(); }
+
   /// Get pointer to device memory.
   inline T* GetDevicePtr() { return device_.get(); }
 

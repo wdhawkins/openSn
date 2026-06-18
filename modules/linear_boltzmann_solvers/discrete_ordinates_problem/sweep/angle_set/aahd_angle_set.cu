@@ -39,18 +39,20 @@ AAHD_AngleSet::InitializeDelayedUpstreamData()
 }
 
 void
-AAHD_AngleSet::PrepostReceives()
+AAHD_AngleSet::PrepostReceives(bool use_device_buffers, bool delayed_psi_on_device)
 {
-  async_comm_.PrepostReceiveUpstreamPsi(static_cast<int>(this->GetID()));
-  async_comm_.PrepostReceiveDelayedData(static_cast<int>(this->GetID()));
+  async_comm_.PrepostReceiveUpstreamPsi(static_cast<int>(this->GetID()), use_device_buffers);
+  async_comm_.PrepostReceiveDelayedData(static_cast<int>(this->GetID()), use_device_buffers);
   auto* aahd_fluds = static_cast<AAHD_FLUDS*>(fluds_.get());
-  aahd_fluds->CopyDelayedPsiToDevice();
+  if (not delayed_psi_on_device)
+    aahd_fluds->CopyDelayedPsiToDevice();
 }
 
 void
 AAHD_AngleSet::WaitForDownstreamAndDelayed()
 {
   async_comm_.WaitForDownstreamPsi();
+  async_comm_.WaitForPromotedDelayedPsi();
   async_comm_.WaitForDelayedIncomingPsi();
 }
 
@@ -65,31 +67,82 @@ AAHD_AngleSet::AngleSetAdvance(SweepChunk& sweep_chunk, AngleSetStatus permissio
 {
   if (executed_)
     return AngleSetStatus::FINISHED;
+  SweepKernelAndSync(sweep_chunk);
+  SendAfterFirstPass();
+  FinalizeAfterSweep(sweep_chunk);
+  return AngleSetStatus::FINISHED;
+}
 
+void
+AAHD_AngleSet::SweepKernelAndSync(SweepChunk& sweep_chunk, bool incoming_psi_on_device)
+{
   auto* aahd_fluds = static_cast<AAHD_FLUDS*>(fluds_.get());
   auto& aahd_sweep_chunk = static_cast<AAHDSweepChunk&>(sweep_chunk);
-
-  aahd_fluds->CopyNonLocalIncomingPsiToDevice();
+  if (not incoming_psi_on_device)
+    aahd_fluds->CopyNonLocalIncomingPsiToDevice();
   aahd_fluds->AllocateSaveAngularFlux(aahd_sweep_chunk.GetProblem(),
                                       aahd_sweep_chunk.GetGroupset());
   aahd_sweep_chunk.Sweep(*this);
-  aahd_fluds->CopyPsiFromDevice();
-  aahd_fluds->CopySaveAngularFluxFromDevice();
   stream_.synchronize();
+}
 
+void
+AAHD_AngleSet::SendAfterFirstPass(bool use_device_buffers)
+{
+  auto* aahd_fluds = static_cast<AAHD_FLUDS*>(fluds_.get());
+  if (aahd_fluds->HasNonLocalOutgoingPsi() and not use_device_buffers)
+  {
+    aahd_fluds->CopyNonLocalOutgoingPsiFromDevice();
+    stream_.synchronize();
+  }
   if (not following_angle_sets_.empty())
   {
     std::scoped_lock lk(m);
     for (auto& following_as : following_angle_sets_)
       following_as->DecrementCounter();
   }
-  async_comm_.SendDownstreamPsi(static_cast<int>(this->GetID()));
+  if (use_device_buffers)
+  {
+    std::scoped_lock lk(m);
+    async_comm_.SendDownstreamPsi(static_cast<int>(this->GetID()), use_device_buffers);
+  }
+  else
+    async_comm_.SendDownstreamPsi(static_cast<int>(this->GetID()), use_device_buffers);
+}
 
-  aahd_fluds->CopySaveAngularFluxToDestinationPsi(
-    aahd_sweep_chunk.GetProblem(), aahd_sweep_chunk.GetGroupset(), *this);
-
+void
+AAHD_AngleSet::FinalizeAfterSweep(SweepChunk& sweep_chunk,
+                                  bool use_device_buffers,
+                                  bool final_download,
+                                  bool download_delayed_psi)
+{
+  auto* aahd_fluds = static_cast<AAHD_FLUDS*>(fluds_.get());
+  auto& aahd_sweep_chunk = static_cast<AAHDSweepChunk&>(sweep_chunk);
+  // Non-local outgoing psi was already downloaded and sent in SendAfterFirstPass().
+  // Here we download local delayed psi (FAS + AB) and saved angular flux.
+  const bool need_local_delayed_download = aahd_fluds->HasAnyLocalDelayedPsi();
+  const bool need_promoted_download = aahd_fluds->HasPromotedDelayedOutgoingPsi();
+  if (download_delayed_psi and need_local_delayed_download)
+    aahd_fluds->CopyLocalDelayedPsiFromDevice();
+  if (need_promoted_download and not use_device_buffers)
+    aahd_fluds->CopyPromotedDelayedOutgoingPsiFromDevice();
+  if (final_download)
+    aahd_fluds->CopySaveAngularFluxFromDevice();
+  if ((download_delayed_psi and need_local_delayed_download) or
+      (final_download and (need_promoted_download or aahd_fluds->HasSaveAngularFlux())) or
+      use_device_buffers)
+    stream_.synchronize();
+  if (use_device_buffers)
+  {
+    std::scoped_lock lk(m);
+    async_comm_.SendPromotedDelayedPsi(static_cast<int>(this->GetID()), use_device_buffers);
+  }
+  else
+    async_comm_.SendPromotedDelayedPsi(static_cast<int>(this->GetID()), use_device_buffers);
+  if (final_download)
+    aahd_fluds->CopySaveAngularFluxToDestinationPsi(
+      aahd_sweep_chunk.GetProblem(), aahd_sweep_chunk.GetGroupset(), *this);
   executed_ = true;
-  return AngleSetStatus::FINISHED;
 }
 
 void

@@ -30,6 +30,7 @@ class MPICommunicatorSet;
 class GridFaceHistogram;
 class FieldFunctionGridBased;
 class TotalXSCarrier;
+class SourceXSCarrier;
 class OutflowCarrier;
 class MeshCarrier;
 template <typename T>
@@ -186,6 +187,8 @@ public:
   /// Low-level device/runtime carriers used by solver components.
   TotalXSCarrier* GetTotalXSCarrier() { return total_xs_carrier_.get(); }
   const TotalXSCarrier* GetTotalXSCarrier() const { return total_xs_carrier_.get(); }
+  SourceXSCarrier* GetSourceXSCarrier() { return source_xs_carrier_.get(); }
+  const SourceXSCarrier* GetSourceXSCarrier() const { return source_xs_carrier_.get(); }
 
   OutflowCarrier* GetOutflowCarrier() { return outflow_carrier_.get(); }
   const OutflowCarrier* GetOutflowCarrier() const { return outflow_carrier_.get(); }
@@ -195,9 +198,16 @@ public:
 
   DeviceVectorMirror<double>* GetSourceMomentsPinner() { return source_pinner_.get(); }
   const DeviceVectorMirror<double>* GetSourceMomentsPinner() const { return source_pinner_.get(); }
+  DeviceVectorMirror<double>* GetSourceBaseMomentsPinner() { return source_base_pinner_.get(); }
+  const DeviceVectorMirror<double>* GetSourceBaseMomentsPinner() const
+  {
+    return source_base_pinner_.get();
+  }
 
   DeviceVectorMirror<double>* GetPhiPinner() { return phi_pinner_.get(); }
   const DeviceVectorMirror<double>* GetPhiPinner() const { return phi_pinner_.get(); }
+  DeviceVectorMirror<double>* GetPhiOldPinner() { return phi_old_pinner_.get(); }
+  const DeviceVectorMirror<double>* GetPhiOldPinner() const { return phi_old_pinner_.get(); }
 
   /// Discretization and local transport data.
   /// Obtains a reference to the spatial discretization.
@@ -389,12 +399,15 @@ protected:
 
   /// Data carriers needed to run the sweep on GPU.
   std::shared_ptr<TotalXSCarrier> total_xs_carrier_ = nullptr;
+  std::shared_ptr<SourceXSCarrier> source_xs_carrier_ = nullptr;
   std::shared_ptr<OutflowCarrier> outflow_carrier_ = nullptr;
   std::shared_ptr<MeshCarrier> mesh_carrier_ = nullptr;
 
   /// Memory pinners for source moments and destination phi.
   std::shared_ptr<DeviceVectorMirror<double>> source_pinner_ = nullptr;
+  std::shared_ptr<DeviceVectorMirror<double>> source_base_pinner_ = nullptr;
   std::shared_ptr<DeviceVectorMirror<double>> phi_pinner_ = nullptr;
+  std::shared_ptr<DeviceVectorMirror<double>> phi_old_pinner_ = nullptr;
 
   /// Flag indicating if GPU acceleration is enabled.
   bool use_gpus_;

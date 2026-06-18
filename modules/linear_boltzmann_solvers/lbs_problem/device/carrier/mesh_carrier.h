@@ -4,6 +4,7 @@
 #pragma once
 
 #include "modules/linear_boltzmann_solvers/lbs_problem/device/carrier/carrier.h"
+#include "modules/linear_boltzmann_solvers/lbs_problem/device/carrier/source_xs_carrier.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/device/carrier/total_xs_carrier.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/outflow/outflow_carrier.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_problem.h"
@@ -18,7 +19,10 @@ class MeshCarrier : public Carrier
 {
 public:
   /// Constructor.
-  MeshCarrier(LBSProblem& lbs_problem, TotalXSCarrier& xs, OutflowCarrier& outflow);
+  MeshCarrier(LBSProblem& lbs_problem,
+              TotalXSCarrier& xs,
+              SourceXSCarrier& source_xs,
+              OutflowCarrier& outflow);
 
   /// Total number of cell nodes in the mesh.
   std::uint64_t num_nodes_total;
@@ -32,7 +36,10 @@ protected:
    * Gather the data of each cell and faces into a contiguous chunk of memory on the host before
    * copying the data to the device.
    */
-  void Assemble(LBSProblem& lbs_problem, TotalXSCarrier& xs, OutflowCarrier& outflow);
+  void Assemble(LBSProblem& lbs_problem,
+                TotalXSCarrier& xs,
+                SourceXSCarrier& source_xs,
+                OutflowCarrier& outflow);
 };
 
 } // namespace opensn

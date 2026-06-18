@@ -41,6 +41,10 @@ struct QuadratureView
     num_angles = *(num_angles_and_moments_data++);
     num_moments = *(num_angles_and_moments_data++);
     quad_data = reinterpret_cast<const char*>(num_angles_and_moments_data);
+    const std::uint32_t* moment_ell_ptr = reinterpret_cast<const std::uint32_t*>(quad_data);
+    moment_ell = moment_ell_ptr;
+    const std::uint32_t padded_num_moments = (num_moments + 1) & ~static_cast<std::uint32_t>(1);
+    quad_data = reinterpret_cast<const char*>(moment_ell_ptr + padded_num_moments);
     // direction data
     direction_data = reinterpret_cast<const double*>(quad_data);
   }
@@ -52,6 +56,7 @@ struct QuadratureView
 
   std::uint32_t num_angles;
   std::uint32_t num_moments;
+  const std::uint32_t* moment_ell;
   const double* direction_data;
 };
 

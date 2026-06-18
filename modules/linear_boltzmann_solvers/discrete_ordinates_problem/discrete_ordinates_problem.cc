@@ -46,6 +46,7 @@
 #include <cassert>
 #include <cmath>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 
@@ -334,6 +335,9 @@ DiscreteOrdinatesProblem::GetNumPhiIterativeUnknowns()
   std::uint64_t num_global_psi_dofs = 0;
   for (auto& groupset : groupsets_)
   {
+    if (groupset.iterative_method ==
+        LinearSystemSolver::IterativeMethod::DEVICE_CLASSIC_RICHARDSON)
+      continue;
     const auto num_delayed_psi_info = groupset.angle_agg->GetNumDelayedAngularDOFs();
     num_local_psi_dofs += num_delayed_psi_info.first;
     num_global_psi_dofs += num_delayed_psi_info.second;
@@ -813,10 +817,9 @@ DiscreteOrdinatesProblem::ResetMode(SweepChunkMode target_mode)
 
     // Reconstruct psi from the converged steady-state phi before enabling transient RHS time terms.
     ReinitializeSolverSchemes();
-    // A single call to RebuildAngularFluxFromConvergedPhi is insufficient with
-    // lagged angular fluxes. Instead, we perform a fixed-point iteration on the
-    // lagged fluxes with phi/q held at the converged steady-state value. This is
-    // a sweep-only reconstruction of psi.
+    // A single call to RebuildAngularFluxFromConvergedPhi is insufficient with lagged angular
+    // fluxes. Iterate the sweep-only psi reconstruction with phi/q held at the converged
+    // steady-state value.
     constexpr int max_reconstruction_passes = 50;
     constexpr double lagged_psi_rel_tol = 1.0e-3;
     const auto q_moments_ref = GetQMomentsLocal();

@@ -782,8 +782,8 @@ WrapLBS(py::module& slv)
               Angle aggregation method to use during sweeping.
           - angle_aggregation_num_subsets: int, default=1
               Number of angle subsets used for aggregation.
-          - inner_linear_method: {'classic_richardson', 'petsc_richardson',
-            'petsc_gmres', 'petsc_bicgstab'}, default='petsc_richardson'
+          - inner_linear_method: {'classic_richardson', 'device_classic_richardson',
+            'petsc_richardson', 'petsc_gmres', 'petsc_bicgstab'}, default='petsc_richardson'
               Iterative method used for inner linear solves.
           - l_abs_tol: float, default=1.0e-6
               Inner linear solver absolute residual tolerance.
@@ -1293,8 +1293,8 @@ WrapLBS(py::module& slv)
               Angle aggregation method to use during sweeping.
           - angle_aggregation_num_subsets: int, default=1
               Number of angle subsets used for aggregation.
-          - inner_linear_method: {'classic_richardson', 'petsc_richardson',
-            'petsc_gmres', 'petsc_bicgstab'}, default='petsc_richardson'
+          - inner_linear_method: {'classic_richardson', 'device_classic_richardson',
+            'petsc_richardson', 'petsc_gmres', 'petsc_bicgstab'}, default='petsc_richardson'
               Iterative method used for inner linear solves.
           - l_abs_tol: float, default=1.0e-6
               Inner linear solver absolute residual tolerance.

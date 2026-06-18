@@ -82,6 +82,10 @@ public:
 
   void CopyDelayedAngularFluxNewToOld(int groupset_id) override;
 
+  void GetDelayedAngularFluxStorageRanges(
+    int groupset_id,
+    std::vector<BoundaryDelayedAngularFluxRange>& ranges) const override;
+
   void GetReflectedMap(int groupset_id,
                        std::vector<std::vector<std::uint32_t>>& reflected_maps) override
   {

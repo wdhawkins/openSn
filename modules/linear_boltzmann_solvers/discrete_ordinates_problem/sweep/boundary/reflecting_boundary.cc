@@ -399,6 +399,21 @@ ReflectingBoundary::CopyDelayedAngularFluxNewToOld(int groupset_id)
   std::copy_n(flux, size, flux_old);
 }
 
+void
+ReflectingBoundary::GetDelayedAngularFluxStorageRanges(
+  int groupset_id,
+  std::vector<BoundaryDelayedAngularFluxRange>& ranges) const
+{
+  if (not opposing_reflected_)
+    return;
+
+  const auto& extra_data = extra_data_[groupset_id];
+  const auto groupset_size = bank_[groupset_id].groupset_size;
+  const auto size = extra_data.old_stride * groupset_size;
+  const auto current_offset = offset_[groupset_id] * groupset_size;
+  ranges.push_back({current_offset, current_offset + size, size});
+}
+
 double*
 ReflectingBoundary::PsiIncoming(std::uint32_t cell_local_id,
                                 unsigned int face_num,

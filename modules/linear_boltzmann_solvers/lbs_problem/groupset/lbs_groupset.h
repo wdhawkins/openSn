@@ -74,6 +74,7 @@ public:
   double residual_tolerance;
   unsigned int max_iterations;
   unsigned int gmres_restart_intvl;
+  bool force_host_source;
 
   bool allow_cycles;
 

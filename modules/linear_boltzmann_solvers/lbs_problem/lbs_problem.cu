@@ -3,6 +3,7 @@
 
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_problem.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/device/carrier/mesh_carrier.h"
+#include "modules/linear_boltzmann_solvers/lbs_problem/device/carrier/source_xs_carrier.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/device/carrier/total_xs_carrier.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/device/device_vector_mirror.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/outflow/outflow_carrier.h"
@@ -21,11 +22,15 @@ LBSProblem::InitializeGPUExtras()
   }
   // initialize carriers
   total_xs_carrier_ = std::make_shared<TotalXSCarrier>(*this);
+  source_xs_carrier_ = std::make_shared<SourceXSCarrier>(*this);
   outflow_carrier_ = std::make_shared<OutflowCarrier>(*this);
-  mesh_carrier_ = std::make_shared<MeshCarrier>(*this, *total_xs_carrier_, *outflow_carrier_);
+  mesh_carrier_ =
+    std::make_shared<MeshCarrier>(*this, *total_xs_carrier_, *source_xs_carrier_, *outflow_carrier_);
   // initialize pinners
   source_pinner_ = std::make_shared<DeviceVectorMirror<double>>(q_moments_local_);
+  source_base_pinner_ = std::make_shared<DeviceVectorMirror<double>>(q_moments_local_);
   phi_pinner_ = std::make_shared<DeviceVectorMirror<double>>(phi_new_local_);
+  phi_old_pinner_ = std::make_shared<DeviceVectorMirror<double>>(phi_old_local_);
 }
 
 void
@@ -38,11 +43,14 @@ LBSProblem::ResetGPUCarriers()
   }
   // delete carriers
   total_xs_carrier_.reset();
+  source_xs_carrier_.reset();
   outflow_carrier_.reset();
   mesh_carrier_.reset();
   // delete pinners
   source_pinner_.reset();
+  source_base_pinner_.reset();
   phi_pinner_.reset();
+  phi_old_pinner_.reset();
 }
 
 void

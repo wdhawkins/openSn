@@ -20,6 +20,14 @@ class FaceNode;
 class MeshContinuum;
 class LBSGroupset;
 
+/// Contiguous delayed angular-flux range in BoundaryBank storage.
+struct BoundaryDelayedAngularFluxRange
+{
+  std::uint64_t current_offset = 0;
+  std::uint64_t old_offset = 0;
+  std::uint64_t size = 0;
+};
+
 /// Base class for sweep related boundaries.
 class SweepBoundary
 {
@@ -115,6 +123,12 @@ public:
   virtual void CopyDelayedAngularFluxOldToNew(int groupset_id) {}
 
   virtual void CopyDelayedAngularFluxNewToOld(int groupset_id) {}
+
+  virtual void GetDelayedAngularFluxStorageRanges(
+    int groupset_id,
+    std::vector<BoundaryDelayedAngularFluxRange>& ranges) const
+  {
+  }
 
   virtual const Vector3* GetNormalForReflection() const { return nullptr; }
 

@@ -57,6 +57,15 @@ public:
   virtual void SetDelayedOutgoingPsiOldToNew() {}
   virtual void SetDelayedOutgoingPsiNewToOld() {}
 
+  /// Returns a span over the new (outgoing) additionally-backward delayed psi. Empty if none.
+  virtual std::span<double> ABDelayedPsi() { return {}; }
+  /// Returns a span over the old (incoming) additionally-backward delayed psi. Empty if none.
+  virtual std::span<double> ABDelayedPsiOld() { return {}; }
+  /// Returns promoted cross-rank delayed incoming psi. Empty unless a FLUDS supports it.
+  virtual std::span<double> PromotedDelayedPsi() { return {}; }
+  /// Returns old promoted cross-rank delayed incoming psi. Empty unless supported.
+  virtual std::span<double> PromotedDelayedPsiOld() { return {}; }
+
   virtual ~FLUDS() = default;
 
 protected:

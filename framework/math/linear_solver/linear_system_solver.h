@@ -16,6 +16,7 @@ public:
   {
     NONE,
     CLASSIC_RICHARDSON,
+    DEVICE_CLASSIC_RICHARDSON,
     PETSC_RICHARDSON,
     PETSC_GMRES,
     PETSC_BICGSTAB
@@ -34,6 +35,8 @@ public:
         return "NONE";
       case IterativeMethod::CLASSIC_RICHARDSON:
         return "CLASSIC_RICHARDSON";
+      case IterativeMethod::DEVICE_CLASSIC_RICHARDSON:
+        return "DEVICE_CLASSIC_RICHARDSON";
       case IterativeMethod::PETSC_RICHARDSON:
         return "PETSC_RICHARDSON";
       case IterativeMethod::PETSC_GMRES:

@@ -4,9 +4,23 @@
 #include "modules/linear_boltzmann_solvers/lbs_problem/vecops/lbs_vecops.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_problem.h"
 #include "framework/math/petsc_utils/petsc_utils.h"
+#include <cstring>
 
 namespace opensn
 {
+
+namespace
+{
+
+bool
+IncludeDelayedAngularDOFsInSolverVector(const LBSGroupset& groupset)
+{
+  return groupset.angle_agg != nullptr and
+         groupset.iterative_method !=
+           LinearSystemSolver::IterativeMethod::DEVICE_CLASSIC_RICHARDSON;
+}
+
+} // namespace
 
 template <typename Functor>
 int64_t
@@ -80,7 +94,7 @@ LBSVecOps::ScalePhiVector(LBSProblem& lbs_problem, PhiSTLOption phi_opt, double 
 
   for (const auto& groupset : groupsets)
   {
-    if (groupset.angle_agg)
+    if (IncludeDelayedAngularDOFsInSolverVector(groupset))
     {
       if (phi_opt == PhiSTLOption::PHI_NEW)
       {
@@ -104,14 +118,28 @@ LBSVecOps::SetGSPETScVecFromPrimarySTLvector(
 {
   const auto& src_phi =
     (src == PhiSTLOption::PHI_NEW) ? lbs_problem.GetPhiNewLocal() : lbs_problem.GetPhiOldLocal();
+  const auto& grid = lbs_problem.GetGrid();
+  const auto& cell_transport_views = lbs_problem.GetCellTransportViews();
+  const auto num_moments = lbs_problem.GetNumMoments();
+  const auto num_groups = groupset.GetNumGroups();
   PetscScalar* petsc_dest = nullptr;
   OpenSnPETScCall(VecGetArray(dest, &petsc_dest));
-  int64_t index = offset + GroupsetScopedCopy(lbs_problem,
-                                              groupset.first_group,
-                                              groupset.GetNumGroups(),
-                                              [&](int64_t idx, size_t mapped_idx)
-                                              { petsc_dest[offset + idx] = src_phi[mapped_idx]; });
-  if (groupset.angle_agg)
+  int64_t index = offset - 1;
+  for (const auto& cell : grid->local_cells)
+  {
+    const auto& transport_view = cell_transport_views[cell.local_id];
+    const auto num_nodes = static_cast<std::size_t>(transport_view.GetNumNodes());
+    for (std::size_t i = 0; i < num_nodes; ++i)
+    {
+      for (unsigned int m = 0; m < num_moments; ++m)
+      {
+        const auto mapped_idx = transport_view.MapDOF(i, m, groupset.first_group);
+        std::memcpy(&petsc_dest[index + 1], &src_phi[mapped_idx], num_groups * sizeof(double));
+        index += static_cast<int64_t>(num_groups);
+      }
+    }
+  }
+  if (IncludeDelayedAngularDOFsInSolverVector(groupset))
   {
     if (src == PhiSTLOption::PHI_NEW)
       groupset.angle_agg->AppendNewDelayedAngularDOFsToArray(index, petsc_dest);
@@ -127,14 +155,28 @@ LBSVecOps::SetPrimarySTLvectorFromGSPETScVec(
 {
   auto& dest_phi =
     (dest == PhiSTLOption::PHI_NEW) ? lbs_problem.GetPhiNewLocal() : lbs_problem.GetPhiOldLocal();
+  const auto& grid = lbs_problem.GetGrid();
+  const auto& cell_transport_views = lbs_problem.GetCellTransportViews();
+  const auto num_moments = lbs_problem.GetNumMoments();
+  const auto num_groups = groupset.GetNumGroups();
   const PetscScalar* petsc_src = nullptr;
   OpenSnPETScCall(VecGetArrayRead(src, &petsc_src));
-  int64_t index = offset + GroupsetScopedCopy(lbs_problem,
-                                              groupset.first_group,
-                                              groupset.GetNumGroups(),
-                                              [&](int64_t idx, size_t mapped_idx)
-                                              { dest_phi[mapped_idx] = petsc_src[offset + idx]; });
-  if (groupset.angle_agg)
+  int64_t index = offset - 1;
+  for (const auto& cell : grid->local_cells)
+  {
+    const auto& transport_view = cell_transport_views[cell.local_id];
+    const auto num_nodes = static_cast<std::size_t>(transport_view.GetNumNodes());
+    for (std::size_t i = 0; i < num_nodes; ++i)
+    {
+      for (unsigned int m = 0; m < num_moments; ++m)
+      {
+        const auto mapped_idx = transport_view.MapDOF(i, m, groupset.first_group);
+        std::memcpy(&dest_phi[mapped_idx], &petsc_src[index + 1], num_groups * sizeof(double));
+        index += static_cast<int64_t>(num_groups);
+      }
+    }
+  }
+  if (IncludeDelayedAngularDOFsInSolverVector(groupset))
   {
     if (dest == PhiSTLOption::PHI_NEW)
       groupset.angle_agg->SetNewDelayedAngularDOFsFromArray(index, petsc_src);
@@ -185,10 +227,21 @@ LBSVecOps::GSScopedCopyPrimarySTLvectors(LBSProblem& lbs_problem,
                                          const std::vector<double>& src,
                                          std::vector<double>& dest)
 {
-  GroupsetScopedCopy(lbs_problem,
-                     groupset.first_group,
-                     groupset.GetNumGroups(),
-                     [&](int64_t idx, size_t mapped_idx) { dest[mapped_idx] = src[mapped_idx]; });
+  const auto& grid = lbs_problem.GetGrid();
+  const auto& cell_transport_views = lbs_problem.GetCellTransportViews();
+  const auto num_moments = lbs_problem.GetNumMoments();
+  const auto num_groups = groupset.GetNumGroups();
+  for (const auto& cell : grid->local_cells)
+  {
+    const auto& transport_view = cell_transport_views[cell.local_id];
+    const auto num_nodes = static_cast<std::size_t>(transport_view.GetNumNodes());
+    for (std::size_t i = 0; i < num_nodes; ++i)
+      for (unsigned int m = 0; m < num_moments; ++m)
+      {
+        const auto mapped_idx = transport_view.MapDOF(i, m, groupset.first_group);
+        std::memcpy(&dest[mapped_idx], &src[mapped_idx], num_groups * sizeof(double));
+      }
+  }
 }
 
 void
@@ -201,12 +254,8 @@ LBSVecOps::GSScopedCopyPrimarySTLvectors(LBSProblem& lbs_problem,
     (src == PhiSTLOption::PHI_NEW) ? lbs_problem.GetPhiNewLocal() : lbs_problem.GetPhiOldLocal();
   auto& dest_phi =
     (dest == PhiSTLOption::PHI_NEW) ? lbs_problem.GetPhiNewLocal() : lbs_problem.GetPhiOldLocal();
-  GroupsetScopedCopy(lbs_problem,
-                     groupset.first_group,
-                     groupset.GetNumGroups(),
-                     [&](int64_t idx, size_t mapped_idx)
-                     { dest_phi[mapped_idx] = src_phi[mapped_idx]; });
-  if (groupset.angle_agg)
+  GSScopedCopyPrimarySTLvectors(lbs_problem, groupset, src_phi, dest_phi);
+  if (IncludeDelayedAngularDOFsInSolverVector(groupset))
   {
     if (src == PhiSTLOption::PHI_NEW and dest == PhiSTLOption::PHI_OLD)
       groupset.angle_agg->SetDelayedPsiNew2Old();
@@ -240,7 +289,7 @@ LBSVecOps::SetMultiGSPETScVecFromPrimarySTLvector(LBSProblem& lbs_problem,
                                                 gss,
                                                 [&](int64_t idx, size_t mapped_idx)
                                                 { x_ref[offset + idx] = y[mapped_idx]; });
-    if (groupset.angle_agg)
+    if (IncludeDelayedAngularDOFsInSolverVector(groupset))
     {
       if (which_phi == PhiSTLOption::PHI_NEW)
         groupset.angle_agg->AppendNewDelayedAngularDOFsToArray(index, x_ref);
@@ -278,7 +327,7 @@ LBSVecOps::SetPrimarySTLvectorFromMultiGSPETScVec(LBSProblem& lbs_problem,
                                                 gss,
                                                 [&](int64_t idx, size_t mapped_idx)
                                                 { y[mapped_idx] = x_ref[offset + idx]; });
-    if (groupset.angle_agg)
+    if (IncludeDelayedAngularDOFsInSolverVector(groupset))
     {
       if (which_phi == PhiSTLOption::PHI_NEW)
         groupset.angle_agg->SetNewDelayedAngularDOFsFromArray(index, x_ref);

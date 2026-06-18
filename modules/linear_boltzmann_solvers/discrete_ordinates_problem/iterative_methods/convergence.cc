@@ -3,8 +3,10 @@
 
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/iterative_methods/convergence.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_problem.h"
-#include "framework/runtime.h"
 #include "framework/mesh/mesh_continuum/mesh_continuum.h"
+#include "framework/runtime.h"
+#include <cmath>
+#include <limits>
 #include <numeric>
 
 namespace opensn
@@ -100,6 +102,31 @@ ComputeL2PhiChange(LBSProblem& lbs_problem,
   mpi_comm.all_reduce<double>(norm, global_norm, mpi::op::sum<double>());
 
   return std::sqrt(global_norm);
+}
+
+RichardsonConvergenceInfo
+EvaluateRichardsonConvergence(const double phi_change,
+                              const double previous_phi_change,
+                              const double psi_change,
+                              const bool psi_check_active,
+                              const double residual_tolerance)
+{
+  RichardsonConvergenceInfo result;
+  result.psi_check_active = psi_check_active;
+
+  if (previous_phi_change > 0.0 and phi_change > 0.0)
+    result.rho = std::sqrt(phi_change / previous_phi_change);
+
+  const double min_tolerance = 1.0e-10;
+  result.phi_tolerance =
+    std::max(residual_tolerance * (1.0 - result.rho), min_tolerance);
+  result.psi_tolerance = std::max(residual_tolerance, min_tolerance);
+
+  const bool phi_converged = phi_change < result.phi_tolerance;
+  const bool psi_converged = (not psi_check_active) or (psi_change < result.psi_tolerance);
+  result.converged = phi_converged and psi_converged;
+
+  return result;
 }
 
 } // namespace opensn
