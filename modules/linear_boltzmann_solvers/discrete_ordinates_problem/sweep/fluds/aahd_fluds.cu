@@ -16,7 +16,91 @@ namespace opensn
 namespace
 {
 
-constexpr unsigned int kReductionBlockSize = 256;
+constexpr unsigned int ReductionBlockSize = 256;
+
+__CRB_GLOBAL_FUNC__ void
+ReduceMaxKernel(const double* input, std::size_t size, double* output)
+{
+#if defined(__NVCC__) || defined(__HIPCC__)
+  __shared__ double shared_max[ReductionBlockSize];
+  const unsigned int tid = threadIdx.x;
+  const std::size_t stride = blockDim.x * gridDim.x;
+  std::size_t i = threadIdx.x + blockDim.x * blockIdx.x;
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+  auto work_index = ::sycl::ext::oneapi::this_work_item::get_nd_item<3>();
+  __attribute__((opencl_local)) double shared_max[ReductionBlockSize];
+  const unsigned int tid = static_cast<unsigned int>(work_index.get_local_id(2));
+  const std::size_t stride = work_index.get_local_range(2) * work_index.get_group_range(2);
+  std::size_t i = work_index.get_global_id(2);
+#endif
+
+  double local_max = 0.0;
+  while (i < size)
+  {
+    local_max = std::max(local_max, input[i]);
+    i += stride;
+  }
+
+#if defined(__NVCC__) || defined(__HIPCC__)
+  shared_max[tid] = local_max;
+  __syncthreads();
+  for (unsigned int offset = ReductionBlockSize / 2; offset > 0; offset /= 2)
+  {
+    if (tid < offset)
+      shared_max[tid] = std::max(shared_max[tid], shared_max[tid + offset]);
+    __syncthreads();
+  }
+
+  if (tid == 0)
+    output[blockIdx.x] = shared_max[0];
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+  shared_max[tid] = local_max;
+  work_index.barrier(sycl::access::fence_space::local_space);
+  for (unsigned int offset = ReductionBlockSize / 2; offset > 0; offset /= 2)
+  {
+    if (tid < offset)
+      shared_max[tid] = std::max(shared_max[tid], shared_max[tid + offset]);
+    work_index.barrier(sycl::access::fence_space::local_space);
+  }
+
+  if (tid == 0)
+    output[work_index.get_group(2)] = shared_max[0];
+#endif
+}
+
+double
+ReduceDeviceMaxToHost(crb::DeviceMemory<double>& device_values, crb::Stream& stream)
+{
+  std::size_t current_size = device_values.size();
+  if (current_size == 0)
+    return 0.0;
+
+  while (current_size > 1)
+  {
+    const unsigned int num_blocks =
+      static_cast<unsigned int>(std::min<std::size_t>((current_size + ReductionBlockSize - 1) /
+                                                        ReductionBlockSize,
+                                                      65535));
+    crb::DeviceMemory<double> reduced(num_blocks);
+#if defined(__NVCC__) || defined(__HIPCC__)
+    ReduceMaxKernel<<<num_blocks, ReductionBlockSize, 0, stream>>>(
+      device_values.get(), current_size, reduced.get());
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+    stream.parallel_for(sycl::nd_range<3>(crb::Dim3(num_blocks) * crb::Dim3(ReductionBlockSize),
+                                          crb::Dim3(ReductionBlockSize)),
+                        [=](sycl::nd_item<3>)
+                        { ReduceMaxKernel(device_values.get(), current_size, reduced.get()); });
+#endif
+    stream.synchronize();
+    device_values = std::move(reduced);
+    current_size = num_blocks;
+  }
+
+  crb::HostVector<double> host_result(1, 0.0);
+  crb::copy(host_result, device_values, 1, 0, 0, stream);
+  stream.synchronize();
+  return host_result[0];
+}
 
 __CRB_GLOBAL_FUNC__ void
 ComputePsiPointwiseChangeKernel(const double* psi_old,
@@ -25,7 +109,7 @@ ComputePsiPointwiseChangeKernel(const double* psi_old,
                                 double* block_max)
 {
 #if defined(__NVCC__) || defined(__HIPCC__)
-  __shared__ double shared_max[kReductionBlockSize];
+  __shared__ double shared_max[ReductionBlockSize];
   const unsigned int tid = threadIdx.x;
   const std::size_t stride = blockDim.x * gridDim.x;
   std::size_t i = threadIdx.x + blockDim.x * blockIdx.x;
@@ -51,7 +135,7 @@ ComputePsiPointwiseChangeKernel(const double* psi_old,
 #if defined(__NVCC__) || defined(__HIPCC__)
   shared_max[tid] = local_max;
   __syncthreads();
-  for (unsigned int offset = kReductionBlockSize / 2; offset > 0; offset /= 2)
+  for (unsigned int offset = ReductionBlockSize / 2; offset > 0; offset /= 2)
   {
     if (tid < offset)
       shared_max[tid] = std::max(shared_max[tid], shared_max[tid + offset]);
@@ -78,16 +162,15 @@ AccumulatePsiPointwiseChange(const crb::DeviceMemory<double>& old_storage,
                        "Delayed angular flux convergence check has mismatched bank sizes.");
 
   const unsigned int num_blocks =
-    static_cast<unsigned int>(std::min<std::size_t>((size + kReductionBlockSize - 1) /
-                                                      kReductionBlockSize,
+    static_cast<unsigned int>(std::min<std::size_t>((size + ReductionBlockSize - 1) /
+                                                      ReductionBlockSize,
                                                     65535));
   crb::DeviceMemory<double> device_block_max(num_blocks);
-  crb::HostVector<double> host_block_max(num_blocks, 0.0);
 #if defined(__NVCC__) || defined(__HIPCC__)
-  ComputePsiPointwiseChangeKernel<<<num_blocks, kReductionBlockSize, 0, stream>>>(
+  ComputePsiPointwiseChangeKernel<<<num_blocks, ReductionBlockSize, 0, stream>>>(
     old_storage.get(), new_storage.get(), size, device_block_max.get());
 #elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
-  const crb::Dim3 block_size(kReductionBlockSize);
+  const crb::Dim3 block_size(ReductionBlockSize);
   const crb::Dim3 grid_size(num_blocks);
   stream.parallel_for(sycl::nd_range<3>(grid_size * block_size, block_size),
                       [=](sycl::nd_item<3>)
@@ -96,10 +179,7 @@ AccumulatePsiPointwiseChange(const crb::DeviceMemory<double>& old_storage,
                           old_storage.get(), new_storage.get(), size, device_block_max.get());
                       });
 #endif
-  crb::copy(host_block_max, device_block_max, host_block_max.size(), 0, 0, stream);
-  stream.synchronize();
-  for (const double value : host_block_max)
-    local_max = std::max(local_max, value);
+  local_max = std::max(local_max, ReduceDeviceMaxToHost(device_block_max, stream));
 }
 
 } // namespace
@@ -276,36 +356,13 @@ AAHD_FLUDS::AAHD_FLUDS(unsigned int num_groups,
 void
 AAHD_FLUDS::AllocateDelayedLocalPsi()
 {
-  // FAS-edge delayed nodes: full stride (num_groups * num_angles)
-  const std::size_t fas_count = common_data_.GetNumDelayedLocalNodes();
-  delayed_local_psi_bank_ = AAHD_DelayedLocalBank(fas_count, num_groups_and_angles_);
+  const std::size_t delayed_count = common_data_.GetNumDelayedLocalNodes();
+  delayed_local_psi_bank_ = AAHD_DelayedLocalBank(delayed_count, num_groups_and_angles_);
   delayed_local_psi_view_ = std::span<double>(delayed_local_psi_bank_.host_storage);
-  // Explicitly zero the device FAS_NEW buffer so that phantom slots (FAS entries for angles
-  // that were promoted to AB for reversed FAS edges) remain zero and do not pollute GMRES.
   delayed_local_psi_bank_.UploadToDevice();
-  delayed_local_psi_old_bank_ = AAHD_DelayedLocalBank(fas_count, num_groups_and_angles_);
+  delayed_local_psi_old_bank_ = AAHD_DelayedLocalBank(delayed_count, num_groups_and_angles_);
   delayed_local_psi_old_view_ = std::span<double>(delayed_local_psi_old_bank_.host_storage);
 
-  // Additionally-backward delayed nodes: compact stride (num_groups only, angle-independent)
-  const std::size_t ab_count = common_data_.GetTotalDelayedLocalNodes() - fas_count;
-  if (ab_count > 0)
-  {
-    ab_delayed_psi_bank_ = AAHD_Bank(ab_count * num_groups_);
-    ab_delayed_psi_old_bank_ = AAHD_Bank(ab_count * num_groups_);
-  }
-
-  promoted_delayed_incoming_psi_bank_ =
-    AAHD_NonLocalDelayedBank(common_data_.GetPromotedDelayedIncomingNodeSizes(),
-                             common_data_.GetPromotedDelayedIncomingNodeOffsets(),
-                             num_groups_);
-  promoted_delayed_incoming_psi_bank_.UpdateViews(delayed_promoted_incoming_psi_view_,
-                                                  delayed_promoted_incoming_psi_old_view_);
-
-  promoted_delayed_outgoing_psi_bank_ =
-    AAHD_NonLocalBank(common_data_.GetPromotedDelayedOutgoingNodeSizes(),
-                      common_data_.GetPromotedDelayedOutgoingNodeOffsets(),
-                      num_groups_);
-  promoted_delayed_outgoing_psi_bank_.UpdateViews(promoted_delayed_outgoing_psi_view_);
 }
 
 void
@@ -333,14 +390,12 @@ void
 AAHD_FLUDS::SetDelayedOutgoingPsiOldToNew()
 {
   nonlocal_delayed_incoming_psi_bank_.SetOldToNew();
-  promoted_delayed_incoming_psi_bank_.SetOldToNew();
 }
 
 void
 AAHD_FLUDS::SetDelayedOutgoingPsiNewToOld()
 {
   nonlocal_delayed_incoming_psi_bank_.SetNewToOld();
-  promoted_delayed_incoming_psi_bank_.SetNewToOld();
 }
 
 void
@@ -348,7 +403,6 @@ AAHD_FLUDS::SetDelayedLocalPsiOldToNew()
 {
   delayed_local_psi_bank_.host_storage = delayed_local_psi_old_bank_.host_storage;
   delayed_local_psi_view_ = std::span<double>(delayed_local_psi_bank_.host_storage);
-  ab_delayed_psi_bank_.host_storage = ab_delayed_psi_old_bank_.host_storage;
 }
 
 void
@@ -356,7 +410,6 @@ AAHD_FLUDS::SetDelayedLocalPsiNewToOld()
 {
   delayed_local_psi_old_bank_.host_storage = delayed_local_psi_bank_.host_storage;
   delayed_local_psi_old_view_ = std::span<double>(delayed_local_psi_old_bank_.host_storage);
-  ab_delayed_psi_old_bank_.host_storage = ab_delayed_psi_bank_.host_storage;
 }
 
 void
@@ -364,12 +417,22 @@ AAHD_FLUDS::CopyDelayedPsiToDevice()
 {
   if (common_data_.GetNumDelayedLocalNodes() > 0)
     delayed_local_psi_old_bank_.UploadToDevice(stream_);
-  if (!ab_delayed_psi_old_bank_.IsNotInitialized())
-    ab_delayed_psi_old_bank_.UploadToDevice(stream_);
   if (HasNonLocalDelayedIncomingPsi())
     nonlocal_delayed_incoming_psi_bank_.UploadToDevice(stream_);
-  if (HasPromotedDelayedIncomingPsi())
-    promoted_delayed_incoming_psi_bank_.UploadToDevice(stream_);
+}
+
+void
+AAHD_FLUDS::UploadDelayedIncomingPsiCurrentToDevice()
+{
+  if (HasNonLocalDelayedIncomingPsi())
+    nonlocal_delayed_incoming_psi_bank_.UploadCurrentToDevice(stream_);
+}
+
+void
+AAHD_FLUDS::CopyDelayedIncomingPsiCurrentFromDevice()
+{
+  if (HasNonLocalDelayedIncomingPsi())
+    nonlocal_delayed_incoming_psi_bank_.DownloadCurrentToHost(stream_);
 }
 
 void
@@ -377,12 +440,8 @@ AAHD_FLUDS::CopyDelayedPsiNewToOldOnDevice()
 {
   if (common_data_.GetNumDelayedLocalNodes() > 0)
     delayed_local_psi_old_bank_.CopyDeviceFrom(delayed_local_psi_bank_, stream_);
-  if (!ab_delayed_psi_old_bank_.IsNotInitialized())
-    ab_delayed_psi_old_bank_.CopyDeviceFrom(ab_delayed_psi_bank_, stream_);
   if (HasNonLocalDelayedIncomingPsi())
     nonlocal_delayed_incoming_psi_bank_.CopyCurrentDeviceToOldDevice(stream_);
-  if (HasPromotedDelayedIncomingPsi())
-    promoted_delayed_incoming_psi_bank_.CopyCurrentDeviceToOldDevice(stream_);
 }
 
 double
@@ -390,24 +449,20 @@ AAHD_FLUDS::ComputeDelayedPsiPointwiseChangeOnDevice()
 {
   double local_max = 0.0;
 
+  // Match the host Richardson convergence metric exactly:
+  // - delayed local psi
+  // - delayed inter-location psi (the AAHD delayed preloc-I views)
+  //
+  // Do not include promoted delayed incoming banks here. The host path does not
+  // include them in AngleAggregation::GetNew/OldDelayedAngularDOFsAsSTLVector().
   if (common_data_.GetNumDelayedLocalNodes() > 0)
     AccumulatePsiPointwiseChange(delayed_local_psi_old_bank_.device_storage,
                                  delayed_local_psi_bank_.device_storage,
                                  local_max,
                                  stream_);
-  if (!ab_delayed_psi_old_bank_.IsNotInitialized())
-    AccumulatePsiPointwiseChange(ab_delayed_psi_old_bank_.device_storage,
-                                 ab_delayed_psi_bank_.device_storage,
-                                 local_max,
-                                 stream_);
   if (HasNonLocalDelayedIncomingPsi())
     AccumulatePsiPointwiseChange(nonlocal_delayed_incoming_psi_bank_.device_storage,
                                  nonlocal_delayed_incoming_psi_bank_.device_current_storage,
-                                 local_max,
-                                 stream_);
-  if (HasPromotedDelayedIncomingPsi())
-    AccumulatePsiPointwiseChange(promoted_delayed_incoming_psi_bank_.device_storage,
-                                 promoted_delayed_incoming_psi_bank_.device_current_storage,
                                  local_max,
                                  stream_);
 
@@ -419,14 +474,8 @@ AAHD_FLUDS::ZeroDelayedPsiNewOnDevice()
 {
   if (common_data_.GetNumDelayedLocalNodes() > 0)
     delayed_local_psi_bank_.ZeroDevice();
-  if (!ab_delayed_psi_bank_.IsNotInitialized())
-    ab_delayed_psi_bank_.ZeroDevice();
   if (HasNonLocalDelayedIncomingPsi())
     nonlocal_delayed_incoming_psi_bank_.ZeroCurrentDevice();
-  if (HasPromotedDelayedIncomingPsi())
-    promoted_delayed_incoming_psi_bank_.ZeroCurrentDevice();
-  if (HasPromotedDelayedOutgoingPsi())
-    promoted_delayed_outgoing_psi_bank_.ZeroDevice();
 }
 
 void
@@ -444,19 +493,14 @@ AAHD_FLUDS::GetDevicePointerSet()
   pointer_set.local_psi = local_psi_.get();
   if (common_data_.GetLocalNodeStackSize() > 0)
     assert(pointer_set.local_psi != nullptr);
-  // FAS delayed local psi
-  pointer_set.fas_count = common_data_.GetNumDelayedLocalNodes();
+  // Delayed local psi
   pointer_set.delayed_local_psi = delayed_local_psi_bank_.device_storage.get();
   pointer_set.delayed_local_psi_old = delayed_local_psi_old_bank_.device_storage.get();
-  if (pointer_set.fas_count > 0)
+  if (common_data_.GetNumDelayedLocalNodes() > 0)
   {
     assert(pointer_set.delayed_local_psi != nullptr);
     assert(pointer_set.delayed_local_psi_old != nullptr);
   }
-  // Additionally-backward compact delayed buffer
-  pointer_set.groupset_size = num_groups_;
-  pointer_set.ab_delayed_psi = ab_delayed_psi_bank_.device_storage.get();
-  pointer_set.ab_delayed_psi_old = ab_delayed_psi_old_bank_.device_storage.get();
   // non-local psi
   pointer_set.nonlocal_incoming_psi = nonlocal_incoming_psi_bank_.device_storage.get();
   if (common_data_.GetNonLocalIncomingNodeOffsets().back() > 0)
@@ -465,26 +509,9 @@ AAHD_FLUDS::GetDevicePointerSet()
   }
   pointer_set.nonlocal_delayed_incoming_psi_old =
     nonlocal_delayed_incoming_psi_bank_.device_storage.get();
-  pointer_set.nonlocal_delayed_incoming_count =
-    common_data_.GetNonLocalDelayedIncomingNodeOffsets().back();
   if (common_data_.GetNonLocalDelayedIncomingNodeOffsets().back() > 0)
   {
     assert(pointer_set.nonlocal_delayed_incoming_psi_old != nullptr);
-  }
-  pointer_set.promoted_delayed_incoming_psi =
-    promoted_delayed_incoming_psi_bank_.CurrentDevicePointer();
-  pointer_set.promoted_delayed_incoming_psi_old =
-    promoted_delayed_incoming_psi_bank_.device_storage.get();
-  if (common_data_.GetPromotedDelayedIncomingNodeOffsets().back() > 0)
-  {
-    assert(pointer_set.promoted_delayed_incoming_psi != nullptr);
-    assert(pointer_set.promoted_delayed_incoming_psi_old != nullptr);
-  }
-  pointer_set.promoted_delayed_outgoing_psi =
-    promoted_delayed_outgoing_psi_bank_.device_storage.get();
-  if (common_data_.GetPromotedDelayedOutgoingNodeOffsets().back() > 0)
-  {
-    assert(pointer_set.promoted_delayed_outgoing_psi != nullptr);
   }
   pointer_set.nonlocal_outgoing_psi = nonlocal_outgoing_psi_bank_.device_storage.get();
   if (common_data_.GetNonLocalOutgoingNodeOffsets().back() > 0)
@@ -516,20 +543,6 @@ AAHD_FLUDS::DeviceDeplocIOutgoingPsi(std::size_t loc, std::size_t block_pos)
 {
   const auto offset = common_data_.GetNonLocalOutgoingNodeOffsets()[loc] * num_groups_and_angles_;
   return nonlocal_outgoing_psi_bank_.device_storage.get() + offset + block_pos;
-}
-
-double*
-AAHD_FLUDS::DevicePromotedDelayedIncomingPsi(std::size_t loc, std::size_t block_pos)
-{
-  const auto offset = common_data_.GetPromotedDelayedIncomingNodeOffsets()[loc] * num_groups_;
-  return promoted_delayed_incoming_psi_bank_.CurrentDevicePointer() + offset + block_pos;
-}
-
-double*
-AAHD_FLUDS::DevicePromotedDelayedOutgoingPsi(std::size_t loc, std::size_t block_pos)
-{
-  const auto offset = common_data_.GetPromotedDelayedOutgoingNodeOffsets()[loc] * num_groups_;
-  return promoted_delayed_outgoing_psi_bank_.device_storage.get() + offset + block_pos;
 }
 
 namespace
@@ -594,34 +607,6 @@ AAHD_FLUDS::ValidateDeviceDeplocIOutgoingPsi(std::size_t loc,
 }
 
 void
-AAHD_FLUDS::ValidateDevicePromotedDelayedIncomingPsi(std::size_t loc,
-                                                     std::size_t block_pos,
-                                                     std::size_t size) const
-{
-  const auto offset = common_data_.GetPromotedDelayedIncomingNodeOffsets()[loc] * num_groups_ +
-                      block_pos;
-  ValidateDeviceBuffer("AAHD_FLUDS::DevicePromotedDelayedIncomingPsi",
-                       promoted_delayed_incoming_psi_bank_.device_current_storage.get(),
-                       promoted_delayed_incoming_psi_bank_.device_current_storage.size(),
-                       offset,
-                       size);
-}
-
-void
-AAHD_FLUDS::ValidateDevicePromotedDelayedOutgoingPsi(std::size_t loc,
-                                                     std::size_t block_pos,
-                                                     std::size_t size) const
-{
-  const auto offset = common_data_.GetPromotedDelayedOutgoingNodeOffsets()[loc] * num_groups_ +
-                      block_pos;
-  ValidateDeviceBuffer("AAHD_FLUDS::DevicePromotedDelayedOutgoingPsi",
-                       promoted_delayed_outgoing_psi_bank_.device_storage.get(),
-                       promoted_delayed_outgoing_psi_bank_.device_storage.size(),
-                       offset,
-                       size);
-}
-
-void
 AAHD_FLUDS::CopyNonLocalOutgoingPsiFromDevice()
 {
   if (HasNonLocalOutgoingPsi())
@@ -633,26 +618,6 @@ AAHD_FLUDS::CopyLocalDelayedPsiFromDevice()
 {
   if (common_data_.GetNumDelayedLocalNodes() > 0)
     delayed_local_psi_bank_.DownloadToHost(stream_);
-  if (!ab_delayed_psi_bank_.IsNotInitialized())
-    ab_delayed_psi_bank_.DownloadToHost(stream_);
-}
-
-void
-AAHD_FLUDS::CopyPromotedDelayedOutgoingPsiFromDevice()
-{
-  if (HasPromotedDelayedOutgoingPsi())
-    promoted_delayed_outgoing_psi_bank_.DownloadToHost(stream_);
-}
-
-void
-AAHD_FLUDS::CopyPsiFromDevice()
-{
-  if (HasNonLocalOutgoingPsi())
-    nonlocal_outgoing_psi_bank_.DownloadToHost(stream_);
-  if (common_data_.GetNumDelayedLocalNodes() > 0)
-    delayed_local_psi_bank_.DownloadToHost(stream_);
-  if (!ab_delayed_psi_bank_.IsNotInitialized())
-    ab_delayed_psi_bank_.DownloadToHost(stream_);
 }
 
 void

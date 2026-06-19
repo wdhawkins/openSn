@@ -213,7 +213,7 @@ WritePsiToFludsAndOutflow(double* psi,
           double* downwind_psi;
           if constexpr (t == SweepType::AAH)
             downwind_psi = args.flud_data.GetOutgoingFluxPointer(
-              node_index, angle_group_idx, group_idx, args.boundary, args.boundary_offset);
+              node_index, angle_group_idx, args.boundary, args.boundary_offset);
           else
             downwind_psi = args.flud_data.GetOutgoingFluxPointer(node_index, angle_group_idx);
           *downwind_psi = psi[i];

@@ -140,13 +140,6 @@ AGSLinearSolver::Solve()
       continue;
 
     const double avg_sweep_time = stats.total_sweep_time / static_cast<double>(stats.num_sweeps);
-    const double avg_sweep_pass_time =
-      stats.num_sweep_passes > 0 ? stats.total_sweep_time / static_cast<double>(stats.num_sweep_passes)
-                                 : 0.0;
-    const double avg_passes_per_sweep =
-      stats.num_sweeps > 0 ? static_cast<double>(stats.num_sweep_passes) /
-                               static_cast<double>(stats.num_sweeps)
-                           : 0.0;
     const auto& groupset = sweep_context->groupset;
     const size_t num_angles = groupset.quadrature->GetNumAngles();
     const size_t num_unknowns =
@@ -158,21 +151,15 @@ AGSLinearSolver::Solve()
         ? static_cast<double>(num_delayed_unknowns) * 100.0 / static_cast<double>(num_unknowns)
         : 0.0;
     double max_avg_sweep_time = 0.0;
-    double max_avg_sweep_pass_time = 0.0;
     opensn::mpi_comm.all_reduce(&avg_sweep_time, 1, &max_avg_sweep_time, mpi::op::max<double>());
-    opensn::mpi_comm.all_reduce(
-      &avg_sweep_pass_time, 1, &max_avg_sweep_pass_time, mpi::op::max<double>());
 
     const double sweep_time_per_unknown =
-      num_unknowns > 0 ? max_avg_sweep_pass_time * 1.0e9 / static_cast<double>(num_unknowns)
-                       : 0.0;
+      num_unknowns > 0 ? max_avg_sweep_time * 1.0e9 / static_cast<double>(num_unknowns) : 0.0;
     const std::string label = "WGS groups [" + std::to_string(groupset.first_group) + "-" +
                               std::to_string(groupset.last_group) + "]";
     std::stringstream sweep_timing;
     sweep_timing << label;
     AppendNumericField(sweep_timing, "avg_sweep_time", max_avg_sweep_time, Scientific(6), false);
-    sweep_timing << " s";
-    AppendNumericField(sweep_timing, "avg_sweep_pass_time", max_avg_sweep_pass_time, Scientific(6));
     sweep_timing << " s";
     AppendNumericField(
       sweep_timing, "sweep_time_per_unknown", sweep_time_per_unknown, Scientific(6));
@@ -182,9 +169,6 @@ AGSLinearSolver::Solve()
     std::stringstream sweep_work;
     sweep_work << label;
     AppendNumericField(sweep_work, "unknowns", num_unknowns, false);
-    AppendNumericField(sweep_work, "sweep_applications", stats.num_sweeps);
-    AppendNumericField(sweep_work, "sweep_passes", stats.num_sweep_passes);
-    AppendNumericField(sweep_work, "avg_passes_per_sweep", avg_passes_per_sweep, Fixed(2));
     AppendNumericField(sweep_work, "lagged_unknowns", num_delayed_unknowns);
     AppendNumericField(sweep_work, "lagged_pct", delayed_unknown_percent, Fixed(2));
     log.Log() << no_wrap << program_timer.GetTimeString() << " " << sweep_work.str();

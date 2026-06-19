@@ -791,6 +791,9 @@ WrapLBS(py::module& slv)
               Inner linear solver maximum iterations.
           - gmres_restart_interval: int, default=30
               GMRES restart interval, if GMRES is used.
+          - force_host_source: bool, default=False
+              For ``device_classic_richardson``, rebuild the iteration source on the host
+              instead of using the fast device-side source update path.
           - allow_cycles: bool, default=True
               Whether cyclic dependencies are allowed in sweeps.
           - apply_wgdsa: bool, default=False
@@ -1302,6 +1305,9 @@ WrapLBS(py::module& slv)
               Inner linear solver maximum iterations.
           - gmres_restart_interval: int, default=30
               GMRES restart interval, if GMRES is used.
+          - force_host_source: bool, default=False
+              For ``device_classic_richardson``, rebuild the iteration source on the host
+              instead of using the fast device-side source update path.
           - allow_cycles: bool, default=True
               Whether cyclic dependencies are allowed in sweeps.
           - apply_wgdsa: bool, default=False

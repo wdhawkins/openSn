@@ -25,10 +25,7 @@ GetLocalGroupsetVectorSize(const LBSProblem& lbs_problem, const LBSGroupset& gro
 {
   const auto num_phi_dofs =
     lbs_problem.GetLocalNodeCount() * lbs_problem.GetNumMoments() * groupset.GetNumGroups();
-  const auto num_delayed_psi_dofs =
-    groupset.iterative_method == LinearSystemSolver::IterativeMethod::DEVICE_CLASSIC_RICHARDSON
-      ? 0
-      : groupset.angle_agg->GetNumDelayedAngularDOFs().first;
+  const auto num_delayed_psi_dofs = groupset.angle_agg->GetNumDelayedAngularDOFs().first;
   return static_cast<int64_t>(num_phi_dofs) + static_cast<int64_t>(num_delayed_psi_dofs);
 }
 

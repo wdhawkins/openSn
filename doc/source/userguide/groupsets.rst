@@ -210,6 +210,7 @@ for that groupset.
 Supported values are:
 
 * ``"classic_richardson"``
+* ``"device_classic_richardson"``
 * ``"petsc_richardson"``
 * ``"petsc_gmres"``
 * ``"petsc_bicgstab"``
@@ -240,6 +241,9 @@ The main groupset-level inner controls are:
 * ``gmres_restart_interval``: GMRES restart interval when GMRES is used; it
   also controls how many Krylov vectors are retained before restart and
   therefore affects memory usage
+* ``force_host_source``: for ``device_classic_richardson``, forces the
+  iteration source to be rebuilt on the host instead of using the fast
+  device-side source update path
 
 These settings belong together. The method and the tolerances should be chosen
 as one configuration, not as unrelated toggles.

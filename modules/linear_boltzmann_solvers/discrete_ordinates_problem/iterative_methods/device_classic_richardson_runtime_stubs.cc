@@ -31,7 +31,7 @@ DeviceClassicRichardsonRuntime::CopySourceMomentsToDevice()
 }
 
 void
-DeviceClassicRichardsonRuntime::CopyDevicePhiNewToOld()
+DeviceClassicRichardsonRuntime::CopyDevicePhiNewToOld(const LBSGroupset&)
 {
   OpenSnLogicalError("DeviceClassicRichardsonRuntime requires GPU support.");
 }
@@ -55,7 +55,19 @@ DeviceClassicRichardsonRuntime::BuildSource(const LBSGroupset&, bool, bool)
 }
 
 double
-DeviceClassicRichardsonRuntime::ComputePhiChange(const LBSGroupset&) const
+DeviceClassicRichardsonRuntime::ComputeLocalPhiChange(const LBSGroupset&) const
+{
+  OpenSnLogicalError("DeviceClassicRichardsonRuntime requires GPU support.");
+}
+
+double
+DeviceClassicRichardsonRuntime::ComputeGlobalPhiChange(const LBSGroupset&) const
+{
+  OpenSnLogicalError("DeviceClassicRichardsonRuntime requires GPU support.");
+}
+
+DeviceRichardsonConvergenceMetrics
+DeviceClassicRichardsonRuntime::ComputeConvergenceMetrics(const LBSGroupset&) const
 {
   OpenSnLogicalError("DeviceClassicRichardsonRuntime requires GPU support.");
 }

@@ -8,6 +8,7 @@
 #include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/iteration_logging.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/vecops/lbs_vecops.h"
 #include "framework/logging/log.h"
+#include "framework/runtime.h"
 #include "framework/utils/caliper_scopes.h"
 #include "framework/utils/error.h"
 #include "framework/utils/timer.h"
@@ -52,6 +53,17 @@ HasUnsupportedSourceFlags(const SourceFlags& scope,
 }
 
 } // namespace
+
+void
+RestoreHostPhiNewForOtherGroupsets(LBSProblem& lbs_problem,
+                                   const LBSGroupset& groupset,
+                                   const std::vector<double>& saved_phi_new)
+{
+  auto restored_phi_new = saved_phi_new;
+  LBSVecOps::GSScopedCopyPrimarySTLvectors(
+    lbs_problem, groupset, lbs_problem.GetPhiNewLocal(), restored_phi_new);
+  lbs_problem.GetPhiNewLocal() = std::move(restored_phi_new);
+}
 
 DeviceClassicRichardson::DeviceClassicRichardson(
   const std::shared_ptr<SweepWGSContext>& gs_context_ptr, bool verbose)
@@ -125,6 +137,11 @@ DeviceClassicRichardson::Validate()
 {
   const auto& do_problem = sweep_context_->do_problem;
   const auto& groupset = sweep_context_->groupset;
+#if OPENSN_GPU_AWARE_MPI
+  constexpr bool compiled_with_gpu_aware_mpi = true;
+#else
+  constexpr bool compiled_with_gpu_aware_mpi = false;
+#endif
 
   OpenSnInvalidArgumentIf(not do_problem.UseGPUs(),
                           "device_classic_richardson requires use_gpus = true.");
@@ -138,6 +155,9 @@ DeviceClassicRichardson::Validate()
                           "groupset.");
   OpenSnInvalidArgumentIf(groupset.apply_wgdsa or groupset.apply_tgdsa,
                           "device_classic_richardson does not currently support DSA.");
+  OpenSnInvalidArgumentIf(opensn::mpi_comm.size() > 1 and not compiled_with_gpu_aware_mpi,
+                          "device_classic_richardson requires OPENSN_GPU_AWARE_MPI=ON for "
+                          "parallel runs. The host-staged fallback is not supported.");
 
   SelectSourceBuildPath();
 
@@ -206,23 +226,13 @@ DeviceClassicRichardson::SyncLaggedStateToLatestIterate()
   const bool host_phi_required = not UseFastDeviceSourcePath();
   if (host_phi_required)
   {
+    const auto saved_phi_new = do_problem.GetPhiNewLocal();
     do_problem.CopyPhiAndOutflowBackToHost();
+    RestoreHostPhiNewForOtherGroupsets(do_problem, groupset, saved_phi_new);
     LBSVecOps::GSScopedCopyPrimarySTLvectors(
       do_problem, groupset, PhiSTLOption::PHI_NEW, PhiSTLOption::PHI_OLD);
   }
-  runtime_.CopyDevicePhiNewToOld();
-}
-
-double
-DeviceClassicRichardson::ComputePhiChange() const
-{
-  return runtime_.ComputePhiChange(sweep_context_->groupset);
-}
-
-double
-DeviceClassicRichardson::ComputePsiChange() const
-{
-  return runtime_.GetLastDelayedPsiRelativeChange();
+  runtime_.CopyDevicePhiNewToOld(groupset);
 }
 
 void
@@ -240,6 +250,11 @@ DeviceClassicRichardson::Solve()
   auto& do_problem = sweep_context_->do_problem;
   auto& groupset = sweep_context_->groupset;
   const auto sweep_scope = sweep_context_->lhs_src_scope | sweep_context_->rhs_src_scope;
+  const bool psi_check_active = groupset.angle_agg->GetNumDelayedAngularDOFs().first > 0;
+  std::vector<double> psi_old;
+  std::vector<double> psi_new;
+  if (psi_check_active and not UseFastDeviceSourcePath())
+    psi_old = groupset.angle_agg->GetOldDelayedAngularDOFsAsSTLVector();
 
   double pw_phi_change_prev = 1.0;
   double last_pw_phi_change = 0.0;
@@ -255,11 +270,30 @@ DeviceClassicRichardson::Solve()
     BuildIterationSource();
     runtime_.ApplyInverseTransportOperator(sweep_scope);
 
-    const double pw_phi_change = ComputePhiChange();
-    const double pw_psi_change = ComputePsiChange();
+    double pw_phi_change = 0.0;
+    double pw_psi_change = 0.0;
+    if (UseFastDeviceSourcePath())
+    {
+      const auto metrics = runtime_.ComputeConvergenceMetrics(groupset);
+      pw_phi_change = metrics.phi_change;
+      pw_psi_change = metrics.psi_change;
+    }
+    else
+    {
+      pw_phi_change = runtime_.ComputeGlobalPhiChange(groupset);
+      if (psi_check_active)
+      {
+        psi_new = groupset.angle_agg->GetNewDelayedAngularDOFsAsSTLVector();
+        pw_psi_change = ComputePointwiseChange(psi_new, psi_old);
+      }
+    }
     last_pw_phi_change = pw_phi_change;
     const auto convergence = EvaluateRichardsonConvergence(
-      pw_phi_change, pw_phi_change_prev, pw_psi_change, true, groupset.residual_tolerance);
+      pw_phi_change,
+      pw_phi_change_prev,
+      pw_psi_change,
+      psi_check_active,
+      groupset.residual_tolerance);
     pw_phi_change_prev = pw_phi_change;
 
     converged = convergence.converged;
@@ -280,6 +314,8 @@ DeviceClassicRichardson::Solve()
     }
 
     SyncLaggedStateToLatestIterate();
+    if (psi_check_active and not UseFastDeviceSourcePath())
+      psi_old = psi_new;
 
     if (converged)
       break;
@@ -300,8 +336,13 @@ DeviceClassicRichardson::Solve()
                                         sweep_context_->last_solve);
 
   do_problem.SetQMomentsFrom(saved_q_moments_local_);
+  const auto saved_phi_new = do_problem.GetPhiNewLocal();
   do_problem.CopyPhiAndOutflowBackToHost();
+  RestoreHostPhiNewForOtherGroupsets(do_problem, groupset, saved_phi_new);
   do_problem.TransferDeviceBoundaryData(groupset.id, false, true);
+  runtime_.DownloadDelayedPsiToHost();
+  groupset.angle_agg->SetOldDelayedAngularDOFsFromSTLVector(
+    groupset.angle_agg->GetNewDelayedAngularDOFsAsSTLVector());
   if (do_problem.SaveAngularFluxEnabled())
     runtime_.FinalizeAngularFluxes();
   LBSVecOps::GSScopedCopyPrimarySTLvectors(

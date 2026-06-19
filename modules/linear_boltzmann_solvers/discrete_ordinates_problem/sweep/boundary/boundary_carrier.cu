@@ -16,7 +16,91 @@ namespace opensn
 namespace
 {
 
-constexpr unsigned int kBoundaryReductionBlockSize = 256;
+constexpr unsigned int BoundaryReductionBlockSize = 256;
+
+__CRB_GLOBAL_FUNC__ void
+ReduceMaxKernel(const double* input, std::size_t size, double* output)
+{
+#if defined(__NVCC__) || defined(__HIPCC__)
+  __shared__ double shared_max[BoundaryReductionBlockSize];
+  const unsigned int tid = threadIdx.x;
+  const std::size_t stride = blockDim.x * gridDim.x;
+  std::size_t i = threadIdx.x + blockDim.x * blockIdx.x;
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+  auto work_index = ::sycl::ext::oneapi::this_work_item::get_nd_item<3>();
+  __attribute__((opencl_local)) double shared_max[BoundaryReductionBlockSize];
+  const unsigned int tid = static_cast<unsigned int>(work_index.get_local_id(2));
+  const std::size_t stride = work_index.get_local_range(2) * work_index.get_group_range(2);
+  std::size_t i = work_index.get_global_id(2);
+#endif
+
+  double local_max = 0.0;
+  while (i < size)
+  {
+    local_max = std::max(local_max, input[i]);
+    i += stride;
+  }
+
+#if defined(__NVCC__) || defined(__HIPCC__)
+  shared_max[tid] = local_max;
+  __syncthreads();
+  for (unsigned int offset = BoundaryReductionBlockSize / 2; offset > 0; offset /= 2)
+  {
+    if (tid < offset)
+      shared_max[tid] = std::max(shared_max[tid], shared_max[tid + offset]);
+    __syncthreads();
+  }
+  if (tid == 0)
+    output[blockIdx.x] = shared_max[0];
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+  shared_max[tid] = local_max;
+  work_index.barrier(sycl::access::fence_space::local_space);
+  for (unsigned int offset = BoundaryReductionBlockSize / 2; offset > 0; offset /= 2)
+  {
+    if (tid < offset)
+      shared_max[tid] = std::max(shared_max[tid], shared_max[tid + offset]);
+    work_index.barrier(sycl::access::fence_space::local_space);
+  }
+  if (tid == 0)
+    output[work_index.get_group(2)] = shared_max[0];
+#endif
+}
+
+double
+ReduceDeviceMaxToHost(crb::DeviceMemory<double>& device_values)
+{
+  std::size_t current_size = device_values.size();
+  if (current_size == 0)
+    return 0.0;
+
+  while (current_size > 1)
+  {
+    const unsigned int num_blocks =
+      static_cast<unsigned int>(std::min<std::size_t>((current_size + BoundaryReductionBlockSize -
+                                                       1) /
+                                                        BoundaryReductionBlockSize,
+                                                      65535));
+    crb::DeviceMemory<double> reduced(num_blocks);
+#if defined(__NVCC__) || defined(__HIPCC__)
+    ReduceMaxKernel<<<num_blocks, BoundaryReductionBlockSize>>>(
+      device_values.get(), current_size, reduced.get());
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+    crb::Stream stream;
+    stream.parallel_for(sycl::nd_range<3>(crb::Dim3(num_blocks) *
+                                            crb::Dim3(BoundaryReductionBlockSize),
+                                          crb::Dim3(BoundaryReductionBlockSize)),
+                        [=](sycl::nd_item<3>)
+                        { ReduceMaxKernel(device_values.get(), current_size, reduced.get()); });
+    stream.synchronize();
+#endif
+    device_values = std::move(reduced);
+    current_size = num_blocks;
+  }
+
+  crb::HostVector<double> host_result(1, 0.0);
+  crb::copy(host_result, device_values, 1);
+  return host_result[0];
+}
 
 __CRB_GLOBAL_FUNC__ void
 ComputeBoundaryFluxPointwiseChangeKernel(const double* current,
@@ -25,7 +109,7 @@ ComputeBoundaryFluxPointwiseChangeKernel(const double* current,
                                          double* block_max)
 {
 #if defined(__NVCC__) || defined(__HIPCC__)
-  __shared__ double shared_max[kBoundaryReductionBlockSize];
+  __shared__ double shared_max[BoundaryReductionBlockSize];
   const unsigned int tid = threadIdx.x;
   const std::size_t stride = blockDim.x * gridDim.x;
   std::size_t i = threadIdx.x + blockDim.x * blockIdx.x;
@@ -51,7 +135,7 @@ ComputeBoundaryFluxPointwiseChangeKernel(const double* current,
 #if defined(__NVCC__) || defined(__HIPCC__)
   shared_max[tid] = local_max;
   __syncthreads();
-  for (unsigned int offset = kBoundaryReductionBlockSize / 2; offset > 0; offset /= 2)
+  for (unsigned int offset = BoundaryReductionBlockSize / 2; offset > 0; offset /= 2)
   {
     if (tid < offset)
       shared_max[tid] = std::max(shared_max[tid], shared_max[tid + offset]);
@@ -138,20 +222,19 @@ BoundaryCarrier::ComputeDelayedAngularFluxPointwiseChangeOnDevice(int groupset_i
                            range.old_offset + range.size > device_data.size(),
                          "Boundary delayed angular flux range exceeds device storage.");
     const unsigned int num_blocks =
-      static_cast<unsigned int>(std::min<std::size_t>((range.size + kBoundaryReductionBlockSize - 1) /
-                                                        kBoundaryReductionBlockSize,
+      static_cast<unsigned int>(std::min<std::size_t>((range.size + BoundaryReductionBlockSize - 1) /
+                                                        BoundaryReductionBlockSize,
                                                       65535));
     crb::DeviceMemory<double> device_block_max(num_blocks);
-    crb::HostVector<double> host_block_max(num_blocks, 0.0);
 #if defined(__NVCC__) || defined(__HIPCC__)
-    ComputeBoundaryFluxPointwiseChangeKernel<<<num_blocks, kBoundaryReductionBlockSize>>>(
+    ComputeBoundaryFluxPointwiseChangeKernel<<<num_blocks, BoundaryReductionBlockSize>>>(
       device_data.get() + range.current_offset,
       device_data.get() + range.old_offset,
       range.size,
       device_block_max.get());
 #elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
     crb::Stream stream;
-    crb::Dim3 block_size(kBoundaryReductionBlockSize);
+    crb::Dim3 block_size(BoundaryReductionBlockSize);
     crb::Dim3 grid_size(num_blocks);
     stream.parallel_for(sycl::nd_range<3>(grid_size * block_size, block_size),
                         [=](sycl::nd_item<3>)
@@ -163,9 +246,7 @@ BoundaryCarrier::ComputeDelayedAngularFluxPointwiseChangeOnDevice(int groupset_i
                             device_block_max.get());
                         });
 #endif
-    crb::copy(host_block_max, device_block_max, host_block_max.size());
-    for (const double value : host_block_max)
-      local_max = std::max(local_max, value);
+    local_max = std::max(local_max, ReduceDeviceMaxToHost(device_block_max));
   }
 
   return local_max;

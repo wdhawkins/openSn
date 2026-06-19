@@ -19,6 +19,7 @@
 #include "framework/utils/error.h"
 #include "framework/utils/timer.h"
 #include "caribou/main.hpp"
+#include <array>
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -32,7 +33,87 @@ namespace opensn
 namespace
 {
 
-constexpr unsigned int kBlockSize = 256;
+constexpr unsigned int BlockSize = 256;
+
+__CRB_GLOBAL_FUNC__ void
+ReduceMaxKernel(const double* input, std::size_t size, double* output)
+{
+#if defined(__NVCC__) || defined(__HIPCC__)
+  __shared__ double shared_max[BlockSize];
+  const unsigned int tid = threadIdx.x;
+  const std::size_t stride = blockDim.x * gridDim.x;
+  std::size_t i = threadIdx.x + blockDim.x * blockIdx.x;
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+  auto work_index = ::sycl::ext::oneapi::this_work_item::get_nd_item<3>();
+  __attribute__((opencl_local)) double shared_max[BlockSize];
+  const unsigned int tid = static_cast<unsigned int>(work_index.get_local_id(2));
+  const std::size_t stride = work_index.get_local_range(2) * work_index.get_group_range(2);
+  std::size_t i = work_index.get_global_id(2);
+#endif
+
+  double local_max = 0.0;
+  while (i < size)
+  {
+    local_max = std::max(local_max, input[i]);
+    i += stride;
+  }
+
+#if defined(__NVCC__) || defined(__HIPCC__)
+  shared_max[tid] = local_max;
+  __syncthreads();
+  for (unsigned int offset = BlockSize / 2; offset > 0; offset /= 2)
+  {
+    if (tid < offset)
+      shared_max[tid] = std::max(shared_max[tid], shared_max[tid + offset]);
+    __syncthreads();
+  }
+  if (tid == 0)
+    output[blockIdx.x] = shared_max[0];
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+  shared_max[tid] = local_max;
+  work_index.barrier(sycl::access::fence_space::local_space);
+  for (unsigned int offset = BlockSize / 2; offset > 0; offset /= 2)
+  {
+    if (tid < offset)
+      shared_max[tid] = std::max(shared_max[tid], shared_max[tid + offset]);
+    work_index.barrier(sycl::access::fence_space::local_space);
+  }
+  if (tid == 0)
+    output[work_index.get_group(2)] = shared_max[0];
+#endif
+}
+
+double
+ReduceDeviceMaxToHost(crb::DeviceMemory<double>& device_values)
+{
+  std::size_t current_size = device_values.size();
+  if (current_size == 0)
+    return 0.0;
+
+  while (current_size > 1)
+  {
+    const auto num_blocks =
+      static_cast<unsigned int>(std::min<std::size_t>((current_size + BlockSize - 1) / BlockSize,
+                                                      65535));
+    crb::DeviceMemory<double> reduced(num_blocks);
+#if defined(__NVCC__) || defined(__HIPCC__)
+    ReduceMaxKernel<<<num_blocks, BlockSize>>>(device_values.get(), current_size, reduced.get());
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+    crb::Stream stream;
+    stream.parallel_for(sycl::nd_range<3>(crb::Dim3(num_blocks) * crb::Dim3(BlockSize),
+                                          crb::Dim3(BlockSize)),
+                        [=](sycl::nd_item<3>)
+                        { ReduceMaxKernel(device_values.get(), current_size, reduced.get()); });
+    stream.synchronize();
+#endif
+    device_values = std::move(reduced);
+    current_size = num_blocks;
+  }
+
+  crb::HostVector<double> host_result(1, 0.0);
+  crb::copy(host_result, device_values, 1);
+  return host_result[0];
+}
 
 AAHDSweepChunk&
 GetAAHDSweepChunk(SweepWGSContext& sweep_context)
@@ -122,6 +203,57 @@ BuildDeviceClassicRichardsonSourceKernel(const char* mesh_data,
 }
 
 __CRB_GLOBAL_FUNC__ void
+ZeroDeviceGroupsetPhiKernel(double* phi,
+                            std::size_t size,
+                            std::uint32_t num_groups,
+                            std::uint32_t groupset_start,
+                            std::uint32_t groupset_size)
+{
+#if defined(__NVCC__) || defined(__HIPCC__)
+  std::size_t i = threadIdx.x + blockDim.x * blockIdx.x;
+  const std::size_t stride = blockDim.x * gridDim.x;
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+  auto work_index = ::sycl::ext::oneapi::this_work_item::get_nd_item<3>();
+  std::size_t i = work_index.get_global_id(2);
+  const std::size_t stride = work_index.get_local_range(2) * work_index.get_group_range(2);
+#endif
+
+  while (i < size)
+  {
+    const std::uint32_t g = i % num_groups;
+    if (g >= groupset_start and g < groupset_start + groupset_size)
+      phi[i] = 0.0;
+    i += stride;
+  }
+}
+
+__CRB_GLOBAL_FUNC__ void
+CopyDeviceGroupsetPhiKernel(double* phi_old,
+                            const double* phi_new,
+                            std::size_t size,
+                            std::uint32_t num_groups,
+                            std::uint32_t groupset_start,
+                            std::uint32_t groupset_size)
+{
+#if defined(__NVCC__) || defined(__HIPCC__)
+  std::size_t i = threadIdx.x + blockDim.x * blockIdx.x;
+  const std::size_t stride = blockDim.x * gridDim.x;
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+  auto work_index = ::sycl::ext::oneapi::this_work_item::get_nd_item<3>();
+  std::size_t i = work_index.get_global_id(2);
+  const std::size_t stride = work_index.get_local_range(2) * work_index.get_group_range(2);
+#endif
+
+  while (i < size)
+  {
+    const std::uint32_t g = i % num_groups;
+    if (g >= groupset_start and g < groupset_start + groupset_size)
+      phi_old[i] = phi_new[i];
+    i += stride;
+  }
+}
+
+__CRB_GLOBAL_FUNC__ void
 ComputePhiChangeKernel(const double* phi_new,
                        const double* phi_old,
                        std::size_t size,
@@ -131,7 +263,7 @@ ComputePhiChangeKernel(const double* phi_new,
                        double* block_results)
 {
 #if defined(__NVCC__) || defined(__HIPCC__)
-  __shared__ double block_change[kBlockSize];
+  __shared__ double block_change[BlockSize];
   const unsigned int tid = threadIdx.x;
   std::size_t i = threadIdx.x + blockDim.x * blockIdx.x;
   const std::size_t stride = blockDim.x * gridDim.x;
@@ -165,7 +297,7 @@ ComputePhiChangeKernel(const double* phi_new,
 #if defined(__NVCC__) || defined(__HIPCC__)
   block_change[tid] = local_change;
   __syncthreads();
-  for (unsigned int offset = kBlockSize / 2; offset > 0; offset /= 2)
+  for (unsigned int offset = BlockSize / 2; offset > 0; offset /= 2)
   {
     if (tid < offset)
       block_change[tid] = std::max(block_change[tid], block_change[tid + offset]);
@@ -224,11 +356,38 @@ DeviceClassicRichardsonRuntime::CopySourceMomentsToDevice()
 }
 
 void
-DeviceClassicRichardsonRuntime::CopyDevicePhiNewToOld()
+DeviceClassicRichardsonRuntime::CopyDevicePhiNewToOld(const LBSGroupset& groupset)
 {
   if (!problem_->UseGPUs())
     return;
-  problem_->GetPhiOldPinner()->CopyDeviceFrom(*problem_->GetPhiPinner());
+
+  const auto phi_size = problem_->GetPhiNewLocal().size();
+  const std::uint32_t block_size = BlockSize;
+  const std::uint32_t grid_size =
+    static_cast<std::uint32_t>((phi_size + block_size - 1) / block_size);
+
+#if defined(__NVCC__) || defined(__HIPCC__)
+  CopyDeviceGroupsetPhiKernel<<<grid_size, block_size>>>(problem_->GetPhiOldPinner()->GetDevicePtr(),
+                                                         problem_->GetPhiPinner()->GetDevicePtr(),
+                                                         phi_size,
+                                                         problem_->GetNumGroups(),
+                                                         groupset.first_group,
+                                                         groupset.GetNumGroups());
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+  crb::Stream stream;
+  stream.parallel_for(sycl::nd_range<3>(crb::Dim3(grid_size) * crb::Dim3(block_size),
+                                        crb::Dim3(block_size)),
+                      [=](sycl::nd_item<3>)
+                      {
+                        CopyDeviceGroupsetPhiKernel(problem_->GetPhiOldPinner()->GetDevicePtr(),
+                                                   problem_->GetPhiPinner()->GetDevicePtr(),
+                                                   phi_size,
+                                                   problem_->GetNumGroups(),
+                                                   groupset.first_group,
+                                                   groupset.GetNumGroups());
+                      });
+  stream.synchronize();
+#endif
 }
 
 void
@@ -274,8 +433,6 @@ DeviceClassicRichardsonRuntime::PrepareSweep(bool use_boundary_source,
       std::fill(fluds.DelayedLocalPsiOld().begin(), fluds.DelayedLocalPsiOld().end(), 0.0);
       for (auto& loc_vector : fluds.DelayedPrelocIOutgoingPsiOld())
         std::fill(loc_vector.begin(), loc_vector.end(), 0.0);
-      std::fill(fluds.ABDelayedPsiOld().begin(), fluds.ABDelayedPsiOld().end(), 0.0);
-      std::fill(fluds.PromotedDelayedPsiOld().begin(), fluds.PromotedDelayedPsiOld().end(), 0.0);
     }
   }
 
@@ -285,16 +442,40 @@ DeviceClassicRichardsonRuntime::PrepareSweep(bool use_boundary_source,
     for (auto& delayed_data : fluds.DelayedPrelocIOutgoingPsi())
       std::fill(delayed_data.begin(), delayed_data.end(), 0.0);
     std::fill(fluds.DelayedLocalPsi().begin(), fluds.DelayedLocalPsi().end(), 0.0);
-    std::fill(fluds.ABDelayedPsi().begin(), fluds.ABDelayedPsi().end(), 0.0);
-    std::fill(fluds.PromotedDelayedPsi().begin(), fluds.PromotedDelayedPsi().end(), 0.0);
   }
 
   sweep_chunk_->ZeroDestinationPsi();
   sweep_chunk_->ZeroDestinationPhi();
   sweep_chunk_->SetBoundarySourceActiveFlag(use_boundary_source);
 
-  problem_->GetPhiPinner()->ZeroOnDevice();
-  problem_->GetOutflowCarrier()->CopyToDevice();
+  const auto phi_size = problem_->GetPhiNewLocal().size();
+  const std::uint32_t block_size = BlockSize;
+  const std::uint32_t grid_size =
+    static_cast<std::uint32_t>((phi_size + block_size - 1) / block_size);
+
+#if defined(__NVCC__) || defined(__HIPCC__)
+  ZeroDeviceGroupsetPhiKernel<<<grid_size, block_size>>>(problem_->GetPhiPinner()->GetDevicePtr(),
+                                                         phi_size,
+                                                         problem_->GetNumGroups(),
+                                                         groupset_->first_group,
+                                                         groupset_->GetNumGroups());
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+  crb::Stream stream;
+  stream.parallel_for(sycl::nd_range<3>(crb::Dim3(grid_size) * crb::Dim3(block_size),
+                                        crb::Dim3(block_size)),
+                      [=](sycl::nd_item<3>)
+                      {
+                        ZeroDeviceGroupsetPhiKernel(problem_->GetPhiPinner()->GetDevicePtr(),
+                                                   phi_size,
+                                                   problem_->GetNumGroups(),
+                                                   groupset_->first_group,
+                                                   groupset_->GetNumGroups());
+                      });
+  stream.synchronize();
+#endif
+  problem_->GetOutflowCarrier()->ZeroGroupsOnDevice(groupset_->first_group,
+                                                    groupset_->GetNumGroups(),
+                                                    problem_->GetNumGroups());
 }
 
 void
@@ -310,7 +491,7 @@ DeviceClassicRichardsonRuntime::BuildSource(const LBSGroupset& groupset,
   const std::uint32_t max_cell_dofs = problem_->GetMaxCellDOFCount();
   const std::uint32_t work_per_cell =
     max_cell_dofs * problem_->GetNumMoments() * groupset.GetNumGroups();
-  const std::uint32_t block_size = kBlockSize;
+  const std::uint32_t block_size = BlockSize;
   const std::uint32_t grid_size_x = (work_per_cell + block_size - 1) / block_size;
   crb::Dim3 block(block_size);
   crb::Dim3 grid(grid_size_x, problem_->GetGrid()->local_cells.size());
@@ -330,6 +511,7 @@ DeviceClassicRichardsonRuntime::BuildSource(const LBSGroupset& groupset,
                                                             max_cell_dofs,
                                                             apply_wgs_scatter,
                                                             apply_wgs_fission);
+  crb::Stream::get_null_stream().synchronize();
 #elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
   crb::Stream stream;
   stream.parallel_for(sycl::nd_range<3>(grid * block, block),
@@ -353,19 +535,17 @@ DeviceClassicRichardsonRuntime::BuildSource(const LBSGroupset& groupset,
 }
 
 double
-DeviceClassicRichardsonRuntime::ComputePhiChange(const LBSGroupset& groupset) const
+DeviceClassicRichardsonRuntime::ComputeLocalPhiChange(const LBSGroupset& groupset) const
 {
   if (!problem_->UseGPUs())
     return 0.0;
 
   const std::size_t size = problem_->GetPhiNewLocal().size();
   const std::uint32_t num_blocks =
-    static_cast<std::uint32_t>(std::min<std::size_t>((size + kBlockSize - 1) / kBlockSize, 65535));
+    static_cast<std::uint32_t>(std::min<std::size_t>((size + BlockSize - 1) / BlockSize, 65535));
   crb::DeviceMemory<double> device_results(num_blocks);
-  crb::HostVector<double> host_results(num_blocks, 0.0);
-
 #if defined(__NVCC__) || defined(__HIPCC__)
-  ComputePhiChangeKernel<<<num_blocks, kBlockSize>>>(problem_->GetPhiPinner()->GetDevicePtr(),
+  ComputePhiChangeKernel<<<num_blocks, BlockSize>>>(problem_->GetPhiPinner()->GetDevicePtr(),
                                                      problem_->GetPhiOldPinner()->GetDevicePtr(),
                                                      size,
                                                      problem_->GetNumGroups(),
@@ -374,7 +554,7 @@ DeviceClassicRichardsonRuntime::ComputePhiChange(const LBSGroupset& groupset) co
                                                      device_results.get());
 #elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
   crb::Stream stream;
-  crb::Dim3 block(kBlockSize);
+  crb::Dim3 block(BlockSize);
   crb::Dim3 grid(num_blocks);
   stream.parallel_for(sycl::nd_range<3>(grid * block, block),
                       [=](sycl::nd_item<3>)
@@ -390,11 +570,33 @@ DeviceClassicRichardsonRuntime::ComputePhiChange(const LBSGroupset& groupset) co
   stream.synchronize();
 #endif
 
-  crb::copy(host_results, device_results, host_results.size());
-  const double local_change = *std::max_element(host_results.begin(), host_results.end());
+  return ReduceDeviceMaxToHost(device_results);
+}
+
+double
+DeviceClassicRichardsonRuntime::ComputeGlobalPhiChange(const LBSGroupset& groupset) const
+{
+  const double local_change = ComputeLocalPhiChange(groupset);
   double global_change = 0.0;
   opensn::mpi_comm.all_reduce(local_change, global_change, mpi::op::max<double>());
   return global_change;
+}
+
+DeviceRichardsonConvergenceMetrics
+DeviceClassicRichardsonRuntime::ComputeConvergenceMetrics(const LBSGroupset& groupset) const
+{
+  DeviceRichardsonConvergenceMetrics metrics;
+  metrics.phi_change = ComputeLocalPhiChange(groupset);
+  metrics.psi_change = last_local_delayed_psi_relative_change_;
+
+  std::array<double, 2> local_metrics = {metrics.phi_change, metrics.psi_change};
+  std::array<double, 2> global_metrics = {0.0, 0.0};
+  opensn::mpi_comm.all_reduce(
+    local_metrics.data(), 2, global_metrics.data(), mpi::op::max<double>());
+
+  metrics.phi_change = global_metrics[0];
+  metrics.psi_change = global_metrics[1];
+  return metrics;
 }
 
 void
@@ -411,13 +613,33 @@ DeviceClassicRichardsonRuntime::UploadDelayedPsiToDevice()
 }
 
 void
+DeviceClassicRichardsonRuntime::DownloadDelayedPsiToHost()
+{
+  for (auto* angle_set : angle_sets_)
+  {
+    auto* aahd_fluds = dynamic_cast<AAHD_FLUDS*>(&angle_set->GetFLUDS());
+    OpenSnLogicalErrorIf(aahd_fluds == nullptr,
+                         "DeviceClassicRichardsonRuntime requires AAHD_FLUDS.");
+    aahd_fluds->CopyLocalDelayedPsiFromDevice();
+    aahd_fluds->CopyDelayedIncomingPsiCurrentFromDevice();
+    aahd_fluds->GetStream().synchronize();
+  }
+}
+
+void
 DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
 {
   last_sweep_pass_count_ = 1;
+  last_local_delayed_psi_relative_change_ = 0.0;
   last_delayed_psi_relative_change_ = 0.0;
 
-  constexpr bool use_device_buffers = true;
-  constexpr bool delayed_psi_on_device = true;
+  const bool use_device_buffers =
+#if OPENSN_GPU_AWARE_MPI
+    true;
+#else
+    (opensn::mpi_comm.size() == 1);
+#endif
+  const bool delayed_psi_on_device = use_device_buffers;
   const bool download_delayed_psi = final_download;
 
   for (auto* angle_set : angle_sets_)
@@ -436,10 +658,10 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
     [this, final_download, download_delayed_psi](std::size_t i)
     {
       auto* angle_set = angle_sets_[i];
-      angle_set->SweepKernelAndSync(*sweep_chunk_, true);
-      angle_set->SendAfterFirstPass(true);
+      angle_set->SweepKernelAndSync(*sweep_chunk_, use_device_buffers);
+      angle_set->SendAfterFirstPass(use_device_buffers);
       angle_set->FinalizeAfterSweep(
-        *sweep_chunk_, true, final_download, download_delayed_psi);
+        *sweep_chunk_, use_device_buffers, final_download, download_delayed_psi);
     });
 
   bool all_angle_sets_ready = true;
@@ -458,10 +680,10 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
       [this, final_download, download_delayed_psi](std::size_t i)
       {
         auto* angle_set = angle_sets_[i];
-        angle_set->SweepKernelAndSync(*sweep_chunk_, true);
-        angle_set->SendAfterFirstPass(true);
+        angle_set->SweepKernelAndSync(*sweep_chunk_, use_device_buffers);
+        angle_set->SendAfterFirstPass(use_device_buffers);
         angle_set->FinalizeAfterSweep(
-          *sweep_chunk_, true, final_download, download_delayed_psi);
+          *sweep_chunk_, use_device_buffers, final_download, download_delayed_psi);
       });
     execution_order_.clear();
   }
@@ -486,6 +708,9 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
   for (auto* angle_set : angle_sets_)
     angle_set->WaitForDownstreamAndDelayed();
 
+  for (auto* angle_set : angle_sets_)
+    static_cast<AAHD_FLUDS*>(&angle_set->GetFLUDS())->UploadDelayedIncomingPsiCurrentToDevice();
+
   double local_max_change = 0.0;
   for (auto* angle_set : angle_sets_)
   {
@@ -495,9 +720,8 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
   }
   local_max_change =
     std::max(local_max_change, problem_->ComputeDeviceBoundaryDelayedPsiPointwiseChange(groupset_->id));
-
-  opensn::mpi_comm.all_reduce(
-    local_max_change, last_delayed_psi_relative_change_, mpi::op::max<double>());
+  last_local_delayed_psi_relative_change_ = local_max_change;
+  last_delayed_psi_relative_change_ = local_max_change;
 
   for (auto* angle_set : angle_sets_)
     static_cast<AAHD_FLUDS*>(&angle_set->GetFLUDS())->CopyDelayedPsiNewToOldOnDevice();
@@ -513,8 +737,7 @@ void
 DeviceClassicRichardsonRuntime::AccumulateSweepStats(double sweep_time_seconds, size_t sweep_passes)
 {
   sweep_context_->sweep_stats_.total_sweep_time += sweep_time_seconds;
-  ++sweep_context_->sweep_stats_.num_sweeps;
-  sweep_context_->sweep_stats_.num_sweep_passes += sweep_passes;
+  sweep_context_->sweep_stats_.num_sweeps += sweep_passes;
 }
 
 void
@@ -527,7 +750,6 @@ DeviceClassicRichardsonRuntime::ApplyInverseTransportOperator(SourceFlags scope)
   const bool use_boundary_source =
     (scope & APPLY_FIXED_SOURCES) and (not problem_->GetOptions().use_src_moments);
   const bool zero_incoming_delayed_psi = (scope & ZERO_INCOMING_DELAYED_PSI);
-  problem_->ZeroOutflowBalanceVars(*groupset_);
   PrepareSweep(use_boundary_source, zero_incoming_delayed_psi);
 
   const high_resolution_clock::time_point sweep_start = high_resolution_clock::now();

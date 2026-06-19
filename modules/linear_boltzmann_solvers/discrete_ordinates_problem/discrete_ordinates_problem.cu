@@ -13,15 +13,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/fluds/cbcd_fluds.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep_chunks/cbcd_sweep_chunk.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/device/device_vector_mirror.h"
-#include "modules/linear_boltzmann_solvers/lbs_problem/device/view/mesh_view.h"
-#include "modules/linear_boltzmann_solvers/lbs_problem/device/view/quadrature_view.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/outflow/outflow_carrier.h"
-#include "caribou/main.hpp"
-#include <algorithm>
-#include <cmath>
-#include <limits>
-
-namespace crb = caribou;
 
 namespace opensn
 {
@@ -61,17 +53,10 @@ DiscreteOrdinatesProblem::CreateAAHD_FLUDSCommonData()
 {
   for (const auto& [quadrature, spds_list] : quadrature_spds_map_)
   {
-    const auto& so_groupings = quadrature_unq_so_grouping_map_.at(quadrature).first;
-    for (std::size_t i = 0; i < spds_list.size(); ++i)
+    for (const auto& spds : spds_list)
     {
-      std::vector<Vector3> group_omegas;
-      group_omegas.reserve(so_groupings[i].size());
-      for (std::size_t dir_id : so_groupings[i])
-        group_omegas.push_back(quadrature->GetOmega(dir_id));
-
       quadrature_fluds_commondata_map_[quadrature].push_back(
-        std::make_unique<AAHD_FLUDSCommonData>(
-          *spds_list[i], grid_nodal_mappings_, *discretization_, std::move(group_omegas)));
+        std::make_unique<AAHD_FLUDSCommonData>(*spds, grid_nodal_mappings_, *discretization_));
     }
   }
 }

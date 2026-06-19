@@ -27,7 +27,6 @@ public:
   void SetMaxNumMessages(int count)
   {
     max_num_messages_ = count;
-    promoted_msg_tag_offset_ = count / 2;
   }
 
   /// Pre-post receiving upstream dependencies have been met.
@@ -46,12 +45,6 @@ public:
 
   /// Send non-local outgoing psi.
   void SendDownstreamPsi(int angle_set_num, bool use_device_buffers = false);
-
-  /// Send promoted cross-rank delayed psi.
-  void SendPromotedDelayedPsi(int angle_set_num, bool use_device_buffers = false);
-
-  /// Wait until promoted delayed messages have been sent.
-  void WaitForPromotedDelayedPsi();
 
   /// Wait until all downstream messages have been sent.
   void WaitForDownstreamPsi();
@@ -75,12 +68,6 @@ private:
 
   std::vector<mpi::Request> deploc_msg_request_;
   std::vector<std::vector<AAH_MessageDetails>> deploc_msg_data_;
-
-  int promoted_msg_tag_offset_ = 0;
-  std::vector<mpi::Request> promoted_delayed_incoming_msg_request_;
-  std::vector<std::vector<AAH_MessageDetails>> promoted_delayed_incoming_msg_data_;
-  std::vector<mpi::Request> promoted_delayed_outgoing_msg_request_;
-  std::vector<std::vector<AAH_MessageDetails>> promoted_delayed_outgoing_msg_data_;
 };
 
 } // namespace opensn

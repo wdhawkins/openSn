@@ -36,6 +36,11 @@ public:
   /// Copy device outflow values to host storage.
   void CopyFromDevice();
 
+  /// Zero the active groupset slice of the device outflow storage.
+  void ZeroGroupsOnDevice(unsigned int first_group,
+                          unsigned int num_groups_in_groupset,
+                          unsigned int total_num_groups);
+
   /**
    * Return the base pointer to device outflow storage.
    * \return Device pointer to the first outflow value, or null when no device storage exists.

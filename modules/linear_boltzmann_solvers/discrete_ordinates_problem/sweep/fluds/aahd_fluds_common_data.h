@@ -5,15 +5,12 @@
 
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/fluds/fluds_common_data.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/fluds/aahd_structs.h"
-#include "framework/data_types/vector3.h"
 #include <cstddef>
 #include <cstdint>
 #include <ostream>
 #include <limits>
 #include <map>
-#include <utility>
 #include <stdexcept>
-#include <vector>
 
 namespace opensn
 {
@@ -35,8 +32,7 @@ public:
    */
   AAHD_FLUDSCommonData(const SPDS& spds,
                        const std::vector<CellFaceNodalMapping>& grid_nodal_mappings,
-                       const SpatialDiscretization& sdm,
-                       std::vector<Vector3> all_omegas = {});
+                       const SpatialDiscretization& sdm);
 
   /// Get constant reference to the face node tracker map.
   const std::map<FaceNode, AAHD_NodeIndex>& GetNodeTracker() const { return node_tracker_; }
@@ -77,46 +73,10 @@ public:
   {
     return nonlocal_outgoing_node_offsets_;
   }
-  /// Get promoted cross-rank delayed incoming neighbor locations.
-  const std::vector<int>& GetPromotedDelayedIncomingLocations() const
-  {
-    return promoted_delayed_incoming_locations_;
-  }
-  /// Get promoted cross-rank delayed incoming node sizes by location.
-  const std::vector<std::size_t>& GetPromotedDelayedIncomingNodeSizes() const
-  {
-    return promoted_delayed_incoming_node_sizes_;
-  }
-  /// Get promoted cross-rank delayed incoming node offsets by location.
-  const std::vector<std::size_t>& GetPromotedDelayedIncomingNodeOffsets() const
-  {
-    return promoted_delayed_incoming_node_offsets_;
-  }
-  /// Get promoted cross-rank delayed outgoing neighbor locations.
-  const std::vector<int>& GetPromotedDelayedOutgoingLocations() const
-  {
-    return promoted_delayed_outgoing_locations_;
-  }
-  /// Get promoted cross-rank delayed outgoing node sizes by location.
-  const std::vector<std::size_t>& GetPromotedDelayedOutgoingNodeSizes() const
-  {
-    return promoted_delayed_outgoing_node_sizes_;
-  }
-  /// Get promoted cross-rank delayed outgoing node offsets by location.
-  const std::vector<std::size_t>& GetPromotedDelayedOutgoingNodeOffsets() const
-  {
-    return promoted_delayed_outgoing_node_offsets_;
-  }
   /// \}
 
-  /// Get pointer to indexes on device (primary angle).
+  /// Get pointer to indexes on device.
   const std::uint64_t* GetDeviceIndex() const { return device_node_indexes_; }
-
-  /// Get device pointer array: flud_indices[a] is the per-angle flat index array for angle a.
-  const std::uint64_t* const* GetDeviceIndexPtrArray() const { return device_index_ptr_array_; }
-
-  /// Get total delayed local nodes including per-angle additionally-backward faces.
-  std::size_t GetTotalDelayedLocalNodes() const { return total_delayed_local_node_stack_size_; }
 
   /// Append an associated angle set pointer.
   void AddAssociatedAngleSet(AAHD_AngleSet* as) const { associated_anglesets_.push_back(as); }
@@ -153,39 +113,12 @@ protected:
   std::vector<std::size_t> nonlocal_outgoing_node_sizes_;
   /// Offset of each location to its outgoing non-local face nodes.
   std::vector<std::size_t> nonlocal_outgoing_node_offsets_;
-  /// Neighbor locations for promoted cross-rank delayed incoming nodes.
-  std::vector<int> promoted_delayed_incoming_locations_;
-  /// Sizes of promoted cross-rank delayed incoming nodes by neighbor location.
-  std::vector<std::size_t> promoted_delayed_incoming_node_sizes_;
-  /// Offsets of promoted cross-rank delayed incoming nodes by neighbor location.
-  std::vector<std::size_t> promoted_delayed_incoming_node_offsets_;
-  /// Neighbor locations for promoted cross-rank delayed outgoing nodes.
-  std::vector<int> promoted_delayed_outgoing_locations_;
-  /// Sizes of promoted cross-rank delayed outgoing nodes by neighbor location.
-  std::vector<std::size_t> promoted_delayed_outgoing_node_sizes_;
-  /// Offsets of promoted cross-rank delayed outgoing nodes by neighbor location.
-  std::vector<std::size_t> promoted_delayed_outgoing_node_offsets_;
   /// \}
-
-  /// Omega vectors for all angles in the angleset (primary angle first).
-  std::vector<Vector3> all_omegas_;
-  /// Boundary node flags keyed by face node: {is_reflecting, is_angle_dependent}.
-  std::map<FaceNode, std::pair<bool, bool>> boundary_node_flags_;
-  /// Promoted cross-rank delayed incoming compact indices keyed by angle and local face node.
-  std::map<std::pair<std::size_t, FaceNode>, std::uint64_t> promoted_delayed_incoming_indices_;
-  /// Promoted cross-rank delayed outgoing compact indices keyed by angle and local face node.
-  std::map<std::pair<std::size_t, FaceNode>, std::uint64_t> promoted_delayed_outgoing_indices_;
 
   /// \name Device storage for node indexes
   /// \{
-  /// Device storage for primary angle node indexes (backward compat alias for per_angle[0]).
+  /// Device storage for node indexes.
   std::uint64_t* device_node_indexes_ = nullptr;
-  /// Per-angle device flat arrays: device_per_angle_indexes_[a] is angle a's flat index array.
-  std::vector<std::uint64_t*> device_per_angle_indexes_;
-  /// Device array of per-angle pointers: device_index_ptr_array_[a] == device_per_angle_indexes_[a].
-  std::uint64_t** device_index_ptr_array_ = nullptr;
-  /// Total delayed nodes = FAS count + sum of additionally-backward nodes across all angles.
-  std::size_t total_delayed_local_node_stack_size_ = 0;
   /// Construct flatten node index structure and copy it to device.
   void CopyFlattenNodeIndexToDevice(const SpatialDiscretization& sdm);
   /// \}
@@ -198,8 +131,6 @@ protected:
   void ComputeNodeIndexForDelayedLocalFaces(const SpatialDiscretization& sdm);
   /// Compute the indexes for non-local face nodes.
   void ComputeNodeIndexForNonLocalFaces(const SpatialDiscretization& sdm);
-  /// Compute promoted cross-rank delayed non-local node metadata.
-  void ComputePromotedDelayedNonLocalFaces(const SpatialDiscretization& sdm);
   /// Compute the index for parallel faces.
   void ComputeNodeIndexForParallelFaces(const SpatialDiscretization& sdm);
   /// Compute the indexes for boundary face nodes.

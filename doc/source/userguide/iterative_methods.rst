@@ -137,6 +137,7 @@ Inner Groupset Methods
 The available groupset inner methods are:
 
 - ``"classic_richardson"``
+- ``"device_classic_richardson"``
 - ``"petsc_richardson"``
 - ``"petsc_gmres"``
 - ``"petsc_bicgstab"``
@@ -210,6 +211,86 @@ Example:
        "l_abs_tol": 1.0e-8,
        "l_max_its": 200,
    }
+
+``device_classic_richardson``
+-----------------------------
+
+This is the GPU-resident variant of classic Richardson. It uses the same basic
+iteration pattern as ``classic_richardson``, but keeps the Richardson update on
+the device as much as possible.
+
+What it does:
+
+- updates the groupset source
+- applies the inverse transport sweep with the GPU AAH kernel
+- checks convergence using pointwise changes in ``phi`` and delayed angular flux
+
+Current requirements and constraints:
+
+- requires ``use_gpus=True``
+- currently supports only GPU ``AAH`` sweeps
+- does not support WGDSA or TGDSA
+- does not use the fast device-side source update path for every problem
+
+Source build paths
+~~~~~~~~~~~~~~~~~~
+
+``device_classic_richardson`` has two source-update modes:
+
+- a fast device-side source update path
+- a host rebuild path
+
+The fast device-side path is used only for cases that match the currently
+supported source model. In particular, it is intended for steady-state or
+k-eigen style groupset solves without precursors, with:
+
+- lhs source scope limited to within-groupset scatter and within-groupset fission
+- rhs source scope limited to fixed sources, across-groupset scatter, and
+  across-groupset fission
+
+When a case falls outside those assumptions, OpenSn automatically falls back to
+the host rebuild path for that groupset.
+
+You can also force that fallback explicitly with the groupset option
+``force_host_source=True``:
+
+.. code-block:: python
+
+   {
+       "groups_from_to": (0, num_groups - 1),
+       "angular_quadrature": quad,
+       "inner_linear_method": "device_classic_richardson",
+       "force_host_source": True,
+       "l_abs_tol": 1.0e-6,
+       "l_max_its": 200,
+   }
+
+This option is mainly useful for debugging, validation, or when comparing the
+device-side source update against the standard host source rebuild.
+
+Example:
+
+.. code-block:: python
+
+   {
+       "groups_from_to": (0, num_groups - 1),
+       "angular_quadrature": quad,
+       "inner_linear_method": "device_classic_richardson",
+       "l_abs_tol": 1.0e-6,
+       "l_max_its": 200,
+   }
+
+Why use it:
+
+- much lower host-side sweep orchestration cost than CPU Richardson
+- keeps the Richardson fixed-point loop close to the GPU sweep implementation
+- avoids Krylov-vector memory growth associated with GMRES
+
+Why not use it blindly:
+
+- it is more restrictive than the standard CPU Richardson path
+- some source combinations still require host source rebuilds
+- it does not currently support DSA
 
 ``petsc_richardson``
 --------------------
@@ -309,8 +390,9 @@ What it tests:
 
 - for PETSc-based groupset methods, it tests the scaled WGS residual used by
   the OpenSn convergence check
-- for ``classic_richardson``, it is the stopping tolerance for the pointwise
-  flux-change test used by the Richardson iteration machinery
+- for ``classic_richardson`` and ``device_classic_richardson``, it is the
+  stopping tolerance for the pointwise flux-change test used by the Richardson
+  iteration machinery
 
 Reasonable values:
 

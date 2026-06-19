@@ -79,10 +79,7 @@ struct Arguments
       boundary_offset = angle_set.GetDeviceBoudnaryOffset();
     // Copy FLUDS data to GPU and retrieve the pointer set
     flud_data = fluds.GetDevicePointerSet();
-    if constexpr (t == SweepType::AAH)
-      flud_indices = fluds.GetCommonData().GetDeviceIndexPtrArray();
-    else
-      flud_index = fluds.GetCommonData().GetDeviceIndex();
+    flud_index = fluds.GetCommonData().GetDeviceIndex();
     // Copy surface source active
     is_surface_source_active = is_active;
   }
@@ -103,9 +100,6 @@ struct Arguments
   std::uint32_t num_groups;
   std::uint32_t groupset_start;
   std::uint32_t groupset_size;
-  // AAH: per-angle flat index arrays; flud_indices[angle_idx] is the flat array for that angle
-  const std::uint64_t* const* __restrict__ flud_indices = nullptr;
-  // CBC: single flat index array (all angles share one sweep ordering)
   const std::uint64_t* __restrict__ flud_index = nullptr;
   FLUDSPointerSetType flud_data;
   // Source active

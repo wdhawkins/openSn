@@ -9,7 +9,6 @@
 #include <algorithm>
 #include <queue>
 #include <set>
-#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -19,103 +18,13 @@ namespace opensn
 AAHD_FLUDSCommonData::AAHD_FLUDSCommonData(
   const SPDS& spds,
   const std::vector<CellFaceNodalMapping>& grid_nodal_mappings,
-  const SpatialDiscretization& sdm,
-  std::vector<Vector3> all_omegas)
-  : FLUDSCommonData(spds, grid_nodal_mappings), all_omegas_(std::move(all_omegas))
+  const SpatialDiscretization& sdm)
+  : FLUDSCommonData(spds, grid_nodal_mappings)
 {
   ComputeNodeIndexForNonDelayedLocalFaces(sdm);
   ComputeNodeIndexForDelayedLocalFaces(sdm);
   ComputeNodeIndexForNonLocalFaces(sdm);
-  ComputePromotedDelayedNonLocalFaces(sdm);
   ComputeNodeIndexForParallelFaces(sdm);
-  total_delayed_local_node_stack_size_ = delayed_local_node_stack_size_;
-}
-
-void
-AAHD_FLUDSCommonData::ComputePromotedDelayedNonLocalFaces(const SpatialDiscretization& sdm)
-{
-  promoted_delayed_incoming_locations_.clear();
-  promoted_delayed_incoming_node_sizes_.clear();
-  promoted_delayed_incoming_node_offsets_ = {0};
-  promoted_delayed_outgoing_locations_.clear();
-  promoted_delayed_outgoing_node_sizes_.clear();
-  promoted_delayed_outgoing_node_offsets_ = {0};
-  promoted_delayed_incoming_indices_.clear();
-  promoted_delayed_outgoing_indices_.clear();
-
-  if (all_omegas_.size() <= 1)
-    return;
-
-  using PromotedKey =
-    std::tuple<std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t>;
-  std::map<int, std::set<std::pair<PromotedKey, FaceNode>>> promoted_incoming_sets;
-  std::map<int, std::set<std::pair<PromotedKey, FaceNode>>> promoted_outgoing_sets;
-  const MeshContinuum& grid = *(spds_.GetGrid());
-  for (std::size_t a = 1; a < all_omegas_.size(); ++a)
-  {
-    const Vector3& omega_a = all_omegas_[a];
-    for (const Cell& cell : grid.local_cells)
-    {
-      for (std::uint32_t f = 0; f < cell.faces.size(); ++f)
-      {
-        const CellFace& face = cell.faces[f];
-        if (!face.has_neighbor or face.IsNeighborLocal(&grid))
-          continue;
-        const FaceOrientation& orient = spds_.GetCellFaceOrientations()[cell.local_id][f];
-        const bool incoming_a = omega_a.Dot(face.normal) < 0.0;
-        if ((orient == FaceOrientation::OUTGOING and !incoming_a) or
-            (orient == FaceOrientation::INCOMING and incoming_a))
-          continue;
-
-        const FaceNodalMapping& fnm = grid_nodal_mappings_[cell.local_id][f];
-        const int loc = face.GetNeighborPartitionID(&grid);
-        const std::uint32_t num_fn = sdm.GetCellMapping(cell).GetNumFaceNodes(f);
-        for (std::uint32_t fn = 0; fn < num_fn; ++fn)
-        {
-          AAHD_NonLocalFaceNode nl_node(cell.global_id,
-                                        cell.local_id,
-                                        f,
-                                        fn,
-                                        face.neighbor_id,
-                                        fnm.associated_face_,
-                                        fnm.face_node_mapping_.at(fn));
-          const auto& base_key = nl_node.GetGlobalOrdering();
-          PromotedKey key{std::get<0>(base_key),
-                          std::get<1>(base_key),
-                          std::get<2>(base_key),
-                          static_cast<std::uint64_t>(a)};
-          if (incoming_a)
-            promoted_incoming_sets[loc].emplace(key, nl_node.node);
-          else
-            promoted_outgoing_sets[loc].emplace(key, nl_node.node);
-        }
-      }
-    }
-  }
-
-  std::uint64_t promoted_index = 0;
-  for (const auto& [loc, nodes] : promoted_incoming_sets)
-  {
-    promoted_delayed_incoming_locations_.push_back(loc);
-    promoted_delayed_incoming_node_sizes_.push_back(nodes.size());
-    promoted_delayed_incoming_node_offsets_.push_back(promoted_delayed_incoming_node_offsets_.back() +
-                                                      nodes.size());
-    for (const auto& [key, node] : nodes)
-      promoted_delayed_incoming_indices_[{static_cast<std::size_t>(std::get<3>(key)), node}] =
-        promoted_index++;
-  }
-
-  promoted_index = 0;
-  for (const auto& [loc, nodes] : promoted_outgoing_sets)
-  {
-    promoted_delayed_outgoing_locations_.push_back(loc);
-    promoted_delayed_outgoing_node_sizes_.push_back(nodes.size());
-    promoted_delayed_outgoing_node_offsets_.push_back(promoted_delayed_outgoing_node_offsets_.back() +
-                                                     nodes.size());
-    for (const auto& [key, node] : nodes)
-      promoted_delayed_outgoing_indices_[{static_cast<std::size_t>(std::get<3>(key)), node}] =
-        promoted_index++;
-  }
 }
 
 void

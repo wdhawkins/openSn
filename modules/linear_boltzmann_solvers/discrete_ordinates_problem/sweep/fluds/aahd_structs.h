@@ -192,28 +192,12 @@ private:
  */
 struct AAHD_FLUDSPointerSet : public FLUDSPointerSet
 {
-  /// Pointer to delayed local angular fluxes (FAS edges; stride = stride_size).
+  /// Pointer to delayed local angular fluxes.
   double* __restrict__ delayed_local_psi = nullptr;
-  /// Pointer to delayed old local angular fluxes (FAS edges; stride = stride_size).
+  /// Pointer to delayed old local angular fluxes.
   double* __restrict__ delayed_local_psi_old = nullptr;
   /// Pointer to non-local old delayed incoming angular fluxes.
   double* __restrict__ nonlocal_delayed_incoming_psi_old = nullptr;
-  /// Compact promoted cross-rank delayed incoming psi (current/old; stride = groupset_size).
-  double* __restrict__ promoted_delayed_incoming_psi = nullptr;
-  double* __restrict__ promoted_delayed_incoming_psi_old = nullptr;
-  /// Compact promoted cross-rank delayed outgoing psi (stride = groupset_size).
-  double* __restrict__ promoted_delayed_outgoing_psi = nullptr;
-  /// Number of regular non-local delayed incoming nodes before compact promoted entries.
-  std::uint64_t nonlocal_delayed_incoming_count = 0;
-
-  /// Compact additionally-backward (AB) delayed buffer (stride = groupset_size, not stride_size).
-  /// AB entries use indices >= fas_count. Buffer indexed as: ab_delayed[(idx-fas_count)*groupset_size + group_idx]
-  double* __restrict__ ab_delayed_psi = nullptr;
-  double* __restrict__ ab_delayed_psi_old = nullptr;
-  /// Number of FAS-edge delayed nodes (threshold between FAS and AB entries).
-  std::uint64_t fas_count = 0;
-  /// Number of groups in the groupset (stride for the compact AB buffer).
-  std::uint64_t groupset_size = 0;
 
   /// Get pointer to the incoming angular flux (if the face is not incoming, a nullptr is returned).
   constexpr double* GetIncomingFluxPointer(const AAHD_NodeIndex& node_index,
@@ -238,11 +222,7 @@ struct AAHD_FLUDSPointerSet : public FLUDSPointerSet
     {
       if (node_index.IsDelayed())
       {
-        const std::uint64_t idx = node_index.GetIndex();
-        if (idx < fas_count)
-          return delayed_local_psi_old + idx * stride_size + angle_group_idx;
-        // Additionally-backward: compact buffer, stride = groupset_size
-        return ab_delayed_psi_old + (idx - fas_count) * groupset_size + group_idx;
+        return delayed_local_psi_old + node_index.GetIndex() * stride_size + angle_group_idx;
       }
       else
       {
@@ -254,11 +234,8 @@ struct AAHD_FLUDSPointerSet : public FLUDSPointerSet
     {
       if (node_index.IsDelayed())
       {
-        const std::uint64_t idx = node_index.GetIndex();
-        if (idx < nonlocal_delayed_incoming_count)
-          return nonlocal_delayed_incoming_psi_old + idx * stride_size + angle_group_idx;
-        return promoted_delayed_incoming_psi_old +
-               (idx - nonlocal_delayed_incoming_count) * groupset_size + group_idx;
+        return nonlocal_delayed_incoming_psi_old + node_index.GetIndex() * stride_size +
+               angle_group_idx;
       }
       else
       {
@@ -271,7 +248,6 @@ struct AAHD_FLUDSPointerSet : public FLUDSPointerSet
   constexpr double*
   GetOutgoingFluxPointer(const AAHD_NodeIndex& node_index,
                          unsigned int angle_group_idx,
-                         unsigned int group_idx,
                          double* __restrict__ boundary,
                          const std::uint64_t* __restrict__ boundary_offset) const noexcept
   {
@@ -285,11 +261,7 @@ struct AAHD_FLUDSPointerSet : public FLUDSPointerSet
     {
       if (node_index.IsDelayed())
       {
-        const std::uint64_t idx = node_index.GetIndex();
-        if (idx < fas_count)
-          return delayed_local_psi + idx * stride_size + angle_group_idx;
-        // Additionally-backward: compact buffer, stride = groupset_size
-        return ab_delayed_psi + (idx - fas_count) * groupset_size + group_idx;
+        return delayed_local_psi + node_index.GetIndex() * stride_size + angle_group_idx;
       }
       else
       {
@@ -299,10 +271,6 @@ struct AAHD_FLUDSPointerSet : public FLUDSPointerSet
     // non-local case
     else
     {
-      if (node_index.IsDelayed())
-      {
-        return promoted_delayed_outgoing_psi + node_index.GetIndex() * groupset_size + group_idx;
-      }
       return nonlocal_outgoing_psi + node_index.GetIndex() * stride_size + angle_group_idx;
     }
   }

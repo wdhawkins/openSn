@@ -26,14 +26,12 @@ public:
   void Solve() override;
 
 private:
-  void SelectSourceBuildPath();
+  bool SelectSourceBuildPath();
   bool UseFastDeviceSourcePath() const;
   void Validate();
   void InitializeLaggedState();
   void BuildIterationSource();
   void SyncLaggedStateToLatestIterate();
-  double ComputePhiChange() const;
-  double ComputePsiChange() const;
 
 private:
   std::shared_ptr<SweepWGSContext> sweep_context_;

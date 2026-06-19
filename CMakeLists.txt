@@ -89,6 +89,13 @@ set(OPENSN_ACCELERATOR_COUNT 0)
 option(OPENSN_WITH_CUDA "Enable CUDA support" OFF)
 option(OPENSN_WITH_HIP "Enable HIP support" OFF)
 option(OPENSN_WITH_SYCL "Enable SYCL support" OFF)
+option(OPENSN_GPU_AWARE_MPI "Enable GPU-aware MPI device-buffer communication" OFF)
+set(OPENSN_GPU_AWARE_MPI_LIBRARIES ""
+    CACHE STRING "Additional libraries required for GPU-aware MPI support")
+if (NOT OPENSN_GPU_AWARE_MPI AND OPENSN_GPU_AWARE_MPI_LIBRARIES)
+  message(FATAL_ERROR
+          "OPENSN_GPU_AWARE_MPI_LIBRARIES was provided but OPENSN_GPU_AWARE_MPI is OFF.")
+endif()
 if(OPENSN_WITH_CUDA)
   math(EXPR OPENSN_ACCELERATOR_COUNT "${OPENSN_ACCELERATOR_COUNT} + 1")
 endif()
@@ -381,6 +388,13 @@ target_link_libraries(libopensn
 )
 if (OPENSN_WITH_GPU)
   target_link_libraries(libopensn INTERFACE libopensngpu)
+endif()
+
+if (OPENSN_GPU_AWARE_MPI AND OPENSN_GPU_AWARE_MPI_LIBRARIES)
+  target_link_libraries(libopensn PRIVATE ${OPENSN_GPU_AWARE_MPI_LIBRARIES})
+  if (OPENSN_WITH_GPU)
+    target_link_libraries(libopensngpu PRIVATE ${OPENSN_GPU_AWARE_MPI_LIBRARIES})
+  endif()
 endif()
 
 target_compile_options(libopensn PRIVATE ${OPENSN_CXX_FLAGS})

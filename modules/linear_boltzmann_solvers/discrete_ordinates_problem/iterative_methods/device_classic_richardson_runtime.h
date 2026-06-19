@@ -18,6 +18,12 @@ struct SweepWGSContext;
 class AAHDSweepChunk;
 class AAHD_AngleSet;
 
+struct DeviceRichardsonConvergenceMetrics
+{
+  double phi_change = 0.0;
+  double psi_change = 0.0;
+};
+
 class DeviceClassicRichardsonRuntime
 {
 public:
@@ -25,11 +31,14 @@ public:
 
   void CopyPhiOldToDevice();
   void CopySourceMomentsToDevice();
-  void CopyDevicePhiNewToOld();
+  void CopyDevicePhiNewToOld(const LBSGroupset& groupset);
   void CopySourceBaseToDevice();
   void BuildSource(const LBSGroupset& groupset, bool apply_wgs_scatter, bool apply_wgs_fission);
-  double ComputePhiChange(const LBSGroupset& groupset) const;
+  double ComputeLocalPhiChange(const LBSGroupset& groupset) const;
+  double ComputeGlobalPhiChange(const LBSGroupset& groupset) const;
+  DeviceRichardsonConvergenceMetrics ComputeConvergenceMetrics(const LBSGroupset& groupset) const;
   void UploadDelayedPsiToDevice();
+  void DownloadDelayedPsiToHost();
   void ApplyInverseTransportOperator(SourceFlags scope);
   double GetLastDelayedPsiRelativeChange() const { return last_delayed_psi_relative_change_; }
   void FinalizeAngularFluxes();
@@ -49,6 +58,7 @@ private:
   SPMD_ThreadPool pool_;
   std::vector<std::size_t> execution_order_;
   size_t last_sweep_pass_count_ = 0;
+  double last_local_delayed_psi_relative_change_ = 0.0;
   double last_delayed_psi_relative_change_ = 0.0;
 };
 
