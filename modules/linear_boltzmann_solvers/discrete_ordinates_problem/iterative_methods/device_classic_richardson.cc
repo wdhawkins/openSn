@@ -8,7 +8,6 @@
 #include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/iteration_logging.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/vecops/lbs_vecops.h"
 #include "framework/logging/log.h"
-#include "framework/runtime.h"
 #include "framework/utils/caliper_scopes.h"
 #include "framework/utils/error.h"
 #include "framework/utils/timer.h"
@@ -137,11 +136,6 @@ DeviceClassicRichardson::Validate()
 {
   const auto& do_problem = sweep_context_->do_problem;
   const auto& groupset = sweep_context_->groupset;
-#if OPENSN_GPU_AWARE_MPI
-  constexpr bool compiled_with_gpu_aware_mpi = true;
-#else
-  constexpr bool compiled_with_gpu_aware_mpi = false;
-#endif
 
   OpenSnInvalidArgumentIf(not do_problem.UseGPUs(),
                           "device_classic_richardson requires use_gpus = true.");
@@ -155,9 +149,6 @@ DeviceClassicRichardson::Validate()
                           "groupset.");
   OpenSnInvalidArgumentIf(groupset.apply_wgdsa or groupset.apply_tgdsa,
                           "device_classic_richardson does not currently support DSA.");
-  OpenSnInvalidArgumentIf(opensn::mpi_comm.size() > 1 and not compiled_with_gpu_aware_mpi,
-                          "device_classic_richardson requires OPENSN_GPU_AWARE_MPI=ON for "
-                          "parallel runs. The host-staged fallback is not supported.");
 
   SelectSourceBuildPath();
 

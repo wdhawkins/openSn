@@ -192,8 +192,6 @@ public:
   /// \{
   /// Copy delayed local and delayed non-local incoming psi to device.
   void CopyDelayedPsiToDevice();
-  /// Download newly received delayed non-local incoming psi current buffers to host.
-  void CopyDelayedIncomingPsiCurrentFromDevice();
   /// Upload newly received delayed non-local incoming psi current buffers to device.
   void UploadDelayedIncomingPsiCurrentToDevice();
   /// Copy delayed angular output/current device banks to old device banks.
@@ -206,6 +204,8 @@ public:
   void CopyNonLocalIncomingPsiToDevice();
   /// Get device pointers for each bank in FLUDS.
   AAHD_FLUDSPointerSet GetDevicePointerSet();
+  /// Copy non-local outgoing and delayed local psi from device to host.
+  void CopyPsiFromDevice();
   /// Copy save angular flux from device to host.
   void CopySaveAngularFluxFromDevice();
   /// Copy save angular flux from host contiguous buffer to destination psi.
@@ -237,9 +237,7 @@ public:
   double* DevicePrelocIOutgoingPsi(std::size_t loc, std::size_t block_pos = 0);
   double* DeviceDelayedPrelocIOutgoingPsi(std::size_t loc, std::size_t block_pos = 0);
   double* DeviceDeplocIOutgoingPsi(std::size_t loc, std::size_t block_pos = 0);
-  void ValidateDevicePrelocIOutgoingPsi(std::size_t loc,
-                                        std::size_t block_pos,
-                                        std::size_t size) const;
+  void ValidateDevicePrelocIOutgoingPsi(std::size_t loc, std::size_t block_pos, std::size_t size) const;
   void ValidateDeviceDelayedPrelocIOutgoingPsi(std::size_t loc,
                                                std::size_t block_pos,
                                                std::size_t size) const;

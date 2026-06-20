@@ -817,10 +817,9 @@ DiscreteOrdinatesProblem::ResetMode(SweepChunkMode target_mode)
 
     // Reconstruct psi from the converged steady-state phi before enabling transient RHS time terms.
     ReinitializeSolverSchemes();
-    // A single call to RebuildAngularFluxFromConvergedPhi is insufficient with
-    // lagged angular fluxes. Instead, we perform a fixed-point iteration on the
-    // lagged fluxes with phi/q held at the converged steady-state value. This is
-    // a sweep-only reconstruction of psi.
+    // A single call to RebuildAngularFluxFromConvergedPhi is insufficient with lagged angular
+    // fluxes. Iterate the sweep-only psi reconstruction with phi/q held at the converged
+    // steady-state value.
     constexpr int max_reconstruction_passes = 50;
     constexpr double lagged_psi_rel_tol = 1.0e-3;
     const auto q_moments_ref = GetQMomentsLocal();

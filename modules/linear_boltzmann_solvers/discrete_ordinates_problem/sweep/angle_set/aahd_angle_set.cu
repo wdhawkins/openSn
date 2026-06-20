@@ -66,9 +66,9 @@ AAHD_AngleSet::AngleSetAdvance(SweepChunk& sweep_chunk, AngleSetStatus permissio
 {
   if (executed_)
     return AngleSetStatus::FINISHED;
-  SweepKernelAndSync(sweep_chunk, false);
-  SendAfterFirstPass(false);
-  FinalizeAfterSweep(sweep_chunk, false, true, true);
+  SweepKernelAndSync(sweep_chunk);
+  SendAfterFirstPass();
+  FinalizeAfterSweep(sweep_chunk);
   return AngleSetStatus::FINISHED;
 }
 
@@ -86,10 +86,10 @@ AAHD_AngleSet::SweepKernelAndSync(SweepChunk& sweep_chunk, bool incoming_psi_on_
 }
 
 void
-AAHD_AngleSet::SendAfterFirstPass(bool use_device_send_buffers)
+AAHD_AngleSet::SendAfterFirstPass(bool use_device_buffers)
 {
   auto* aahd_fluds = static_cast<AAHD_FLUDS*>(fluds_.get());
-  if (aahd_fluds->HasNonLocalOutgoingPsi() and not use_device_send_buffers)
+  if (aahd_fluds->HasNonLocalOutgoingPsi() and not use_device_buffers)
   {
     aahd_fluds->CopyNonLocalOutgoingPsiFromDevice();
     stream_.synchronize();
@@ -100,20 +100,18 @@ AAHD_AngleSet::SendAfterFirstPass(bool use_device_send_buffers)
     for (auto& following_as : following_angle_sets_)
       following_as->DecrementCounter();
   }
-  if (use_device_send_buffers)
+  if (use_device_buffers)
   {
-    if (aahd_fluds->HasNonLocalOutgoingPsi())
-      stream_.synchronize();
     std::scoped_lock lk(m);
-    async_comm_.SendDownstreamPsi(static_cast<int>(this->GetID()), use_device_send_buffers);
+    async_comm_.SendDownstreamPsi(static_cast<int>(this->GetID()), use_device_buffers);
   }
   else
-    async_comm_.SendDownstreamPsi(static_cast<int>(this->GetID()), use_device_send_buffers);
+    async_comm_.SendDownstreamPsi(static_cast<int>(this->GetID()), use_device_buffers);
 }
 
 void
 AAHD_AngleSet::FinalizeAfterSweep(SweepChunk& sweep_chunk,
-                                  bool use_device_send_buffers,
+                                  bool use_device_buffers,
                                   bool final_download,
                                   bool download_delayed_psi)
 {
@@ -128,7 +126,7 @@ AAHD_AngleSet::FinalizeAfterSweep(SweepChunk& sweep_chunk,
     aahd_fluds->CopySaveAngularFluxFromDevice();
   if ((download_delayed_psi and need_local_delayed_download) or
       (final_download and aahd_fluds->HasSaveAngularFlux()) or
-      use_device_send_buffers)
+      use_device_buffers)
     stream_.synchronize();
   if (final_download)
     aahd_fluds->CopySaveAngularFluxToDestinationPsi(

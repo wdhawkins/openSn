@@ -31,7 +31,7 @@ SweepScheduler::ScheduleAlgoAAO(SweepChunk& sweep_chunk)
   {
     auto aahd_angle_set = static_cast<AAHD_AngleSet*>(angle_agg_[i].get());
     aahd_angle_set->ResetDependencyCounter();
-    aahd_angle_set->PrepostReceives(false);
+    aahd_angle_set->PrepostReceives();
     execution_order_[i] = i;
   }
 
@@ -40,9 +40,7 @@ SweepScheduler::ScheduleAlgoAAO(SweepChunk& sweep_chunk)
     [this, &sweep_chunk](std::size_t i)
     {
       auto* aahd = static_cast<AAHD_AngleSet*>(angle_agg_[i].get());
-      aahd->SweepKernelAndSync(sweep_chunk, false);
-      aahd->SendAfterFirstPass(false);
-      aahd->FinalizeAfterSweep(sweep_chunk, false, true, true);
+      aahd->AngleSetAdvance(sweep_chunk, AngleSetStatus::EXECUTE);
     });
 
   // poll for readiness and launch threads

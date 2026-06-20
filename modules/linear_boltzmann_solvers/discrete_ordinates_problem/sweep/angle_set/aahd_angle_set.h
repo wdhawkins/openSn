@@ -52,11 +52,11 @@ public:
   void SweepKernelAndSync(SweepChunk& sweep_chunk, bool incoming_psi_on_device = false);
 
   /// Download non-local outgoing psi, signal intra-rank followers, and send downstream psi.
-  void SendAfterFirstPass(bool use_device_send_buffers = false);
+  void SendAfterFirstPass(bool use_device_buffers = false);
 
   /// Final pass: download local delayed psi + save angular flux, copy to destination psi.
   void FinalizeAfterSweep(SweepChunk& sweep_chunk,
-                          bool use_device_send_buffers = false,
+                          bool use_device_buffers = false,
                           bool final_download = true,
                           bool download_delayed_psi = true);
 

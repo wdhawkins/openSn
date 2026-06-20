@@ -154,7 +154,8 @@ AGSLinearSolver::Solve()
     opensn::mpi_comm.all_reduce(&avg_sweep_time, 1, &max_avg_sweep_time, mpi::op::max<double>());
 
     const double sweep_time_per_unknown =
-      num_unknowns > 0 ? max_avg_sweep_time * 1.0e9 / static_cast<double>(num_unknowns) : 0.0;
+      num_unknowns > 0 ? max_avg_sweep_time * 1.0e9 / static_cast<double>(num_unknowns)
+                       : 0.0;
     const std::string label = "WGS groups [" + std::to_string(groupset.first_group) + "-" +
                               std::to_string(groupset.last_group) + "]";
     std::stringstream sweep_timing;

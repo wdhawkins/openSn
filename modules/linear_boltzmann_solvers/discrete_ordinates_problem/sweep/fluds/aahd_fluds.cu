@@ -16,19 +16,19 @@ namespace opensn
 namespace
 {
 
-constexpr unsigned int ReductionBlockSize = 256;
+constexpr unsigned int kReductionBlockSize = 256;
 
 __CRB_GLOBAL_FUNC__ void
 ReduceMaxKernel(const double* input, std::size_t size, double* output)
 {
 #if defined(__NVCC__) || defined(__HIPCC__)
-  __shared__ double shared_max[ReductionBlockSize];
+  __shared__ double shared_max[kReductionBlockSize];
   const unsigned int tid = threadIdx.x;
   const std::size_t stride = blockDim.x * gridDim.x;
   std::size_t i = threadIdx.x + blockDim.x * blockIdx.x;
 #elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
   auto work_index = ::sycl::ext::oneapi::this_work_item::get_nd_item<3>();
-  __attribute__((opencl_local)) double shared_max[ReductionBlockSize];
+  __attribute__((opencl_local)) double shared_max[kReductionBlockSize];
   const unsigned int tid = static_cast<unsigned int>(work_index.get_local_id(2));
   const std::size_t stride = work_index.get_local_range(2) * work_index.get_group_range(2);
   std::size_t i = work_index.get_global_id(2);
@@ -44,7 +44,7 @@ ReduceMaxKernel(const double* input, std::size_t size, double* output)
 #if defined(__NVCC__) || defined(__HIPCC__)
   shared_max[tid] = local_max;
   __syncthreads();
-  for (unsigned int offset = ReductionBlockSize / 2; offset > 0; offset /= 2)
+  for (unsigned int offset = kReductionBlockSize / 2; offset > 0; offset /= 2)
   {
     if (tid < offset)
       shared_max[tid] = std::max(shared_max[tid], shared_max[tid + offset]);
@@ -56,7 +56,7 @@ ReduceMaxKernel(const double* input, std::size_t size, double* output)
 #elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
   shared_max[tid] = local_max;
   work_index.barrier(sycl::access::fence_space::local_space);
-  for (unsigned int offset = ReductionBlockSize / 2; offset > 0; offset /= 2)
+  for (unsigned int offset = kReductionBlockSize / 2; offset > 0; offset /= 2)
   {
     if (tid < offset)
       shared_max[tid] = std::max(shared_max[tid], shared_max[tid + offset]);
@@ -78,16 +78,16 @@ ReduceDeviceMaxToHost(crb::DeviceMemory<double>& device_values, crb::Stream& str
   while (current_size > 1)
   {
     const unsigned int num_blocks =
-      static_cast<unsigned int>(std::min<std::size_t>((current_size + ReductionBlockSize - 1) /
-                                                        ReductionBlockSize,
+      static_cast<unsigned int>(std::min<std::size_t>((current_size + kReductionBlockSize - 1) /
+                                                        kReductionBlockSize,
                                                       65535));
     crb::DeviceMemory<double> reduced(num_blocks);
 #if defined(__NVCC__) || defined(__HIPCC__)
-    ReduceMaxKernel<<<num_blocks, ReductionBlockSize, 0, stream>>>(
+    ReduceMaxKernel<<<num_blocks, kReductionBlockSize, 0, stream>>>(
       device_values.get(), current_size, reduced.get());
 #elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
-    stream.parallel_for(sycl::nd_range<3>(crb::Dim3(num_blocks) * crb::Dim3(ReductionBlockSize),
-                                          crb::Dim3(ReductionBlockSize)),
+    stream.parallel_for(sycl::nd_range<3>(crb::Dim3(num_blocks) * crb::Dim3(kReductionBlockSize),
+                                          crb::Dim3(kReductionBlockSize)),
                         [=](sycl::nd_item<3>)
                         { ReduceMaxKernel(device_values.get(), current_size, reduced.get()); });
 #endif
@@ -109,7 +109,7 @@ ComputePsiPointwiseChangeKernel(const double* psi_old,
                                 double* block_max)
 {
 #if defined(__NVCC__) || defined(__HIPCC__)
-  __shared__ double shared_max[ReductionBlockSize];
+  __shared__ double shared_max[kReductionBlockSize];
   const unsigned int tid = threadIdx.x;
   const std::size_t stride = blockDim.x * gridDim.x;
   std::size_t i = threadIdx.x + blockDim.x * blockIdx.x;
@@ -135,7 +135,7 @@ ComputePsiPointwiseChangeKernel(const double* psi_old,
 #if defined(__NVCC__) || defined(__HIPCC__)
   shared_max[tid] = local_max;
   __syncthreads();
-  for (unsigned int offset = ReductionBlockSize / 2; offset > 0; offset /= 2)
+  for (unsigned int offset = kReductionBlockSize / 2; offset > 0; offset /= 2)
   {
     if (tid < offset)
       shared_max[tid] = std::max(shared_max[tid], shared_max[tid + offset]);
@@ -162,15 +162,15 @@ AccumulatePsiPointwiseChange(const crb::DeviceMemory<double>& old_storage,
                        "Delayed angular flux convergence check has mismatched bank sizes.");
 
   const unsigned int num_blocks =
-    static_cast<unsigned int>(std::min<std::size_t>((size + ReductionBlockSize - 1) /
-                                                      ReductionBlockSize,
+    static_cast<unsigned int>(std::min<std::size_t>((size + kReductionBlockSize - 1) /
+                                                      kReductionBlockSize,
                                                     65535));
   crb::DeviceMemory<double> device_block_max(num_blocks);
 #if defined(__NVCC__) || defined(__HIPCC__)
-  ComputePsiPointwiseChangeKernel<<<num_blocks, ReductionBlockSize, 0, stream>>>(
+  ComputePsiPointwiseChangeKernel<<<num_blocks, kReductionBlockSize, 0, stream>>>(
     old_storage.get(), new_storage.get(), size, device_block_max.get());
 #elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
-  const crb::Dim3 block_size(ReductionBlockSize);
+  const crb::Dim3 block_size(kReductionBlockSize);
   const crb::Dim3 grid_size(num_blocks);
   stream.parallel_for(sycl::nd_range<3>(grid_size * block_size, block_size),
                       [=](sycl::nd_item<3>)
@@ -429,13 +429,6 @@ AAHD_FLUDS::UploadDelayedIncomingPsiCurrentToDevice()
 }
 
 void
-AAHD_FLUDS::CopyDelayedIncomingPsiCurrentFromDevice()
-{
-  if (HasNonLocalDelayedIncomingPsi())
-    nonlocal_delayed_incoming_psi_bank_.DownloadCurrentToHost(stream_);
-}
-
-void
 AAHD_FLUDS::CopyDelayedPsiNewToOldOnDevice()
 {
   if (common_data_.GetNumDelayedLocalNodes() > 0)
@@ -616,6 +609,15 @@ AAHD_FLUDS::CopyNonLocalOutgoingPsiFromDevice()
 void
 AAHD_FLUDS::CopyLocalDelayedPsiFromDevice()
 {
+  if (common_data_.GetNumDelayedLocalNodes() > 0)
+    delayed_local_psi_bank_.DownloadToHost(stream_);
+}
+
+void
+AAHD_FLUDS::CopyPsiFromDevice()
+{
+  if (HasNonLocalOutgoingPsi())
+    nonlocal_outgoing_psi_bank_.DownloadToHost(stream_);
   if (common_data_.GetNumDelayedLocalNodes() > 0)
     delayed_local_psi_bank_.DownloadToHost(stream_);
 }

@@ -33,19 +33,19 @@ namespace opensn
 namespace
 {
 
-constexpr unsigned int BlockSize = 256;
+constexpr unsigned int kBlockSize = 256;
 
 __CRB_GLOBAL_FUNC__ void
 ReduceMaxKernel(const double* input, std::size_t size, double* output)
 {
 #if defined(__NVCC__) || defined(__HIPCC__)
-  __shared__ double shared_max[BlockSize];
+  __shared__ double shared_max[kBlockSize];
   const unsigned int tid = threadIdx.x;
   const std::size_t stride = blockDim.x * gridDim.x;
   std::size_t i = threadIdx.x + blockDim.x * blockIdx.x;
 #elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
   auto work_index = ::sycl::ext::oneapi::this_work_item::get_nd_item<3>();
-  __attribute__((opencl_local)) double shared_max[BlockSize];
+  __attribute__((opencl_local)) double shared_max[kBlockSize];
   const unsigned int tid = static_cast<unsigned int>(work_index.get_local_id(2));
   const std::size_t stride = work_index.get_local_range(2) * work_index.get_group_range(2);
   std::size_t i = work_index.get_global_id(2);
@@ -61,7 +61,7 @@ ReduceMaxKernel(const double* input, std::size_t size, double* output)
 #if defined(__NVCC__) || defined(__HIPCC__)
   shared_max[tid] = local_max;
   __syncthreads();
-  for (unsigned int offset = BlockSize / 2; offset > 0; offset /= 2)
+  for (unsigned int offset = kBlockSize / 2; offset > 0; offset /= 2)
   {
     if (tid < offset)
       shared_max[tid] = std::max(shared_max[tid], shared_max[tid + offset]);
@@ -72,7 +72,7 @@ ReduceMaxKernel(const double* input, std::size_t size, double* output)
 #elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
   shared_max[tid] = local_max;
   work_index.barrier(sycl::access::fence_space::local_space);
-  for (unsigned int offset = BlockSize / 2; offset > 0; offset /= 2)
+  for (unsigned int offset = kBlockSize / 2; offset > 0; offset /= 2)
   {
     if (tid < offset)
       shared_max[tid] = std::max(shared_max[tid], shared_max[tid + offset]);
@@ -93,15 +93,15 @@ ReduceDeviceMaxToHost(crb::DeviceMemory<double>& device_values)
   while (current_size > 1)
   {
     const auto num_blocks =
-      static_cast<unsigned int>(std::min<std::size_t>((current_size + BlockSize - 1) / BlockSize,
+      static_cast<unsigned int>(std::min<std::size_t>((current_size + kBlockSize - 1) / kBlockSize,
                                                       65535));
     crb::DeviceMemory<double> reduced(num_blocks);
 #if defined(__NVCC__) || defined(__HIPCC__)
-    ReduceMaxKernel<<<num_blocks, BlockSize>>>(device_values.get(), current_size, reduced.get());
+    ReduceMaxKernel<<<num_blocks, kBlockSize>>>(device_values.get(), current_size, reduced.get());
 #elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
     crb::Stream stream;
-    stream.parallel_for(sycl::nd_range<3>(crb::Dim3(num_blocks) * crb::Dim3(BlockSize),
-                                          crb::Dim3(BlockSize)),
+    stream.parallel_for(sycl::nd_range<3>(crb::Dim3(num_blocks) * crb::Dim3(kBlockSize),
+                                          crb::Dim3(kBlockSize)),
                         [=](sycl::nd_item<3>)
                         { ReduceMaxKernel(device_values.get(), current_size, reduced.get()); });
     stream.synchronize();
@@ -263,7 +263,7 @@ ComputePhiChangeKernel(const double* phi_new,
                        double* block_results)
 {
 #if defined(__NVCC__) || defined(__HIPCC__)
-  __shared__ double block_change[BlockSize];
+  __shared__ double block_change[kBlockSize];
   const unsigned int tid = threadIdx.x;
   std::size_t i = threadIdx.x + blockDim.x * blockIdx.x;
   const std::size_t stride = blockDim.x * gridDim.x;
@@ -297,7 +297,7 @@ ComputePhiChangeKernel(const double* phi_new,
 #if defined(__NVCC__) || defined(__HIPCC__)
   block_change[tid] = local_change;
   __syncthreads();
-  for (unsigned int offset = BlockSize / 2; offset > 0; offset /= 2)
+  for (unsigned int offset = kBlockSize / 2; offset > 0; offset /= 2)
   {
     if (tid < offset)
       block_change[tid] = std::max(block_change[tid], block_change[tid + offset]);
@@ -362,7 +362,7 @@ DeviceClassicRichardsonRuntime::CopyDevicePhiNewToOld(const LBSGroupset& groupse
     return;
 
   const auto phi_size = problem_->GetPhiNewLocal().size();
-  const std::uint32_t block_size = BlockSize;
+  const std::uint32_t block_size = kBlockSize;
   const std::uint32_t grid_size =
     static_cast<std::uint32_t>((phi_size + block_size - 1) / block_size);
 
@@ -449,7 +449,7 @@ DeviceClassicRichardsonRuntime::PrepareSweep(bool use_boundary_source,
   sweep_chunk_->SetBoundarySourceActiveFlag(use_boundary_source);
 
   const auto phi_size = problem_->GetPhiNewLocal().size();
-  const std::uint32_t block_size = BlockSize;
+  const std::uint32_t block_size = kBlockSize;
   const std::uint32_t grid_size =
     static_cast<std::uint32_t>((phi_size + block_size - 1) / block_size);
 
@@ -491,7 +491,7 @@ DeviceClassicRichardsonRuntime::BuildSource(const LBSGroupset& groupset,
   const std::uint32_t max_cell_dofs = problem_->GetMaxCellDOFCount();
   const std::uint32_t work_per_cell =
     max_cell_dofs * problem_->GetNumMoments() * groupset.GetNumGroups();
-  const std::uint32_t block_size = BlockSize;
+  const std::uint32_t block_size = kBlockSize;
   const std::uint32_t grid_size_x = (work_per_cell + block_size - 1) / block_size;
   crb::Dim3 block(block_size);
   crb::Dim3 grid(grid_size_x, problem_->GetGrid()->local_cells.size());
@@ -542,10 +542,10 @@ DeviceClassicRichardsonRuntime::ComputeLocalPhiChange(const LBSGroupset& groupse
 
   const std::size_t size = problem_->GetPhiNewLocal().size();
   const std::uint32_t num_blocks =
-    static_cast<std::uint32_t>(std::min<std::size_t>((size + BlockSize - 1) / BlockSize, 65535));
+    static_cast<std::uint32_t>(std::min<std::size_t>((size + kBlockSize - 1) / kBlockSize, 65535));
   crb::DeviceMemory<double> device_results(num_blocks);
 #if defined(__NVCC__) || defined(__HIPCC__)
-  ComputePhiChangeKernel<<<num_blocks, BlockSize>>>(problem_->GetPhiPinner()->GetDevicePtr(),
+  ComputePhiChangeKernel<<<num_blocks, kBlockSize>>>(problem_->GetPhiPinner()->GetDevicePtr(),
                                                      problem_->GetPhiOldPinner()->GetDevicePtr(),
                                                      size,
                                                      problem_->GetNumGroups(),
@@ -554,7 +554,7 @@ DeviceClassicRichardsonRuntime::ComputeLocalPhiChange(const LBSGroupset& groupse
                                                      device_results.get());
 #elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
   crb::Stream stream;
-  crb::Dim3 block(BlockSize);
+  crb::Dim3 block(kBlockSize);
   crb::Dim3 grid(num_blocks);
   stream.parallel_for(sycl::nd_range<3>(grid * block, block),
                       [=](sycl::nd_item<3>)
@@ -621,7 +621,6 @@ DeviceClassicRichardsonRuntime::DownloadDelayedPsiToHost()
     OpenSnLogicalErrorIf(aahd_fluds == nullptr,
                          "DeviceClassicRichardsonRuntime requires AAHD_FLUDS.");
     aahd_fluds->CopyLocalDelayedPsiFromDevice();
-    aahd_fluds->CopyDelayedIncomingPsiCurrentFromDevice();
     aahd_fluds->GetStream().synchronize();
   }
 }
@@ -633,13 +632,8 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
   last_local_delayed_psi_relative_change_ = 0.0;
   last_delayed_psi_relative_change_ = 0.0;
 
-  const bool use_device_buffers =
-#if OPENSN_GPU_AWARE_MPI
-    true;
-#else
-    (opensn::mpi_comm.size() == 1);
-#endif
-  const bool delayed_psi_on_device = use_device_buffers;
+  constexpr bool use_device_buffers = true;
+  constexpr bool delayed_psi_on_device = true;
   const bool download_delayed_psi = final_download;
 
   for (auto* angle_set : angle_sets_)
@@ -708,8 +702,11 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
   for (auto* angle_set : angle_sets_)
     angle_set->WaitForDownstreamAndDelayed();
 
-  for (auto* angle_set : angle_sets_)
-    static_cast<AAHD_FLUDS*>(&angle_set->GetFLUDS())->UploadDelayedIncomingPsiCurrentToDevice();
+  if (not use_device_buffers)
+  {
+    for (auto* angle_set : angle_sets_)
+      static_cast<AAHD_FLUDS*>(&angle_set->GetFLUDS())->UploadDelayedIncomingPsiCurrentToDevice();
+  }
 
   double local_max_change = 0.0;
   for (auto* angle_set : angle_sets_)

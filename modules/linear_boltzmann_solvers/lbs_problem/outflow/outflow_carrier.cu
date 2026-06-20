@@ -12,7 +12,7 @@ namespace opensn
 namespace
 {
 
-constexpr unsigned int OutflowZeroBlockSize = 256;
+constexpr unsigned int kOutflowZeroBlockSize = 256;
 
 __CRB_GLOBAL_FUNC__ void
 ZeroOutflowGroupsKernel(double* outflow,
@@ -79,17 +79,17 @@ OutflowCarrier::ZeroGroupsOnDevice(unsigned int first_group,
     return;
 
   const auto num_blocks = static_cast<unsigned int>(
-    std::min<std::size_t>((size + OutflowZeroBlockSize - 1) / OutflowZeroBlockSize, 65535));
+    std::min<std::size_t>((size + kOutflowZeroBlockSize - 1) / kOutflowZeroBlockSize, 65535));
 
 #if defined(__NVCC__) || defined(__HIPCC__)
-  ZeroOutflowGroupsKernel<<<num_blocks, OutflowZeroBlockSize>>>(device_outflows_.get(),
+  ZeroOutflowGroupsKernel<<<num_blocks, kOutflowZeroBlockSize>>>(device_outflows_.get(),
                                                                  size,
                                                                  first_group,
                                                                  num_groups_in_groupset,
                                                                  total_num_groups);
 #elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
   crb::Stream stream;
-  crb::Dim3 block(OutflowZeroBlockSize);
+  crb::Dim3 block(kOutflowZeroBlockSize);
   crb::Dim3 grid(num_blocks);
   stream.parallel_for(sycl::nd_range<3>(grid * block, block),
                       [=](sycl::nd_item<3>)

@@ -10,6 +10,8 @@
 #include "caribou/main.hpp"
 #include <cinttypes>
 #include <map>
+#include <set>
+#include <tuple>
 
 namespace crb = caribou;
 
