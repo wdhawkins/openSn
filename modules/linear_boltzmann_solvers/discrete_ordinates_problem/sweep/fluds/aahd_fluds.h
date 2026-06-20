@@ -192,6 +192,8 @@ public:
   /// \{
   /// Copy delayed local and delayed non-local incoming psi to device.
   void CopyDelayedPsiToDevice();
+  /// Download newly received delayed non-local incoming psi current buffers to host.
+  void CopyDelayedIncomingPsiCurrentFromDevice();
   /// Upload newly received delayed non-local incoming psi current buffers to device.
   void UploadDelayedIncomingPsiCurrentToDevice();
   /// Copy delayed angular output/current device banks to old device banks.

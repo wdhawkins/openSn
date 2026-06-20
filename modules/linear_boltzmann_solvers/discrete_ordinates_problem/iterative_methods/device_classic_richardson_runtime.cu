@@ -621,6 +621,7 @@ DeviceClassicRichardsonRuntime::DownloadDelayedPsiToHost()
     OpenSnLogicalErrorIf(aahd_fluds == nullptr,
                          "DeviceClassicRichardsonRuntime requires AAHD_FLUDS.");
     aahd_fluds->CopyLocalDelayedPsiFromDevice();
+    aahd_fluds->CopyDelayedIncomingPsiCurrentFromDevice();
     aahd_fluds->GetStream().synchronize();
   }
 }
@@ -632,7 +633,11 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
   last_local_delayed_psi_relative_change_ = 0.0;
   last_delayed_psi_relative_change_ = 0.0;
 
+#if OPENSN_GPU_AWARE_MPI
   constexpr bool use_device_buffers = true;
+#else
+  constexpr bool use_device_buffers = false;
+#endif
   constexpr bool delayed_psi_on_device = true;
   const bool download_delayed_psi = final_download;
 

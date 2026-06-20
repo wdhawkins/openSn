@@ -429,6 +429,13 @@ AAHD_FLUDS::UploadDelayedIncomingPsiCurrentToDevice()
 }
 
 void
+AAHD_FLUDS::CopyDelayedIncomingPsiCurrentFromDevice()
+{
+  if (HasNonLocalDelayedIncomingPsi())
+    nonlocal_delayed_incoming_psi_bank_.DownloadCurrentToHost(stream_);
+}
+
+void
 AAHD_FLUDS::CopyDelayedPsiNewToOldOnDevice()
 {
   if (common_data_.GetNumDelayedLocalNodes() > 0)
