@@ -16,6 +16,7 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <cstdio>
 #include <initializer_list>
 #include <iostream>
 #include <memory>
@@ -257,6 +258,12 @@ DeviceClassicRichardson::SyncLaggedStateToLatestIterate()
 void
 DeviceClassicRichardson::Solve()
 {
+  std::fprintf(stderr,
+               "DEVICE_CLASSIC_RICHARDSON_SOLVE groups [%u-%u]\n",
+               sweep_context_->groupset.first_group,
+               sweep_context_->groupset.last_group);
+  std::fflush(stderr);
+
   CaliperPhaseScope cali_solve_phase("Solve", CaliperSolvePhaseDepth());
   CaliperRegionScope cali_wgs("WGS", CaliperWGSScopeDepth());
   CALI_CXX_MARK_SCOPE("DeviceClassicRichardson");
