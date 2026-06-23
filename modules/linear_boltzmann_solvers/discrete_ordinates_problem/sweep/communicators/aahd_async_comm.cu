@@ -86,6 +86,7 @@ AAHD_ASynchronousCommunicator::PrepostReceiveUpstreamPsi(int angle_set_num,
   const auto& comm = comm_set_.LocICommunicator(opensn::mpi_comm.rank());
   const std::size_t num_dependencies = spds.GetLocationDependencies().size();
   auto* aahd_fluds = dynamic_cast<AAHD_FLUDS*>(&fluds_);
+  upstream_receives_complete_ = preloc_msg_request_.empty();
 
   for (std::size_t i = 0, req = 0; i < num_dependencies; ++i)
   {
@@ -109,13 +110,18 @@ AAHD_ASynchronousCommunicator::PrepostReceiveUpstreamPsi(int angle_set_num,
 bool
 AAHD_ASynchronousCommunicator::TestReceiveUpstreamPsi()
 {
-  return mpi::test_all(preloc_msg_request_);
+  if (upstream_receives_complete_)
+    return true;
+
+  upstream_receives_complete_ = mpi::test_all(preloc_msg_request_);
+  return upstream_receives_complete_;
 }
 
 void
 AAHD_ASynchronousCommunicator::WaitForUpstreamPsi()
 {
   mpi::wait_all(preloc_msg_request_);
+  upstream_receives_complete_ = true;
 }
 
 void

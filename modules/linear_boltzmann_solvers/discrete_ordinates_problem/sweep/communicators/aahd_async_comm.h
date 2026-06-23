@@ -59,6 +59,7 @@ protected:
 private:
   int max_num_messages_;
   int max_mpi_message_size_;
+  bool upstream_receives_complete_ = true;
 
   std::vector<mpi::Request> preloc_msg_request_;
   std::vector<std::vector<AAH_MessageDetails>> preloc_msg_data_;
