@@ -58,10 +58,7 @@ AAHD_AngleSet::WaitForDownstreamAndDelayed()
 bool
 AAHD_AngleSet::IsReady()
 {
-  if (dependency_counter_ != 0)
-    return false;
-
-  return async_comm_.TestReceiveUpstreamPsi();
+  return (async_comm_.TestReceiveUpstreamPsi()) && (dependency_counter_ == 0);
 }
 
 AngleSetStatus

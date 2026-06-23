@@ -670,28 +670,48 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
   for (auto* angle_set : angle_sets_)
     static_cast<AAHD_FLUDS*>(&angle_set->GetFLUDS())->ZeroDelayedPsiNewOnDevice();
 
-  execution_order_.resize(angle_sets_.size());
+  std::vector<std::size_t> mpi_poll_indices;
+  std::vector<std::size_t> dependency_blocked_indices;
+  mpi_poll_indices.reserve(angle_sets_.size());
+  dependency_blocked_indices.reserve(angle_sets_.size());
+
   for (std::size_t i = 0; i < angle_sets_.size(); ++i)
   {
     auto* angle_set = angle_sets_[i];
     angle_set->ResetDependencyCounter();
     angle_set->PrepostReceives(use_device_buffers, delayed_psi_on_device);
-    execution_order_[i] = i;
+    if (angle_set->IsDependencyResolved())
+      mpi_poll_indices.push_back(i);
+    else
+      dependency_blocked_indices.push_back(i);
   }
 
-  while (not execution_order_.empty())
+  while (not mpi_poll_indices.empty() or not dependency_blocked_indices.empty())
   {
     std::vector<std::size_t> ready_indices;
-    ready_indices.reserve(execution_order_.size());
+    ready_indices.reserve(mpi_poll_indices.size());
 
-    for (auto it = execution_order_.begin(); it != execution_order_.end();)
+    for (auto it = dependency_blocked_indices.begin(); it != dependency_blocked_indices.end();)
+    {
+      auto* angle_set = angle_sets_[*it];
+      if (angle_set->IsDependencyResolved())
+      {
+        mpi_poll_indices.push_back(*it);
+        std::swap(*it, dependency_blocked_indices.back());
+        dependency_blocked_indices.pop_back();
+      }
+      else
+        ++it;
+    }
+
+    for (auto it = mpi_poll_indices.begin(); it != mpi_poll_indices.end();)
     {
       auto* angle_set = angle_sets_[*it];
       if (angle_set->IsReady())
       {
         ready_indices.push_back(*it);
-        std::swap(*it, execution_order_.back());
-        execution_order_.pop_back();
+        std::swap(*it, mpi_poll_indices.back());
+        mpi_poll_indices.pop_back();
       }
       else
         ++it;
