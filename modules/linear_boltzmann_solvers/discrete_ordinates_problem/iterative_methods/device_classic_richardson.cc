@@ -8,6 +8,7 @@
 #include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/iteration_logging.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/vecops/lbs_vecops.h"
 #include "framework/logging/log.h"
+#include "framework/runtime.h"
 #include "framework/utils/caliper_scopes.h"
 #include "framework/utils/error.h"
 #include "framework/utils/timer.h"
@@ -16,6 +17,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <initializer_list>
+#include <iostream>
 #include <memory>
 
 namespace opensn
@@ -82,7 +84,8 @@ LogSweepProfileIfEnabled(const DeviceClassicRichardsonRuntime& runtime, const LB
   AppendNumericField(out, "finalize_s", profile.finalize_seconds, Fixed(3));
   AppendNumericField(out, "wait_s", profile.wait_seconds, Fixed(3));
   AppendNumericField(out, "post_s", profile.post_seconds, Fixed(3));
-  log.Log0() << no_wrap << out.str();
+  if (mpi_comm.rank() == 0)
+    std::cout << out.str() << std::endl;
 }
 
 } // namespace
