@@ -727,7 +727,13 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
 
     std::atomic_size_t next_ready_idx = 0;
     pool_.ExecuteBatch(
-      [this, &ready_indices, &next_ready_idx, final_download, download_delayed_psi](std::size_t)
+      [this,
+       &ready_indices,
+       &next_ready_idx,
+       &send_time_ns,
+       &finalize_time_ns,
+       final_download,
+       download_delayed_psi](std::size_t)
       {
         while (true)
         {
