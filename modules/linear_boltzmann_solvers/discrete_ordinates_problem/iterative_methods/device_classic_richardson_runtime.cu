@@ -19,6 +19,7 @@
 #include "framework/utils/error.h"
 #include "framework/utils/timer.h"
 #include "caribou/main.hpp"
+#include <atomic>
 #include <array>
 #include <algorithm>
 #include <chrono>
@@ -678,56 +679,48 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
     execution_order_[i] = i;
   }
 
-  pool_.AssignTask(
-    [this, final_download, download_delayed_psi](std::size_t i)
-    {
-      auto* angle_set = angle_sets_[i];
-      angle_set->SweepKernelAndSync(*sweep_chunk_, use_device_buffers);
-      angle_set->SendAfterFirstPass(use_device_buffers);
-      angle_set->FinalizeAfterSweep(
-        *sweep_chunk_, use_device_buffers, final_download, download_delayed_psi);
-    });
-
-  bool all_angle_sets_ready = true;
-  for (auto* angle_set : angle_sets_)
-  {
-    if (not angle_set->IsReady())
-    {
-      all_angle_sets_ready = false;
-      break;
-    }
-  }
-
-  if (all_angle_sets_ready)
-  {
-    pool_.ExecuteBatch(
-      [this, final_download, download_delayed_psi](std::size_t i)
-      {
-        auto* angle_set = angle_sets_[i];
-        angle_set->SweepKernelAndSync(*sweep_chunk_, use_device_buffers);
-        angle_set->SendAfterFirstPass(use_device_buffers);
-        angle_set->FinalizeAfterSweep(
-          *sweep_chunk_, use_device_buffers, final_download, download_delayed_psi);
-      });
-    execution_order_.clear();
-  }
-
   while (not execution_order_.empty())
   {
+    std::vector<std::size_t> ready_indices;
+    ready_indices.reserve(execution_order_.size());
+
     for (auto it = execution_order_.begin(); it != execution_order_.end();)
     {
       auto* angle_set = angle_sets_[*it];
       if (angle_set->IsReady())
       {
-        pool_.Run(*it);
+        ready_indices.push_back(*it);
         std::swap(*it, execution_order_.back());
         execution_order_.pop_back();
       }
       else
         ++it;
     }
+
+    if (ready_indices.empty())
+    {
+      std::this_thread::yield();
+      continue;
+    }
+
+    std::atomic_size_t next_ready_idx = 0;
+    pool_.ExecuteBatch(
+      [this, &ready_indices, &next_ready_idx, final_download, download_delayed_psi](std::size_t)
+      {
+        while (true)
+        {
+          const auto ready_pos = next_ready_idx.fetch_add(1, std::memory_order_relaxed);
+          if (ready_pos >= ready_indices.size())
+            return;
+
+          auto* angle_set = angle_sets_[ready_indices[ready_pos]];
+          angle_set->SweepKernelAndSync(*sweep_chunk_, use_device_buffers);
+          angle_set->SendAfterFirstPass(use_device_buffers);
+          angle_set->FinalizeAfterSweep(
+            *sweep_chunk_, use_device_buffers, final_download, download_delayed_psi);
+        }
+      });
   }
-  pool_.WaitAll();
 
   for (auto* angle_set : angle_sets_)
     angle_set->WaitForDownstreamAndDelayed();

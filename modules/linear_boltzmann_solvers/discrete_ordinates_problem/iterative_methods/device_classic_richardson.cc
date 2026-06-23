@@ -14,6 +14,7 @@
 #include "caliper/cali.h"
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <initializer_list>
 #include <memory>
 
@@ -49,6 +50,18 @@ HasUnsupportedSourceFlags(const SourceFlags& scope,
       return true;
 
   return false;
+}
+
+bool
+UseOrdinarySchedulerExperiment()
+{
+  const char* env_value =
+    std::getenv("OPENSN_DEVICE_RICHARDSON_USE_ORDINARY_SCHEDULER"); // NOLINT(concurrency-mt-unsafe)
+  if (env_value == nullptr)
+    return false;
+
+  const std::string value(env_value);
+  return value == "1" or value == "true" or value == "TRUE" or value == "on" or value == "ON";
 }
 
 } // namespace
@@ -227,12 +240,22 @@ DeviceClassicRichardson::Solve()
   sweep_context_->PreSetupCallback();
   sweep_context_->PreSolveCallback();
   Validate();
-  InitializeLaggedState();
 
   auto& do_problem = sweep_context_->do_problem;
   auto& groupset = sweep_context_->groupset;
   const auto sweep_scope = sweep_context_->lhs_src_scope | sweep_context_->rhs_src_scope;
   const bool psi_check_active = groupset.angle_agg->GetNumDelayedAngularDOFs().first > 0;
+  const bool use_ordinary_scheduler = UseOrdinarySchedulerExperiment();
+
+  if (use_ordinary_scheduler)
+    saved_q_moments_local_ = do_problem.GetQMomentsLocal();
+  else
+    InitializeLaggedState();
+
+  std::vector<double> psi_old;
+  std::vector<double> psi_new;
+  if (psi_check_active and use_ordinary_scheduler)
+    psi_old = groupset.angle_agg->GetOldDelayedAngularDOFsAsSTLVector();
 
   double pw_phi_change_prev = 1.0;
   double last_pw_phi_change = 0.0;
@@ -245,12 +268,30 @@ DeviceClassicRichardson::Solve()
     CALI_CXX_MARK_LOOP_ITERATION(wgs_iteration, k);
 
     num_iterations = k + 1;
-    BuildIterationSource();
-    runtime_.ApplyInverseTransportOperator(sweep_scope);
+    double pw_phi_change = 0.0;
+    double pw_psi_change = 0.0;
+    if (use_ordinary_scheduler)
+    {
+      do_problem.SetQMomentsFrom(saved_q_moments_local_);
+      sweep_context_->set_source_function(
+        groupset, do_problem.GetQMomentsLocal(), do_problem.GetPhiOldLocal(), sweep_scope);
+      sweep_context_->ApplyInverseTransportOperator(sweep_scope);
+      pw_phi_change = ComputePointwisePhiChange(do_problem, groupset.id);
+      if (psi_check_active)
+      {
+        psi_new = groupset.angle_agg->GetNewDelayedAngularDOFsAsSTLVector();
+        pw_psi_change = ComputePointwiseChange(psi_new, psi_old);
+      }
+    }
+    else
+    {
+      BuildIterationSource();
+      runtime_.ApplyInverseTransportOperator(sweep_scope);
 
-    const auto metrics = runtime_.ComputeConvergenceMetrics(groupset);
-    const double pw_phi_change = metrics.phi_change;
-    const double pw_psi_change = metrics.psi_change;
+      const auto metrics = runtime_.ComputeConvergenceMetrics(groupset);
+      pw_phi_change = metrics.phi_change;
+      pw_psi_change = metrics.psi_change;
+    }
     last_pw_phi_change = pw_phi_change;
     const auto convergence = EvaluateRichardsonConvergence(
       pw_phi_change,
@@ -278,7 +319,17 @@ DeviceClassicRichardson::Solve()
     }
 
     if (not converged)
-      SyncLaggedStateToLatestIterate();
+    {
+      if (use_ordinary_scheduler)
+      {
+        LBSVecOps::GSScopedCopyPrimarySTLvectors(
+          do_problem, groupset, PhiSTLOption::PHI_NEW, PhiSTLOption::PHI_OLD);
+        if (psi_check_active)
+          psi_old = psi_new;
+      }
+      else
+        SyncLaggedStateToLatestIterate();
+    }
     else
       break;
   }
@@ -298,17 +349,28 @@ DeviceClassicRichardson::Solve()
                                         sweep_context_->last_solve);
 
   do_problem.SetQMomentsFrom(saved_q_moments_local_);
-  const auto saved_phi_new = do_problem.GetPhiNewLocal();
-  do_problem.CopyPhiAndOutflowBackToHost();
-  RestoreHostPhiNewForOtherGroupsets(do_problem, groupset, saved_phi_new);
-  do_problem.TransferDeviceBoundaryData(groupset.id, false, true);
-  runtime_.DownloadDelayedPsiToHost();
-  groupset.angle_agg->SetOldDelayedAngularDOFsFromSTLVector(
-    groupset.angle_agg->GetNewDelayedAngularDOFsAsSTLVector());
-  if (do_problem.SaveAngularFluxEnabled())
-    runtime_.FinalizeAngularFluxes();
-  LBSVecOps::GSScopedCopyPrimarySTLvectors(
-    do_problem, groupset, PhiSTLOption::PHI_NEW, PhiSTLOption::PHI_OLD);
+  if (use_ordinary_scheduler)
+  {
+    if (psi_check_active)
+      groupset.angle_agg->SetOldDelayedAngularDOFsFromSTLVector(
+        groupset.angle_agg->GetNewDelayedAngularDOFsAsSTLVector());
+    LBSVecOps::GSScopedCopyPrimarySTLvectors(
+      do_problem, groupset, PhiSTLOption::PHI_NEW, PhiSTLOption::PHI_OLD);
+  }
+  else
+  {
+    const auto saved_phi_new = do_problem.GetPhiNewLocal();
+    do_problem.CopyPhiAndOutflowBackToHost();
+    RestoreHostPhiNewForOtherGroupsets(do_problem, groupset, saved_phi_new);
+    do_problem.TransferDeviceBoundaryData(groupset.id, false, true);
+    runtime_.DownloadDelayedPsiToHost();
+    groupset.angle_agg->SetOldDelayedAngularDOFsFromSTLVector(
+      groupset.angle_agg->GetNewDelayedAngularDOFsAsSTLVector());
+    if (do_problem.SaveAngularFluxEnabled())
+      runtime_.FinalizeAngularFluxes();
+    LBSVecOps::GSScopedCopyPrimarySTLvectors(
+      do_problem, groupset, PhiSTLOption::PHI_NEW, PhiSTLOption::PHI_OLD);
+  }
 
   sweep_context_->PostSolveCallback();
 }

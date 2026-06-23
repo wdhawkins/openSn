@@ -125,8 +125,7 @@ AAHD_AngleSet::FinalizeAfterSweep(SweepChunk& sweep_chunk,
   if (final_download)
     aahd_fluds->CopySaveAngularFluxFromDevice();
   if ((download_delayed_psi and need_local_delayed_download) or
-      (final_download and aahd_fluds->HasSaveAngularFlux()) or
-      use_device_buffers)
+      (final_download and aahd_fluds->HasSaveAngularFlux()))
     stream_.synchronize();
   if (final_download)
     aahd_fluds->CopySaveAngularFluxToDestinationPsi(
