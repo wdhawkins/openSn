@@ -64,6 +64,27 @@ UseOrdinarySchedulerExperiment()
   return value == "1" or value == "true" or value == "TRUE" or value == "on" or value == "ON";
 }
 
+void
+LogSweepProfileIfEnabled(const DeviceClassicRichardsonRuntime& runtime, const LBSGroupset& groupset)
+{
+  if (not runtime.ProfilingEnabled())
+    return;
+
+  const auto& profile = runtime.GetSweepProfile();
+  if (profile.num_sweeps == 0)
+    return;
+
+  std::stringstream out;
+  out << "device_classic_richardson profile groups [" << groupset.first_group << "-"
+      << groupset.last_group << "] sweeps=" << profile.num_sweeps;
+  AppendNumericField(out, "poll_s", profile.poll_seconds, Fixed(3));
+  AppendNumericField(out, "send_s", profile.send_seconds, Fixed(3));
+  AppendNumericField(out, "finalize_s", profile.finalize_seconds, Fixed(3));
+  AppendNumericField(out, "wait_s", profile.wait_seconds, Fixed(3));
+  AppendNumericField(out, "post_s", profile.post_seconds, Fixed(3));
+  log.Log() << no_wrap << out.str();
+}
+
 } // namespace
 
 void
@@ -372,6 +393,7 @@ DeviceClassicRichardson::Solve()
       do_problem, groupset, PhiSTLOption::PHI_NEW, PhiSTLOption::PHI_OLD);
   }
 
+  LogSweepProfileIfEnabled(runtime_, groupset);
   sweep_context_->PostSolveCallback();
 }
 

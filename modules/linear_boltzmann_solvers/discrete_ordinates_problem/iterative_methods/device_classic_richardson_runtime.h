@@ -27,6 +27,16 @@ struct DeviceRichardsonConvergenceMetrics
 class DeviceClassicRichardsonRuntime
 {
 public:
+  struct SweepProfile
+  {
+    double poll_seconds = 0.0;
+    double send_seconds = 0.0;
+    double finalize_seconds = 0.0;
+    double wait_seconds = 0.0;
+    double post_seconds = 0.0;
+    std::size_t num_sweeps = 0;
+  };
+
   explicit DeviceClassicRichardsonRuntime(SweepWGSContext& sweep_context);
 
   void CopyPhiOldToDevice();
@@ -43,6 +53,8 @@ public:
   void ApplyInverseTransportOperator(SourceFlags scope);
   double GetLastDelayedPsiRelativeChange() const { return last_delayed_psi_relative_change_; }
   void FinalizeAngularFluxes();
+  const SweepProfile& GetSweepProfile() const { return sweep_profile_; }
+  bool ProfilingEnabled() const { return profiling_enabled_; }
 
 private:
   void InitializeSweepResources();
@@ -61,6 +73,8 @@ private:
   size_t last_sweep_pass_count_ = 0;
   double last_local_delayed_psi_relative_change_ = 0.0;
   double last_delayed_psi_relative_change_ = 0.0;
+  bool profiling_enabled_ = false;
+  SweepProfile sweep_profile_;
 };
 
 } // namespace opensn

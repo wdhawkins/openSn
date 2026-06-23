@@ -14,6 +14,7 @@
 #include "modules/linear_boltzmann_solvers/lbs_problem/device/view/mesh_view.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/device/view/quadrature_view.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/outflow/outflow_carrier.h"
+#include "framework/logging/log.h"
 #include "framework/runtime.h"
 #include "framework/utils/caliper_scopes.h"
 #include "framework/utils/error.h"
@@ -37,6 +38,18 @@ namespace
 constexpr unsigned int kBlockSize = 256;
 crb::DeviceMemory<double> phi_change_block_max_scratch;
 crb::DeviceMemory<double> phi_change_reduce_scratch;
+
+bool
+DeviceRichardsonProfilingEnabled()
+{
+  const char* env_value =
+    std::getenv("OPENSN_DEVICE_RICHARDSON_PROFILE"); // NOLINT(concurrency-mt-unsafe)
+  if (env_value == nullptr)
+    return false;
+
+  const std::string value(env_value);
+  return value == "1" or value == "true" or value == "TRUE" or value == "on" or value == "ON";
+}
 
 __CRB_GLOBAL_FUNC__ void
 ReduceMaxKernel(const double* input, std::size_t size, double* output)
@@ -330,6 +343,7 @@ DeviceClassicRichardsonRuntime::DeviceClassicRichardsonRuntime(SweepWGSContext& 
     groupset_(&sweep_context.groupset),
     sweep_chunk_(&GetAAHDSweepChunk(sweep_context))
 {
+  profiling_enabled_ = DeviceRichardsonProfilingEnabled();
   OpenSnLogicalErrorIf(not problem_->UseGPUs(),
                        "DeviceClassicRichardsonRuntime requires GPU support.");
   OpenSnLogicalErrorIf(problem_->GetSweepType() != "AAH",
@@ -655,6 +669,9 @@ DeviceClassicRichardsonRuntime::DownloadDelayedPsiToHost()
 void
 DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
 {
+  using Clock = high_resolution_clock;
+  using Seconds = duration<double>;
+
   last_sweep_pass_count_ = 1;
   last_local_delayed_psi_relative_change_ = 0.0;
   last_delayed_psi_relative_change_ = 0.0;
@@ -666,56 +683,41 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
 #endif
   constexpr bool delayed_psi_on_device = true;
   const bool download_delayed_psi = final_download;
+  std::atomic<long long> send_time_ns{0};
+  std::atomic<long long> finalize_time_ns{0};
+  double poll_seconds = 0.0;
 
   for (auto* angle_set : angle_sets_)
     static_cast<AAHD_FLUDS*>(&angle_set->GetFLUDS())->ZeroDelayedPsiNewOnDevice();
 
-  std::vector<std::size_t> mpi_poll_indices;
-  std::vector<std::size_t> dependency_blocked_indices;
-  mpi_poll_indices.reserve(angle_sets_.size());
-  dependency_blocked_indices.reserve(angle_sets_.size());
-
+  execution_order_.resize(angle_sets_.size());
   for (std::size_t i = 0; i < angle_sets_.size(); ++i)
   {
     auto* angle_set = angle_sets_[i];
     angle_set->ResetDependencyCounter();
     angle_set->PrepostReceives(use_device_buffers, delayed_psi_on_device);
-    if (angle_set->IsDependencyResolved())
-      mpi_poll_indices.push_back(i);
-    else
-      dependency_blocked_indices.push_back(i);
+    execution_order_[i] = i;
   }
 
-  while (not mpi_poll_indices.empty() or not dependency_blocked_indices.empty())
+  while (not execution_order_.empty())
   {
+    const auto poll_start = Clock::now();
     std::vector<std::size_t> ready_indices;
-    ready_indices.reserve(mpi_poll_indices.size());
+    ready_indices.reserve(execution_order_.size());
 
-    for (auto it = dependency_blocked_indices.begin(); it != dependency_blocked_indices.end();)
-    {
-      auto* angle_set = angle_sets_[*it];
-      if (angle_set->IsDependencyResolved())
-      {
-        mpi_poll_indices.push_back(*it);
-        std::swap(*it, dependency_blocked_indices.back());
-        dependency_blocked_indices.pop_back();
-      }
-      else
-        ++it;
-    }
-
-    for (auto it = mpi_poll_indices.begin(); it != mpi_poll_indices.end();)
+    for (auto it = execution_order_.begin(); it != execution_order_.end();)
     {
       auto* angle_set = angle_sets_[*it];
       if (angle_set->IsReady())
       {
         ready_indices.push_back(*it);
-        std::swap(*it, mpi_poll_indices.back());
-        mpi_poll_indices.pop_back();
+        std::swap(*it, execution_order_.back());
+        execution_order_.pop_back();
       }
       else
         ++it;
     }
+    poll_seconds += duration_cast<Seconds>(Clock::now() - poll_start).count();
 
     if (ready_indices.empty())
     {
@@ -735,16 +737,26 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
 
           auto* angle_set = angle_sets_[ready_indices[ready_pos]];
           angle_set->SweepKernelAndSync(*sweep_chunk_, use_device_buffers);
+          const auto send_start = Clock::now();
           angle_set->SendAfterFirstPass(use_device_buffers);
+          send_time_ns.fetch_add(duration_cast<nanoseconds>(Clock::now() - send_start).count(),
+                                 std::memory_order_relaxed);
+          const auto finalize_start = Clock::now();
           angle_set->FinalizeAfterSweep(
             *sweep_chunk_, use_device_buffers, final_download, download_delayed_psi);
+          finalize_time_ns.fetch_add(
+            duration_cast<nanoseconds>(Clock::now() - finalize_start).count(),
+            std::memory_order_relaxed);
         }
       });
   }
 
+  const auto wait_start = Clock::now();
   for (auto* angle_set : angle_sets_)
     angle_set->WaitForDownstreamAndDelayed();
+  const auto wait_seconds = duration_cast<Seconds>(Clock::now() - wait_start).count();
 
+  const auto post_start = Clock::now();
   if (not use_device_buffers)
   {
     for (auto* angle_set : angle_sets_)
@@ -772,6 +784,17 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
   }
   for (auto* angle_set : angle_sets_)
     angle_set->ResetSweepBuffers();
+  const auto post_seconds = duration_cast<Seconds>(Clock::now() - post_start).count();
+
+  if (profiling_enabled_)
+  {
+    sweep_profile_.poll_seconds += poll_seconds;
+    sweep_profile_.send_seconds += static_cast<double>(send_time_ns.load()) * 1.0e-9;
+    sweep_profile_.finalize_seconds += static_cast<double>(finalize_time_ns.load()) * 1.0e-9;
+    sweep_profile_.wait_seconds += wait_seconds;
+    sweep_profile_.post_seconds += post_seconds;
+    sweep_profile_.num_sweeps += last_sweep_pass_count_;
+  }
 }
 
 void
