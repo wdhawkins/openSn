@@ -58,7 +58,7 @@ AAHD_AngleSet::WaitForDownstreamAndDelayed()
 bool
 AAHD_AngleSet::IsReady()
 {
-  return async_comm_.TestReceiveUpstreamPsi() and IsDependencyResolved();
+  return (async_comm_.TestReceiveUpstreamPsi()) && (dependency_counter_ == 0);
 }
 
 AngleSetStatus
@@ -96,6 +96,7 @@ AAHD_AngleSet::SendAfterFirstPass(bool use_device_buffers)
   }
   if (not following_angle_sets_.empty())
   {
+    std::scoped_lock lk(m);
     for (auto& following_as : following_angle_sets_)
       following_as->DecrementCounter();
   }
