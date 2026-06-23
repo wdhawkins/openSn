@@ -212,18 +212,9 @@ DeviceClassicRichardson::BuildIterationSource()
 void
 DeviceClassicRichardson::SyncLaggedStateToLatestIterate()
 {
-  auto& do_problem = sweep_context_->do_problem;
-  auto& groupset = sweep_context_->groupset;
-  const bool host_phi_required = not UseFastDeviceSourcePath();
-  if (host_phi_required)
-  {
-    const auto saved_phi_new = do_problem.GetPhiNewLocal();
-    do_problem.CopyPhiAndOutflowBackToHost();
-    RestoreHostPhiNewForOtherGroupsets(do_problem, groupset, saved_phi_new);
-    LBSVecOps::GSScopedCopyPrimarySTLvectors(
-      do_problem, groupset, PhiSTLOption::PHI_NEW, PhiSTLOption::PHI_OLD);
-  }
-  runtime_.CopyDevicePhiNewToOld(groupset);
+  runtime_.CopyDevicePhiNewToOld(sweep_context_->groupset);
+  if (not UseFastDeviceSourcePath())
+    runtime_.CopyPhiOldToHost();
 }
 
 void
@@ -242,10 +233,6 @@ DeviceClassicRichardson::Solve()
   auto& groupset = sweep_context_->groupset;
   const auto sweep_scope = sweep_context_->lhs_src_scope | sweep_context_->rhs_src_scope;
   const bool psi_check_active = groupset.angle_agg->GetNumDelayedAngularDOFs().first > 0;
-  std::vector<double> psi_old;
-  std::vector<double> psi_new;
-  if (psi_check_active and not UseFastDeviceSourcePath())
-    psi_old = groupset.angle_agg->GetOldDelayedAngularDOFsAsSTLVector();
 
   double pw_phi_change_prev = 1.0;
   double last_pw_phi_change = 0.0;
@@ -261,23 +248,9 @@ DeviceClassicRichardson::Solve()
     BuildIterationSource();
     runtime_.ApplyInverseTransportOperator(sweep_scope);
 
-    double pw_phi_change = 0.0;
-    double pw_psi_change = 0.0;
-    if (UseFastDeviceSourcePath())
-    {
-      const auto metrics = runtime_.ComputeConvergenceMetrics(groupset);
-      pw_phi_change = metrics.phi_change;
-      pw_psi_change = metrics.psi_change;
-    }
-    else
-    {
-      pw_phi_change = runtime_.ComputeGlobalPhiChange(groupset);
-      if (psi_check_active)
-      {
-        psi_new = groupset.angle_agg->GetNewDelayedAngularDOFsAsSTLVector();
-        pw_psi_change = ComputePointwiseChange(psi_new, psi_old);
-      }
-    }
+    const auto metrics = runtime_.ComputeConvergenceMetrics(groupset);
+    const double pw_phi_change = metrics.phi_change;
+    const double pw_psi_change = metrics.psi_change;
     last_pw_phi_change = pw_phi_change;
     const auto convergence = EvaluateRichardsonConvergence(
       pw_phi_change,
@@ -304,11 +277,9 @@ DeviceClassicRichardson::Solve()
       log.Log() << no_wrap << iter_stats.str();
     }
 
-    SyncLaggedStateToLatestIterate();
-    if (psi_check_active and not UseFastDeviceSourcePath())
-      psi_old = psi_new;
-
-    if (converged)
+    if (not converged)
+      SyncLaggedStateToLatestIterate();
+    else
       break;
   }
   CALI_CXX_MARK_LOOP_END(wgs_iteration);

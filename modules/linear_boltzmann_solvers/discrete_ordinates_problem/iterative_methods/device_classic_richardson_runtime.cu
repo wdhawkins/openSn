@@ -348,6 +348,14 @@ DeviceClassicRichardsonRuntime::CopyPhiOldToDevice()
 }
 
 void
+DeviceClassicRichardsonRuntime::CopyPhiOldToHost()
+{
+  if (!problem_->UseGPUs())
+    return;
+  problem_->GetPhiOldPinner()->CopyFromDevice();
+}
+
+void
 DeviceClassicRichardsonRuntime::CopySourceMomentsToDevice()
 {
   if (!problem_->UseGPUs())

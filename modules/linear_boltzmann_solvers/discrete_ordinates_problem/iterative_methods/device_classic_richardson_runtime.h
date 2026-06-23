@@ -30,6 +30,7 @@ public:
   explicit DeviceClassicRichardsonRuntime(SweepWGSContext& sweep_context);
 
   void CopyPhiOldToDevice();
+  void CopyPhiOldToHost();
   void CopySourceMomentsToDevice();
   void CopyDevicePhiNewToOld(const LBSGroupset& groupset);
   void CopySourceBaseToDevice();

@@ -25,6 +25,12 @@ DeviceClassicRichardsonRuntime::CopyPhiOldToDevice()
 }
 
 void
+DeviceClassicRichardsonRuntime::CopyPhiOldToHost()
+{
+  OpenSnLogicalError("DeviceClassicRichardsonRuntime requires GPU support.");
+}
+
+void
 DeviceClassicRichardsonRuntime::CopySourceMomentsToDevice()
 {
   OpenSnLogicalError("DeviceClassicRichardsonRuntime requires GPU support.");
@@ -44,6 +50,12 @@ DeviceClassicRichardsonRuntime::CopySourceBaseToDevice()
 
 void
 DeviceClassicRichardsonRuntime::UploadDelayedPsiToDevice()
+{
+  OpenSnLogicalError("DeviceClassicRichardsonRuntime requires GPU support.");
+}
+
+void
+DeviceClassicRichardsonRuntime::DownloadDelayedPsiToHost()
 {
   OpenSnLogicalError("DeviceClassicRichardsonRuntime requires GPU support.");
 }
