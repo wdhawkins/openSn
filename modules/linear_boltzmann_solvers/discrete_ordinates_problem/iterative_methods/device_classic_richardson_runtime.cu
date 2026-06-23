@@ -685,6 +685,9 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
   constexpr bool delayed_psi_on_device = true;
   const bool download_delayed_psi = final_download;
   std::atomic<long long> send_time_ns{0};
+  std::atomic<long long> send_copy_time_ns{0};
+  std::atomic<long long> send_dependency_time_ns{0};
+  std::atomic<long long> send_mpi_time_ns{0};
   std::atomic<long long> finalize_time_ns{0};
   double poll_seconds = 0.0;
 
@@ -732,6 +735,9 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
        &ready_indices,
        &next_ready_idx,
        &send_time_ns,
+       &send_copy_time_ns,
+       &send_dependency_time_ns,
+       &send_mpi_time_ns,
        &finalize_time_ns,
        final_download,
        download_delayed_psi](std::size_t)
@@ -745,7 +751,10 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
           auto* angle_set = angle_sets_[ready_indices[ready_pos]];
           angle_set->SweepKernelAndSync(*sweep_chunk_, use_device_buffers);
           const auto send_start = Clock::now();
-          angle_set->SendAfterFirstPass(use_device_buffers);
+          angle_set->SendAfterFirstPass(use_device_buffers,
+                                        &send_copy_time_ns,
+                                        &send_dependency_time_ns,
+                                        &send_mpi_time_ns);
           send_time_ns.fetch_add(duration_cast<nanoseconds>(Clock::now() - send_start).count(),
                                  std::memory_order_relaxed);
           const auto finalize_start = Clock::now();
@@ -797,6 +806,10 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
   {
     sweep_profile_.poll_seconds += poll_seconds;
     sweep_profile_.send_seconds += static_cast<double>(send_time_ns.load()) * 1.0e-9;
+    sweep_profile_.send_copy_seconds += static_cast<double>(send_copy_time_ns.load()) * 1.0e-9;
+    sweep_profile_.send_dependency_seconds +=
+      static_cast<double>(send_dependency_time_ns.load()) * 1.0e-9;
+    sweep_profile_.send_mpi_seconds += static_cast<double>(send_mpi_time_ns.load()) * 1.0e-9;
     sweep_profile_.finalize_seconds += static_cast<double>(finalize_time_ns.load()) * 1.0e-9;
     sweep_profile_.wait_seconds += wait_seconds;
     sweep_profile_.post_seconds += post_seconds;

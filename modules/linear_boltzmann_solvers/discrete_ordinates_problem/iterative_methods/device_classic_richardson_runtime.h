@@ -31,6 +31,9 @@ public:
   {
     double poll_seconds = 0.0;
     double send_seconds = 0.0;
+    double send_copy_seconds = 0.0;
+    double send_dependency_seconds = 0.0;
+    double send_mpi_seconds = 0.0;
     double finalize_seconds = 0.0;
     double wait_seconds = 0.0;
     double post_seconds = 0.0;

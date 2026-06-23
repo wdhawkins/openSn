@@ -16,7 +16,6 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
-#include <cstdio>
 #include <initializer_list>
 #include <iostream>
 #include <memory>
@@ -82,6 +81,9 @@ LogSweepProfileIfEnabled(const DeviceClassicRichardsonRuntime& runtime, const LB
       << groupset.last_group << "] sweeps=" << profile.num_sweeps;
   AppendNumericField(out, "poll_s", profile.poll_seconds, Fixed(3));
   AppendNumericField(out, "send_s", profile.send_seconds, Fixed(3));
+  AppendNumericField(out, "send_copy_s", profile.send_copy_seconds, Fixed(3));
+  AppendNumericField(out, "send_dep_s", profile.send_dependency_seconds, Fixed(3));
+  AppendNumericField(out, "send_mpi_s", profile.send_mpi_seconds, Fixed(3));
   AppendNumericField(out, "finalize_s", profile.finalize_seconds, Fixed(3));
   AppendNumericField(out, "wait_s", profile.wait_seconds, Fixed(3));
   AppendNumericField(out, "post_s", profile.post_seconds, Fixed(3));
@@ -258,12 +260,6 @@ DeviceClassicRichardson::SyncLaggedStateToLatestIterate()
 void
 DeviceClassicRichardson::Solve()
 {
-  std::fprintf(stderr,
-               "DEVICE_CLASSIC_RICHARDSON_SOLVE groups [%u-%u]\n",
-               sweep_context_->groupset.first_group,
-               sweep_context_->groupset.last_group);
-  std::fflush(stderr);
-
   CaliperPhaseScope cali_solve_phase("Solve", CaliperSolvePhaseDepth());
   CaliperRegionScope cali_wgs("WGS", CaliperWGSScopeDepth());
   CALI_CXX_MARK_SCOPE("DeviceClassicRichardson");

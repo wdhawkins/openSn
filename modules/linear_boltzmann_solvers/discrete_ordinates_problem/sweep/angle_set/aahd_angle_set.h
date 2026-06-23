@@ -6,6 +6,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/angle_set/angle_set.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/communicators/aahd_async_comm.h"
 #include "caribou/main.hpp"
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -53,6 +54,10 @@ public:
 
   /// Download non-local outgoing psi, signal intra-rank followers, and send downstream psi.
   void SendAfterFirstPass(bool use_device_buffers = false);
+  void SendAfterFirstPass(bool use_device_buffers,
+                          std::atomic<long long>* copy_time_ns,
+                          std::atomic<long long>* dependency_time_ns,
+                          std::atomic<long long>* mpi_send_time_ns);
 
   /// Final pass: download local delayed psi + save angular flux, copy to destination psi.
   void FinalizeAfterSweep(SweepChunk& sweep_chunk,

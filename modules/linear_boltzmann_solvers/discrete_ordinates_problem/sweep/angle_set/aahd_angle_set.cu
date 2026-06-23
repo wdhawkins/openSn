@@ -88,18 +88,41 @@ AAHD_AngleSet::SweepKernelAndSync(SweepChunk& sweep_chunk, bool incoming_psi_on_
 void
 AAHD_AngleSet::SendAfterFirstPass(bool use_device_buffers)
 {
+  SendAfterFirstPass(use_device_buffers, nullptr, nullptr, nullptr);
+}
+
+void
+AAHD_AngleSet::SendAfterFirstPass(bool use_device_buffers,
+                                  std::atomic<long long>* copy_time_ns,
+                                  std::atomic<long long>* dependency_time_ns,
+                                  std::atomic<long long>* mpi_send_time_ns)
+{
+  using Clock = std::chrono::high_resolution_clock;
+
   auto* aahd_fluds = static_cast<AAHD_FLUDS*>(fluds_.get());
   if (aahd_fluds->HasNonLocalOutgoingPsi() and not use_device_buffers)
   {
+    const auto copy_start = Clock::now();
     aahd_fluds->CopyNonLocalOutgoingPsiFromDevice();
     stream_.synchronize();
+    if (copy_time_ns != nullptr)
+      copy_time_ns->fetch_add(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - copy_start).count(),
+        std::memory_order_relaxed);
   }
   if (not following_angle_sets_.empty())
   {
+    const auto dependency_start = Clock::now();
     std::scoped_lock lk(m);
     for (auto& following_as : following_angle_sets_)
       following_as->DecrementCounter();
+    if (dependency_time_ns != nullptr)
+      dependency_time_ns->fetch_add(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                      Clock::now() - dependency_start)
+                                      .count(),
+                                    std::memory_order_relaxed);
   }
+  const auto mpi_send_start = Clock::now();
   if (use_device_buffers)
   {
     std::scoped_lock lk(m);
@@ -107,6 +130,10 @@ AAHD_AngleSet::SendAfterFirstPass(bool use_device_buffers)
   }
   else
     async_comm_.SendDownstreamPsi(static_cast<int>(this->GetID()), use_device_buffers);
+  if (mpi_send_time_ns != nullptr)
+    mpi_send_time_ns->fetch_add(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - mpi_send_start).count(),
+      std::memory_order_relaxed);
 }
 
 void
