@@ -34,6 +34,8 @@ namespace
 {
 
 constexpr unsigned int kBlockSize = 256;
+crb::DeviceMemory<double> phi_change_block_max_scratch;
+crb::DeviceMemory<double> phi_change_reduce_scratch;
 
 __CRB_GLOBAL_FUNC__ void
 ReduceMaxKernel(const double* input, std::size_t size, double* output)
@@ -84,34 +86,41 @@ ReduceMaxKernel(const double* input, std::size_t size, double* output)
 }
 
 double
-ReduceDeviceMaxToHost(crb::DeviceMemory<double>& device_values)
+ReduceDeviceMaxToHost(const double* device_values,
+                      std::size_t size,
+                      crb::DeviceMemory<double>& reduce_scratch)
 {
-  std::size_t current_size = device_values.size();
+  std::size_t current_size = size;
   if (current_size == 0)
     return 0.0;
+
+  const auto required_scratch = std::max<std::size_t>(1, current_size);
+  if (reduce_scratch.size() < required_scratch)
+    reduce_scratch = crb::DeviceMemory<double>(required_scratch);
+
+  const double* current_values = device_values;
 
   while (current_size > 1)
   {
     const auto num_blocks =
       static_cast<unsigned int>(std::min<std::size_t>((current_size + kBlockSize - 1) / kBlockSize,
                                                       65535));
-    crb::DeviceMemory<double> reduced(num_blocks);
 #if defined(__NVCC__) || defined(__HIPCC__)
-    ReduceMaxKernel<<<num_blocks, kBlockSize>>>(device_values.get(), current_size, reduced.get());
+    ReduceMaxKernel<<<num_blocks, kBlockSize>>>(current_values, current_size, reduce_scratch.get());
 #elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
     crb::Stream stream;
     stream.parallel_for(sycl::nd_range<3>(crb::Dim3(num_blocks) * crb::Dim3(kBlockSize),
                                           crb::Dim3(kBlockSize)),
                         [=](sycl::nd_item<3>)
-                        { ReduceMaxKernel(device_values.get(), current_size, reduced.get()); });
+                        { ReduceMaxKernel(current_values, current_size, reduce_scratch.get()); });
     stream.synchronize();
 #endif
-    device_values = std::move(reduced);
+    current_values = reduce_scratch.get();
     current_size = num_blocks;
   }
 
   crb::HostVector<double> host_result(1, 0.0);
-  crb::copy(host_result, device_values, 1);
+  crb::copy(host_result, reduce_scratch, 1);
   return host_result[0];
 }
 
@@ -444,14 +453,6 @@ DeviceClassicRichardsonRuntime::PrepareSweep(bool use_boundary_source,
     }
   }
 
-  for (auto* angle_set : angle_sets_)
-  {
-    auto& fluds = angle_set->GetFLUDS();
-    for (auto& delayed_data : fluds.DelayedPrelocIOutgoingPsi())
-      std::fill(delayed_data.begin(), delayed_data.end(), 0.0);
-    std::fill(fluds.DelayedLocalPsi().begin(), fluds.DelayedLocalPsi().end(), 0.0);
-  }
-
   sweep_chunk_->ZeroDestinationPsi();
   sweep_chunk_->ZeroDestinationPhi();
   sweep_chunk_->SetBoundarySourceActiveFlag(use_boundary_source);
@@ -519,7 +520,6 @@ DeviceClassicRichardsonRuntime::BuildSource(const LBSGroupset& groupset,
                                                             max_cell_dofs,
                                                             apply_wgs_scatter,
                                                             apply_wgs_fission);
-  crb::Stream::get_null_stream().synchronize();
 #elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
   crb::Stream stream;
   stream.parallel_for(sycl::nd_range<3>(grid * block, block),
@@ -551,7 +551,8 @@ DeviceClassicRichardsonRuntime::ComputeLocalPhiChange(const LBSGroupset& groupse
   const std::size_t size = problem_->GetPhiNewLocal().size();
   const std::uint32_t num_blocks =
     static_cast<std::uint32_t>(std::min<std::size_t>((size + kBlockSize - 1) / kBlockSize, 65535));
-  crb::DeviceMemory<double> device_results(num_blocks);
+  if (phi_change_block_max_scratch.size() != num_blocks)
+    phi_change_block_max_scratch = crb::DeviceMemory<double>(num_blocks);
 #if defined(__NVCC__) || defined(__HIPCC__)
   ComputePhiChangeKernel<<<num_blocks, kBlockSize>>>(problem_->GetPhiPinner()->GetDevicePtr(),
                                                      problem_->GetPhiOldPinner()->GetDevicePtr(),
@@ -559,7 +560,7 @@ DeviceClassicRichardsonRuntime::ComputeLocalPhiChange(const LBSGroupset& groupse
                                                      problem_->GetNumGroups(),
                                                      groupset.first_group,
                                                      groupset.GetNumGroups(),
-                                                     device_results.get());
+                                                     phi_change_block_max_scratch.get());
 #elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
   crb::Stream stream;
   crb::Dim3 block(kBlockSize);
@@ -573,12 +574,14 @@ DeviceClassicRichardsonRuntime::ComputeLocalPhiChange(const LBSGroupset& groupse
                                                problem_->GetNumGroups(),
                                                groupset.first_group,
                                                groupset.GetNumGroups(),
-                                               device_results.get());
+                                               phi_change_block_max_scratch.get());
                       });
   stream.synchronize();
 #endif
 
-  return ReduceDeviceMaxToHost(device_results);
+  return ReduceDeviceMaxToHost(phi_change_block_max_scratch.get(),
+                               num_blocks,
+                               phi_change_reduce_scratch);
 }
 
 double
@@ -616,6 +619,13 @@ DeviceClassicRichardsonRuntime::UploadDelayedPsiToDevice()
     OpenSnLogicalErrorIf(aahd_fluds == nullptr,
                          "DeviceClassicRichardsonRuntime requires AAHD_FLUDS.");
     aahd_fluds->CopyDelayedPsiToDevice();
+  }
+
+  for (auto* angle_set : angle_sets_)
+  {
+    auto* aahd_fluds = dynamic_cast<AAHD_FLUDS*>(&angle_set->GetFLUDS());
+    OpenSnLogicalErrorIf(aahd_fluds == nullptr,
+                         "DeviceClassicRichardsonRuntime requires AAHD_FLUDS.");
     aahd_fluds->GetStream().synchronize();
   }
 }
@@ -630,6 +640,13 @@ DeviceClassicRichardsonRuntime::DownloadDelayedPsiToHost()
                          "DeviceClassicRichardsonRuntime requires AAHD_FLUDS.");
     aahd_fluds->CopyLocalDelayedPsiFromDevice();
     aahd_fluds->CopyDelayedIncomingPsiCurrentFromDevice();
+  }
+
+  for (auto* angle_set : angle_sets_)
+  {
+    auto* aahd_fluds = dynamic_cast<AAHD_FLUDS*>(&angle_set->GetFLUDS());
+    OpenSnLogicalErrorIf(aahd_fluds == nullptr,
+                         "DeviceClassicRichardsonRuntime requires AAHD_FLUDS.");
     aahd_fluds->GetStream().synchronize();
   }
 }
@@ -739,8 +756,9 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
   for (auto* angle_set : angle_sets_)
   {
     static_cast<AAHD_FLUDS*>(&angle_set->GetFLUDS())->GetStream().synchronize();
-    angle_set->ResetSweepBuffers();
   }
+  for (auto* angle_set : angle_sets_)
+    angle_set->ResetSweepBuffers();
 }
 
 void
