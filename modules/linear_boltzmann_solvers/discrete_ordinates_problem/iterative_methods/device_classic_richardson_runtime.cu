@@ -45,10 +45,11 @@ DeviceRichardsonProfilingEnabled()
   const char* env_value =
     std::getenv("OPENSN_DEVICE_RICHARDSON_PROFILE"); // NOLINT(concurrency-mt-unsafe)
   if (env_value == nullptr)
-    return false;
+    return true;
 
   const std::string value(env_value);
-  return value == "1" or value == "true" or value == "TRUE" or value == "on" or value == "ON";
+  return not(value == "0" or value == "false" or value == "FALSE" or value == "off" or
+             value == "OFF");
 }
 
 __CRB_GLOBAL_FUNC__ void

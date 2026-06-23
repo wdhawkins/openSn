@@ -82,7 +82,7 @@ LogSweepProfileIfEnabled(const DeviceClassicRichardsonRuntime& runtime, const LB
   AppendNumericField(out, "finalize_s", profile.finalize_seconds, Fixed(3));
   AppendNumericField(out, "wait_s", profile.wait_seconds, Fixed(3));
   AppendNumericField(out, "post_s", profile.post_seconds, Fixed(3));
-  log.Log() << no_wrap << out.str();
+  log.Log0() << no_wrap << out.str();
 }
 
 } // namespace
