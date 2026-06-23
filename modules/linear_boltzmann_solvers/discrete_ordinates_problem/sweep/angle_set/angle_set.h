@@ -9,6 +9,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/fluds/fluds.h"
 #include "framework/mesh/mesh.h"
 #include "framework/logging/log.h"
+#include <atomic>
 #include <memory>
 
 namespace opensn
@@ -84,12 +85,12 @@ public:
   /// Resets number of dependencies.
   void ResetNumDependencies();
   /// Resets dependency counter.
-  void ResetDependencyCounter() { dependency_counter_ = num_dependencies_; }
+  void ResetDependencyCounter() { dependency_counter_.store(num_dependencies_); }
 
   /// Checks if dependency is resolved.
-  bool IsDependencyResolved() const { return dependency_counter_ == 0; }
+  bool IsDependencyResolved() const { return dependency_counter_.load() == 0; }
 
-  void DecrementCounter() { --dependency_counter_; }
+  void DecrementCounter() { dependency_counter_.fetch_sub(1); }
 
   /// Instructs the sweep buffer to receive delayed data.
   virtual bool ReceiveDelayedData() = 0;
@@ -138,7 +139,7 @@ protected:
   /// Number of anglesets the current angle set depends on.
   std::size_t num_dependencies_ = 0;
   /// Counter for un-resolved dependencies.
-  std::size_t dependency_counter_ = 0;
+  std::atomic_size_t dependency_counter_{0};
   /**
    * List of angle sets waiting after this angle set.
    * After this angle set completes its sweep chunk, it decrements the counter of the angle sets

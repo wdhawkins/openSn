@@ -747,10 +747,6 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
     static_cast<AAHD_FLUDS*>(&angle_set->GetFLUDS())->CopyDelayedPsiNewToOldOnDevice();
   problem_->CopyDeviceBoundaryDelayedPsiNewToOld(groupset_->id);
   for (auto* angle_set : angle_sets_)
-  {
-    static_cast<AAHD_FLUDS*>(&angle_set->GetFLUDS())->GetStream().synchronize();
-  }
-  for (auto* angle_set : angle_sets_)
     angle_set->ResetSweepBuffers();
 }
 
