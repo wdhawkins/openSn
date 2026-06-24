@@ -54,13 +54,16 @@ public:
 
   /// Download non-local outgoing psi, signal intra-rank followers, and send downstream psi.
   void SendAfterFirstPass(bool use_device_buffers = false);
-  void SendAfterFirstPass(bool use_device_buffers,
-                          std::atomic<long long>* copy_time_ns,
-                          std::atomic<long long>* dependency_time_ns,
-                          std::atomic<long long>* mpi_send_time_ns,
-                          std::atomic<long long>* message_count,
-                          std::atomic<long long>* total_doubles,
-                          std::atomic<long long>* max_message_doubles);
+  /// Worker-side portion of the first-pass completion path.
+  void PrepareAfterFirstPass(bool use_device_buffers,
+                             std::atomic<long long>* copy_time_ns,
+                             std::atomic<long long>* dependency_time_ns);
+  /// Host-side MPI send issuance for data prepared by the first pass.
+  void IssueDownstreamSends(bool use_device_buffers,
+                            std::atomic<long long>* mpi_send_time_ns,
+                            std::atomic<long long>* message_count,
+                            std::atomic<long long>* total_doubles,
+                            std::atomic<long long>* max_message_doubles);
 
   /// Final pass: download local delayed psi + save angular flux, copy to destination psi.
   void FinalizeAfterSweep(SweepChunk& sweep_chunk,

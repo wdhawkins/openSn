@@ -757,13 +757,9 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
           auto* angle_set = angle_sets_[ready_indices[ready_pos]];
           angle_set->SweepKernelAndSync(*sweep_chunk_, use_device_buffers);
           const auto send_start = Clock::now();
-          angle_set->SendAfterFirstPass(use_device_buffers,
-                                        &send_copy_time_ns,
-                                        &send_dependency_time_ns,
-                                        &send_mpi_time_ns,
-                                        &send_message_count,
-                                        &send_total_doubles,
-                                        &send_max_message_doubles);
+          angle_set->PrepareAfterFirstPass(use_device_buffers,
+                                           &send_copy_time_ns,
+                                           &send_dependency_time_ns);
           send_time_ns.fetch_add(duration_cast<nanoseconds>(Clock::now() - send_start).count(),
                                  std::memory_order_relaxed);
           const auto finalize_start = Clock::now();
@@ -774,6 +770,19 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
             std::memory_order_relaxed);
         }
       });
+
+    for (const auto angle_set_idx : ready_indices)
+    {
+      auto* angle_set = angle_sets_[angle_set_idx];
+      const auto send_start = Clock::now();
+      angle_set->IssueDownstreamSends(use_device_buffers,
+                                      &send_mpi_time_ns,
+                                      &send_message_count,
+                                      &send_total_doubles,
+                                      &send_max_message_doubles);
+      send_time_ns.fetch_add(duration_cast<nanoseconds>(Clock::now() - send_start).count(),
+                             std::memory_order_relaxed);
+    }
   }
 
   const auto wait_start = Clock::now();
