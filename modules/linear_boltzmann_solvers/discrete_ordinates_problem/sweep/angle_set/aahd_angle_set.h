@@ -49,12 +49,13 @@ public:
 
   AngleSetStatus AngleSetAdvance(SweepChunk& sweep_chunk, AngleSetStatus permission) override;
 
-  /// Upload non-local incoming psi, run kernel, synchronize stream. No download.
-  void SweepKernelAndSync(SweepChunk& sweep_chunk, bool incoming_psi_on_device = false);
-  void SweepKernelAndSync(SweepChunk& sweep_chunk,
-                          bool incoming_psi_on_device,
-                          std::atomic<long long>* incoming_copy_time_ns,
-                          std::atomic<long long>* kernel_sync_time_ns);
+  /// Upload non-local incoming psi and launch the sweep kernel without synchronizing.
+  void LaunchSweepKernel(SweepChunk& sweep_chunk, bool incoming_psi_on_device = false);
+  void LaunchSweepKernel(SweepChunk& sweep_chunk,
+                         bool incoming_psi_on_device,
+                         std::atomic<long long>* incoming_copy_time_ns);
+  /// Synchronize the angle set's stream after a launched sweep kernel.
+  void SynchronizeSweep(std::atomic<long long>* kernel_sync_time_ns = nullptr);
 
   /// Download non-local outgoing psi, signal intra-rank followers, and send downstream psi.
   void SendAfterFirstPass(bool use_device_buffers = false);

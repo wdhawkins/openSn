@@ -770,22 +770,12 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
 
           auto* angle_set = angle_sets_[ready_indices[ready_pos]];
           kernel_launch_count.fetch_add(1, std::memory_order_relaxed);
-          angle_set->SweepKernelAndSync(
-            *sweep_chunk_, use_device_buffers, &incoming_copy_time_ns, &kernel_sync_time_ns);
-          const auto send_start = Clock::now();
-          angle_set->PrepareAfterFirstPass(use_device_buffers,
-                                           &send_copy_time_ns,
-                                           &send_dependency_time_ns);
-          send_time_ns.fetch_add(duration_cast<nanoseconds>(Clock::now() - send_start).count(),
-                                 std::memory_order_relaxed);
-          const auto finalize_start = Clock::now();
-          angle_set->FinalizeAfterSweep(
-            *sweep_chunk_, use_device_buffers, final_download, download_delayed_psi);
-          finalize_time_ns.fetch_add(
-            duration_cast<nanoseconds>(Clock::now() - finalize_start).count(),
-            std::memory_order_relaxed);
+          angle_set->LaunchSweepKernel(*sweep_chunk_, use_device_buffers, &incoming_copy_time_ns);
         }
       });
+
+    for (const auto angle_set_idx : ready_indices)
+      angle_sets_[angle_set_idx]->SynchronizeSweep(&kernel_sync_time_ns);
 
     if (not use_device_buffers)
     {
@@ -802,6 +792,13 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
     for (const auto angle_set_idx : ready_indices)
     {
       auto* angle_set = angle_sets_[angle_set_idx];
+      const auto prepare_start = Clock::now();
+      angle_set->PrepareAfterFirstPass(use_device_buffers,
+                                       &send_copy_time_ns,
+                                       &send_dependency_time_ns);
+      send_time_ns.fetch_add(duration_cast<nanoseconds>(Clock::now() - prepare_start).count(),
+                             std::memory_order_relaxed);
+
       const auto send_start = Clock::now();
       angle_set->IssueDownstreamSends(use_device_buffers,
                                       &send_mpi_time_ns,
@@ -810,6 +807,12 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
                                       &send_max_message_doubles);
       send_time_ns.fetch_add(duration_cast<nanoseconds>(Clock::now() - send_start).count(),
                              std::memory_order_relaxed);
+
+      const auto finalize_start = Clock::now();
+      angle_set->FinalizeAfterSweep(
+        *sweep_chunk_, use_device_buffers, final_download, download_delayed_psi);
+      finalize_time_ns.fetch_add(duration_cast<nanoseconds>(Clock::now() - finalize_start).count(),
+                                 std::memory_order_relaxed);
     }
   }
 
