@@ -9,6 +9,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep_chunks/cbcd_sweep_chunk.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/discrete_ordinates_problem.h"
 #include "caribou/main.hpp"
+#include <atomic>
 #include <chrono>
 #include <thread>
 #include <vector>
@@ -40,25 +41,18 @@ SweepScheduler::ScheduleAlgoAAO(SweepChunk& sweep_chunk)
   }
 
   // assign sweep task to thread pool (but not execution yet)
-  pool_.AssignTask(
-    [this, &sweep_chunk](std::size_t i)
-    {
-      auto* aahd = static_cast<AAHD_AngleSet*>(angle_agg_[i].get());
-      aahd->AngleSetAdvance(sweep_chunk, AngleSetStatus::EXECUTE);
-    });
-
   // poll for readiness and launch threads
   while (!execution_order_.empty())
   {
     const auto poll_start = Clock::now();
-    std::size_t ready_count = 0;
+    std::vector<std::size_t> ready_indices;
+    ready_indices.reserve(execution_order_.size());
     for (auto it = execution_order_.begin(); it != execution_order_.end();)
     {
       auto* angle_set = static_cast<AAHD_AngleSet*>(angle_agg_[*it].get());
       if (angle_set->IsReady())
       {
-        pool_.Run(*it);
-        ++ready_count;
+        ready_indices.push_back(*it);
         std::swap(*it, execution_order_.back());
         execution_order_.pop_back();
       }
@@ -68,15 +62,29 @@ SweepScheduler::ScheduleAlgoAAO(SweepChunk& sweep_chunk)
       }
     }
     profile_.poll_seconds += std::chrono::duration_cast<Seconds>(Clock::now() - poll_start).count();
-    if (ready_count > 0)
+    if (not ready_indices.empty())
     {
       ++profile_.ready_batches;
-      profile_.ready_total += ready_count;
-      profile_.ready_max = std::max(profile_.ready_max, ready_count);
-      profile_.kernel_launches += ready_count;
+      profile_.ready_total += ready_indices.size();
+      profile_.ready_max = std::max(profile_.ready_max, ready_indices.size());
+      profile_.kernel_launches += ready_indices.size();
+
+      std::atomic_size_t next_ready_idx = 0;
+      pool_.ExecuteBatch(
+        [this, &sweep_chunk, &ready_indices, &next_ready_idx](std::size_t)
+        {
+          while (true)
+          {
+            const auto ready_pos = next_ready_idx.fetch_add(1, std::memory_order_relaxed);
+            if (ready_pos >= ready_indices.size())
+              return;
+
+            auto* aahd = static_cast<AAHD_AngleSet*>(angle_agg_[ready_indices[ready_pos]].get());
+            aahd->AngleSetAdvance(sweep_chunk, AngleSetStatus::EXECUTE);
+          }
+        });
     }
   }
-  pool_.WaitAll();
 
   // wait for sends and receive of delayed data
   const auto wait_start = Clock::now();
