@@ -696,6 +696,10 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
   std::atomic<long long> send_max_message_doubles{0};
   std::atomic<long long> finalize_time_ns{0};
   double poll_seconds = 0.0;
+  double batch_launch_wall_seconds = 0.0;
+  double batch_sync_wall_seconds = 0.0;
+  double batch_send_wall_seconds = 0.0;
+  double batch_finalize_wall_seconds = 0.0;
   std::size_t ready_batch_count = 0;
   std::size_t ready_batch_total_size = 0;
   std::size_t ready_batch_max_size = 0;
@@ -744,6 +748,7 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
     ready_batch_max_size = std::max(ready_batch_max_size, ready_batch_size);
 
     std::atomic_size_t next_ready_idx = 0;
+    const auto batch_launch_start = Clock::now();
     pool_.ExecuteBatch(
       [this,
        &ready_indices,
@@ -773,10 +778,14 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
           angle_set->LaunchSweepKernel(*sweep_chunk_, use_device_buffers, &incoming_copy_time_ns);
         }
       });
+    batch_launch_wall_seconds += duration_cast<Seconds>(Clock::now() - batch_launch_start).count();
 
+    const auto batch_sync_start = Clock::now();
     for (const auto angle_set_idx : ready_indices)
       angle_sets_[angle_set_idx]->SynchronizeSweep(&kernel_sync_time_ns);
+    batch_sync_wall_seconds += duration_cast<Seconds>(Clock::now() - batch_sync_start).count();
 
+    const auto batch_send_start = Clock::now();
     if (not use_device_buffers)
     {
       for (const auto angle_set_idx : ready_indices)
@@ -807,13 +816,21 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
                                       &send_max_message_doubles);
       send_time_ns.fetch_add(duration_cast<nanoseconds>(Clock::now() - send_start).count(),
                              std::memory_order_relaxed);
+    }
+    batch_send_wall_seconds += duration_cast<Seconds>(Clock::now() - batch_send_start).count();
 
+    const auto batch_finalize_start = Clock::now();
+    for (const auto angle_set_idx : ready_indices)
+    {
+      auto* angle_set = angle_sets_[angle_set_idx];
       const auto finalize_start = Clock::now();
       angle_set->FinalizeAfterSweep(
         *sweep_chunk_, use_device_buffers, final_download, download_delayed_psi);
       finalize_time_ns.fetch_add(duration_cast<nanoseconds>(Clock::now() - finalize_start).count(),
                                  std::memory_order_relaxed);
     }
+    batch_finalize_wall_seconds +=
+      duration_cast<Seconds>(Clock::now() - batch_finalize_start).count();
   }
 
   const auto wait_start = Clock::now();
@@ -857,6 +874,10 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
     sweep_profile_.incoming_copy_seconds +=
       static_cast<double>(incoming_copy_time_ns.load()) * 1.0e-9;
     sweep_profile_.kernel_sync_seconds += static_cast<double>(kernel_sync_time_ns.load()) * 1.0e-9;
+    sweep_profile_.batch_launch_wall_seconds += batch_launch_wall_seconds;
+    sweep_profile_.batch_sync_wall_seconds += batch_sync_wall_seconds;
+    sweep_profile_.batch_send_wall_seconds += batch_send_wall_seconds;
+    sweep_profile_.batch_finalize_wall_seconds += batch_finalize_wall_seconds;
     sweep_profile_.kernel_launch_count += static_cast<std::size_t>(kernel_launch_count.load());
     sweep_profile_.ready_batch_count += ready_batch_count;
     sweep_profile_.ready_batch_total_size += ready_batch_total_size;

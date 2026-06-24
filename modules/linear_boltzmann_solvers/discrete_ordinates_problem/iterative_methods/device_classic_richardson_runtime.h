@@ -32,6 +32,10 @@ public:
     double poll_seconds = 0.0;
     double incoming_copy_seconds = 0.0;
     double kernel_sync_seconds = 0.0;
+    double batch_launch_wall_seconds = 0.0;
+    double batch_sync_wall_seconds = 0.0;
+    double batch_send_wall_seconds = 0.0;
+    double batch_finalize_wall_seconds = 0.0;
     std::size_t kernel_launch_count = 0;
     std::size_t ready_batch_count = 0;
     std::size_t ready_batch_total_size = 0;

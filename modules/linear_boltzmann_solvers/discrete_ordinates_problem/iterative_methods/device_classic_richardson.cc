@@ -82,6 +82,11 @@ LogSweepProfileIfEnabled(const DeviceClassicRichardsonRuntime& runtime, const LB
   AppendNumericField(out, "poll_s", profile.poll_seconds, Fixed(3));
   AppendNumericField(out, "incoming_copy_s", profile.incoming_copy_seconds, Fixed(3));
   AppendNumericField(out, "kernel_sync_s", profile.kernel_sync_seconds, Fixed(3));
+  AppendNumericField(out, "batch_launch_wall_s", profile.batch_launch_wall_seconds, Fixed(3));
+  AppendNumericField(out, "batch_sync_wall_s", profile.batch_sync_wall_seconds, Fixed(3));
+  AppendNumericField(out, "batch_send_wall_s", profile.batch_send_wall_seconds, Fixed(3));
+  AppendNumericField(
+    out, "batch_finalize_wall_s", profile.batch_finalize_wall_seconds, Fixed(3));
   out << ", kernel_launches = " << profile.kernel_launch_count;
   out << ", ready_batches = " << profile.ready_batch_count;
   out << ", ready_avg = "
