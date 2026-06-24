@@ -23,7 +23,7 @@ SweepScheduler::ScheduleAlgoAAO(SweepChunk& sweep_chunk)
   using Seconds = std::chrono::duration<double>;
 
   // copy phi and src moments to device
-  auto aah_sweep_chunk = static_cast<AAHDSweepChunk&>(sweep_chunk);
+  auto& aah_sweep_chunk = static_cast<AAHDSweepChunk&>(sweep_chunk);
   int groupset_id = angle_agg_.GetGroupsetID();
   aah_sweep_chunk.GetProblem().CopyPhiAndSrcToDevice();
   aah_sweep_chunk.GetProblem().TransferDeviceBoundaryData(groupset_id, true);
