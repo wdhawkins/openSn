@@ -104,7 +104,6 @@ AAHD_AngleSet::PrepareAfterFirstPass(bool use_device_buffers,
   {
     const auto copy_start = Clock::now();
     aahd_fluds->CopyNonLocalOutgoingPsiFromDevice();
-    stream_.synchronize();
     if (copy_time_ns != nullptr)
       copy_time_ns->fetch_add(
         std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - copy_start).count(),

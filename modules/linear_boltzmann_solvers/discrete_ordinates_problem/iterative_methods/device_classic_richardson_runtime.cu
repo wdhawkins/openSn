@@ -771,6 +771,18 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
         }
       });
 
+    if (not use_device_buffers)
+    {
+      for (const auto angle_set_idx : ready_indices)
+      {
+        const auto copy_sync_start = Clock::now();
+        angle_sets_[angle_set_idx]->GetStream().synchronize();
+        send_copy_time_ns.fetch_add(
+          duration_cast<nanoseconds>(Clock::now() - copy_sync_start).count(),
+          std::memory_order_relaxed);
+      }
+    }
+
     for (const auto angle_set_idx : ready_indices)
     {
       auto* angle_set = angle_sets_[angle_set_idx];
