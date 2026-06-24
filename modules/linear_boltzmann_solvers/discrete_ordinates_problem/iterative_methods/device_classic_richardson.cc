@@ -109,6 +109,24 @@ LogSweepProfileIfEnabled(const DeviceClassicRichardsonRuntime& runtime, const LB
     std::cout << out.str() << std::endl;
 }
 
+void
+LogIterationProfile(const DeviceClassicRichardson& solver, const LBSGroupset& groupset)
+{
+  const auto& profile = solver.GetIterationProfile();
+  if (profile.num_iterations == 0)
+    return;
+
+  std::stringstream out;
+  out << "device_classic_richardson iteration profile groups [" << groupset.first_group << "-"
+      << groupset.last_group << "] iters=" << profile.num_iterations;
+  AppendNumericField(out, "source_s", profile.source_seconds, Fixed(3));
+  AppendNumericField(out, "transport_s", profile.transport_seconds, Fixed(3));
+  AppendNumericField(out, "convergence_s", profile.convergence_seconds, Fixed(3));
+  AppendNumericField(out, "lagged_sync_s", profile.lagged_sync_seconds, Fixed(3));
+  if (mpi_comm.rank() == 0)
+    std::cout << out.str() << std::endl;
+}
+
 } // namespace
 
 void
@@ -278,6 +296,9 @@ DeviceClassicRichardson::SyncLaggedStateToLatestIterate()
 void
 DeviceClassicRichardson::Solve()
 {
+  using Clock = std::chrono::high_resolution_clock;
+  using Seconds = std::chrono::duration<double>;
+
   CaliperPhaseScope cali_solve_phase("Solve", CaliperSolvePhaseDepth());
   CaliperRegionScope cali_wgs("WGS", CaliperWGSScopeDepth());
   CALI_CXX_MARK_SCOPE("DeviceClassicRichardson");
@@ -306,6 +327,7 @@ DeviceClassicRichardson::Solve()
   double last_pw_phi_change = 0.0;
   bool converged = false;
   unsigned int num_iterations = 0;
+  iteration_profile_ = {};
 
   CALI_CXX_MARK_LOOP_BEGIN(wgs_iteration, "WGSIteration");
   for (unsigned int k = 0; k < groupset.max_iterations; ++k)
@@ -317,26 +339,48 @@ DeviceClassicRichardson::Solve()
     double pw_psi_change = 0.0;
     if (use_ordinary_scheduler)
     {
+      const auto source_start = Clock::now();
       do_problem.SetQMomentsFrom(saved_q_moments_local_);
       sweep_context_->set_source_function(
         groupset, do_problem.GetQMomentsLocal(), do_problem.GetPhiOldLocal(), sweep_scope);
+      iteration_profile_.source_seconds +=
+        std::chrono::duration_cast<Seconds>(Clock::now() - source_start).count();
+
+      const auto transport_start = Clock::now();
       sweep_context_->ApplyInverseTransportOperator(sweep_scope);
+      iteration_profile_.transport_seconds +=
+        std::chrono::duration_cast<Seconds>(Clock::now() - transport_start).count();
+
+      const auto convergence_start = Clock::now();
       pw_phi_change = ComputePointwisePhiChange(do_problem, groupset.id);
       if (psi_check_active)
       {
         psi_new = groupset.angle_agg->GetNewDelayedAngularDOFsAsSTLVector();
         pw_psi_change = ComputePointwiseChange(psi_new, psi_old);
       }
+      iteration_profile_.convergence_seconds +=
+        std::chrono::duration_cast<Seconds>(Clock::now() - convergence_start).count();
     }
     else
     {
+      const auto source_start = Clock::now();
       BuildIterationSource();
-      runtime_.ApplyInverseTransportOperator(sweep_scope);
+      iteration_profile_.source_seconds +=
+        std::chrono::duration_cast<Seconds>(Clock::now() - source_start).count();
 
+      const auto transport_start = Clock::now();
+      runtime_.ApplyInverseTransportOperator(sweep_scope);
+      iteration_profile_.transport_seconds +=
+        std::chrono::duration_cast<Seconds>(Clock::now() - transport_start).count();
+
+      const auto convergence_start = Clock::now();
       const auto metrics = runtime_.ComputeConvergenceMetrics(groupset);
       pw_phi_change = metrics.phi_change;
       pw_psi_change = metrics.psi_change;
+      iteration_profile_.convergence_seconds +=
+        std::chrono::duration_cast<Seconds>(Clock::now() - convergence_start).count();
     }
+    iteration_profile_.num_iterations = num_iterations;
     last_pw_phi_change = pw_phi_change;
     const auto convergence = EvaluateRichardsonConvergence(
       pw_phi_change,
@@ -367,13 +411,21 @@ DeviceClassicRichardson::Solve()
     {
       if (use_ordinary_scheduler)
       {
+        const auto lagged_sync_start = Clock::now();
         LBSVecOps::GSScopedCopyPrimarySTLvectors(
           do_problem, groupset, PhiSTLOption::PHI_NEW, PhiSTLOption::PHI_OLD);
         if (psi_check_active)
           psi_old = psi_new;
+        iteration_profile_.lagged_sync_seconds +=
+          std::chrono::duration_cast<Seconds>(Clock::now() - lagged_sync_start).count();
       }
       else
+      {
+        const auto lagged_sync_start = Clock::now();
         SyncLaggedStateToLatestIterate();
+        iteration_profile_.lagged_sync_seconds +=
+          std::chrono::duration_cast<Seconds>(Clock::now() - lagged_sync_start).count();
+      }
     }
     else
       break;
@@ -418,6 +470,7 @@ DeviceClassicRichardson::Solve()
   }
 
   LogSweepProfileIfEnabled(runtime_, groupset);
+  LogIterationProfile(*this, groupset);
   sweep_context_->PostSolveCallback();
 }
 

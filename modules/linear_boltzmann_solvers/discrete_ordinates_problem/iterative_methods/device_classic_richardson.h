@@ -18,12 +18,22 @@ struct SweepWGSContext;
 class DeviceClassicRichardson : public LinearSystemSolver
 {
 public:
+  struct IterationProfile
+  {
+    double source_seconds = 0.0;
+    double transport_seconds = 0.0;
+    double convergence_seconds = 0.0;
+    double lagged_sync_seconds = 0.0;
+    std::size_t num_iterations = 0;
+  };
+
   explicit DeviceClassicRichardson(const std::shared_ptr<SweepWGSContext>& gs_context_ptr,
                                    bool verbose);
 
   ~DeviceClassicRichardson() override = default;
 
   void Solve() override;
+  const IterationProfile& GetIterationProfile() const { return iteration_profile_; }
 
 private:
   bool SelectSourceBuildPath();
@@ -40,6 +50,7 @@ private:
   bool use_fast_device_source_path_ = false;
   std::string host_source_fallback_reason_;
   std::vector<double> saved_q_moments_local_;
+  IterationProfile iteration_profile_;
 };
 
 } // namespace opensn
