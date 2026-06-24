@@ -12,6 +12,7 @@
 #include "modules/linear_boltzmann_solvers/lbs_problem/device/device_vector_mirror.h"
 #include "caliper/cali.h"
 #include "caribou/main.hpp"
+#include <cstdlib>
 
 namespace crb = caribou;
 
@@ -32,6 +33,25 @@ AtomicStoreMax(std::atomic<std::size_t>& target, std::size_t value)
                                           std::memory_order_relaxed))
   {
   }
+}
+
+unsigned int
+GetAAHSweepThreadBudget()
+{
+  const char* env_value =
+    std::getenv("OPENSN_AAH_SWEEP_THREAD_BUDGET"); // NOLINT(concurrency-mt-unsafe)
+  if (env_value != nullptr)
+  {
+    const auto parsed = std::strtoul(env_value, nullptr, 10);
+    if (parsed >= 32)
+      return static_cast<unsigned int>(parsed);
+  }
+
+#if defined(__HIPCC__)
+  return 256;
+#else
+  return gpu_kernel::threshold;
+#endif
 }
 
 } // namespace
@@ -72,12 +92,13 @@ AAHDSweepChunk::Sweep(AngleSet& angle_set)
   total_level_count_.fetch_add(levels_in_angle_set, std::memory_order_relaxed);
   AtomicStoreMax(max_levels_per_angle_set_, levels_in_angle_set);
   // compute block size
+  const unsigned int thread_budget = GetAAHSweepThreadBudget();
   unsigned int stride_size =
     gpu_kernel::RoundUp(static_cast<unsigned int>(args.flud_data.stride_size));
-  unsigned int block_size_x = std::min(stride_size, gpu_kernel::threshold);
-  unsigned int block_size_y = gpu_kernel::threshold / block_size_x;
+  unsigned int block_size_x = std::min(stride_size, thread_budget);
+  unsigned int block_size_y = std::max(1U, thread_budget / block_size_x);
   crb::Dim3 block_size(block_size_x, block_size_y);
-  unsigned int grid_size_x = (stride_size + gpu_kernel::threshold - 1) / gpu_kernel::threshold;
+  unsigned int grid_size_x = (stride_size + thread_budget - 1) / thread_budget;
   for (std::uint32_t level = 0; level < levelized_spls.size(); ++level)
   {
     // compute grid size
