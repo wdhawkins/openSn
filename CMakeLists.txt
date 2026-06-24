@@ -377,6 +377,13 @@ if (OPENSN_WITH_GPU)
   target_link_libraries(libopensngpu PRIVATE MPI::MPI_CXX)
 endif()
 
+if (OPENSN_GPU_AWARE_MPI)
+  target_compile_definitions(libopensn PRIVATE OPENSN_GPU_AWARE_MPI=1)
+  if (OPENSN_WITH_GPU)
+    target_compile_definitions(libopensngpu PRIVATE OPENSN_GPU_AWARE_MPI=1)
+  endif()
+endif()
+
 target_link_libraries(libopensn
     PUBLIC
     ${PETSC_LIBRARY}
