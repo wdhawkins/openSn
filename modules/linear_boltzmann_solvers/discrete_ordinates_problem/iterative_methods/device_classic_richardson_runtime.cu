@@ -686,6 +686,7 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
   const bool download_delayed_psi = final_download;
   std::atomic<long long> incoming_copy_time_ns{0};
   std::atomic<long long> kernel_sync_time_ns{0};
+  std::atomic<long long> kernel_launch_count{0};
   std::atomic<long long> send_time_ns{0};
   std::atomic<long long> send_copy_time_ns{0};
   std::atomic<long long> send_dependency_time_ns{0};
@@ -695,6 +696,9 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
   std::atomic<long long> send_max_message_doubles{0};
   std::atomic<long long> finalize_time_ns{0};
   double poll_seconds = 0.0;
+  std::size_t ready_batch_count = 0;
+  std::size_t ready_batch_total_size = 0;
+  std::size_t ready_batch_max_size = 0;
 
   for (auto* angle_set : angle_sets_)
     static_cast<AAHD_FLUDS*>(&angle_set->GetFLUDS())->ZeroDelayedPsiNewOnDevice();
@@ -734,6 +738,11 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
       continue;
     }
 
+    const auto ready_batch_size = ready_indices.size();
+    ++ready_batch_count;
+    ready_batch_total_size += ready_batch_size;
+    ready_batch_max_size = std::max(ready_batch_max_size, ready_batch_size);
+
     std::atomic_size_t next_ready_idx = 0;
     pool_.ExecuteBatch(
       [this,
@@ -741,6 +750,7 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
        &next_ready_idx,
        &incoming_copy_time_ns,
        &kernel_sync_time_ns,
+       &kernel_launch_count,
        &send_time_ns,
        &send_copy_time_ns,
        &send_dependency_time_ns,
@@ -759,6 +769,7 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
             return;
 
           auto* angle_set = angle_sets_[ready_indices[ready_pos]];
+          kernel_launch_count.fetch_add(1, std::memory_order_relaxed);
           angle_set->SweepKernelAndSync(
             *sweep_chunk_, use_device_buffers, &incoming_copy_time_ns, &kernel_sync_time_ns);
           const auto send_start = Clock::now();
@@ -843,6 +854,11 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
     sweep_profile_.incoming_copy_seconds +=
       static_cast<double>(incoming_copy_time_ns.load()) * 1.0e-9;
     sweep_profile_.kernel_sync_seconds += static_cast<double>(kernel_sync_time_ns.load()) * 1.0e-9;
+    sweep_profile_.kernel_launch_count += static_cast<std::size_t>(kernel_launch_count.load());
+    sweep_profile_.ready_batch_count += ready_batch_count;
+    sweep_profile_.ready_batch_total_size += ready_batch_total_size;
+    sweep_profile_.ready_batch_max_size =
+      std::max(sweep_profile_.ready_batch_max_size, ready_batch_max_size);
     sweep_profile_.send_seconds += static_cast<double>(send_time_ns.load()) * 1.0e-9;
     sweep_profile_.send_copy_seconds += static_cast<double>(send_copy_time_ns.load()) * 1.0e-9;
     sweep_profile_.send_dependency_seconds +=
