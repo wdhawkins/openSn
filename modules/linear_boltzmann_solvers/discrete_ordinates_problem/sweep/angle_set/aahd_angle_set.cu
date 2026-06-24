@@ -75,14 +75,39 @@ AAHD_AngleSet::AngleSetAdvance(SweepChunk& sweep_chunk, AngleSetStatus permissio
 void
 AAHD_AngleSet::SweepKernelAndSync(SweepChunk& sweep_chunk, bool incoming_psi_on_device)
 {
+  SweepKernelAndSync(sweep_chunk, incoming_psi_on_device, nullptr, nullptr);
+}
+
+void
+AAHD_AngleSet::SweepKernelAndSync(SweepChunk& sweep_chunk,
+                                  bool incoming_psi_on_device,
+                                  std::atomic<long long>* incoming_copy_time_ns,
+                                  std::atomic<long long>* kernel_sync_time_ns)
+{
+  using Clock = std::chrono::high_resolution_clock;
+
   auto* aahd_fluds = static_cast<AAHD_FLUDS*>(fluds_.get());
   auto& aahd_sweep_chunk = static_cast<AAHDSweepChunk&>(sweep_chunk);
   if (not incoming_psi_on_device)
+  {
+    const auto incoming_copy_start = Clock::now();
     aahd_fluds->CopyNonLocalIncomingPsiToDevice();
+    if (incoming_copy_time_ns != nullptr)
+      incoming_copy_time_ns->fetch_add(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - incoming_copy_start)
+          .count(),
+        std::memory_order_relaxed);
+  }
   aahd_fluds->AllocateSaveAngularFlux(aahd_sweep_chunk.GetProblem(),
                                       aahd_sweep_chunk.GetGroupset());
+  const auto kernel_sync_start = Clock::now();
   aahd_sweep_chunk.Sweep(*this);
   stream_.synchronize();
+  if (kernel_sync_time_ns != nullptr)
+    kernel_sync_time_ns->fetch_add(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - kernel_sync_start)
+        .count(),
+      std::memory_order_relaxed);
 }
 
 void

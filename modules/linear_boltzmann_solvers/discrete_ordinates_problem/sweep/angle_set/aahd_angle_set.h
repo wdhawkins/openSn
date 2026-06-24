@@ -51,6 +51,10 @@ public:
 
   /// Upload non-local incoming psi, run kernel, synchronize stream. No download.
   void SweepKernelAndSync(SweepChunk& sweep_chunk, bool incoming_psi_on_device = false);
+  void SweepKernelAndSync(SweepChunk& sweep_chunk,
+                          bool incoming_psi_on_device,
+                          std::atomic<long long>* incoming_copy_time_ns,
+                          std::atomic<long long>* kernel_sync_time_ns);
 
   /// Download non-local outgoing psi, signal intra-rank followers, and send downstream psi.
   void SendAfterFirstPass(bool use_device_buffers = false);

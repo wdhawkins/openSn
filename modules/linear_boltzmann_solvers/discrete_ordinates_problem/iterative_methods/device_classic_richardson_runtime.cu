@@ -684,6 +684,8 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
 #endif
   constexpr bool delayed_psi_on_device = true;
   const bool download_delayed_psi = final_download;
+  std::atomic<long long> incoming_copy_time_ns{0};
+  std::atomic<long long> kernel_sync_time_ns{0};
   std::atomic<long long> send_time_ns{0};
   std::atomic<long long> send_copy_time_ns{0};
   std::atomic<long long> send_dependency_time_ns{0};
@@ -737,6 +739,8 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
       [this,
        &ready_indices,
        &next_ready_idx,
+       &incoming_copy_time_ns,
+       &kernel_sync_time_ns,
        &send_time_ns,
        &send_copy_time_ns,
        &send_dependency_time_ns,
@@ -755,7 +759,8 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
             return;
 
           auto* angle_set = angle_sets_[ready_indices[ready_pos]];
-          angle_set->SweepKernelAndSync(*sweep_chunk_, use_device_buffers);
+          angle_set->SweepKernelAndSync(
+            *sweep_chunk_, use_device_buffers, &incoming_copy_time_ns, &kernel_sync_time_ns);
           const auto send_start = Clock::now();
           angle_set->PrepareAfterFirstPass(use_device_buffers,
                                            &send_copy_time_ns,
@@ -835,6 +840,9 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
   if (profiling_enabled_)
   {
     sweep_profile_.poll_seconds += poll_seconds;
+    sweep_profile_.incoming_copy_seconds +=
+      static_cast<double>(incoming_copy_time_ns.load()) * 1.0e-9;
+    sweep_profile_.kernel_sync_seconds += static_cast<double>(kernel_sync_time_ns.load()) * 1.0e-9;
     sweep_profile_.send_seconds += static_cast<double>(send_time_ns.load()) * 1.0e-9;
     sweep_profile_.send_copy_seconds += static_cast<double>(send_copy_time_ns.load()) * 1.0e-9;
     sweep_profile_.send_dependency_seconds +=

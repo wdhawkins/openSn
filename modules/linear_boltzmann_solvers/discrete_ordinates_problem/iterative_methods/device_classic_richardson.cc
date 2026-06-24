@@ -80,6 +80,8 @@ LogSweepProfileIfEnabled(const DeviceClassicRichardsonRuntime& runtime, const LB
   out << "device_classic_richardson profile groups [" << groupset.first_group << "-"
       << groupset.last_group << "] sweeps=" << profile.num_sweeps;
   AppendNumericField(out, "poll_s", profile.poll_seconds, Fixed(3));
+  AppendNumericField(out, "incoming_copy_s", profile.incoming_copy_seconds, Fixed(3));
+  AppendNumericField(out, "kernel_sync_s", profile.kernel_sync_seconds, Fixed(3));
   AppendNumericField(out, "send_s", profile.send_seconds, Fixed(3));
   AppendNumericField(out, "send_copy_s", profile.send_copy_seconds, Fixed(3));
   AppendNumericField(out, "send_dep_s", profile.send_dependency_seconds, Fixed(3));
