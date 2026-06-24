@@ -5,6 +5,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/discrete_ordinates_problem.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/preconditioning/lbs_shell_operations.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/vecops/lbs_vecops.h"
+#include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/iteration_logging.h"
 #include "framework/math/petsc_utils/petsc_utils.h"
 #include "framework/logging/log.h"
 #include "framework/runtime.h"
@@ -41,6 +42,27 @@ GetSchedulingAlgorithm(const std::string& sweep_type, bool use_gpu)
   }
   else
     throw std::runtime_error("Unsupported sweep scheduling algorithm: " + sweep_type + "\n");
+}
+
+void
+LogSweepSchedulerProfile(const SweepScheduler& scheduler, const LBSGroupset& groupset)
+{
+  const auto& profile = scheduler.GetProfile();
+  if (profile.sweeps == 0)
+    return;
+
+  std::stringstream out;
+  out << "sweep_scheduler profile groups [" << groupset.first_group << "-"
+      << groupset.last_group << "] sweeps=" << profile.sweeps;
+  AppendNumericField(out, "poll_s", profile.poll_seconds, Fixed(3));
+  AppendNumericField(out, "wait_s", profile.wait_seconds, Fixed(3));
+  out << ", kernel_launches = " << profile.kernel_launches;
+  out << ", ready_batches = " << profile.ready_batches;
+  out << ", ready_avg = "
+      << (profile.ready_batches > 0 ? profile.ready_total / profile.ready_batches : 0);
+  out << ", ready_max = " << profile.ready_max;
+  if (mpi_comm.rank() == 0)
+    std::cout << out.str() << std::endl;
 }
 
 } // namespace
@@ -151,6 +173,8 @@ SweepWGSContext::ApplyInverseTransportOperator(SourceFlags scope)
 void
 SweepWGSContext::PostSolveCallback()
 {
+  if (do_problem.UseGPUs() and do_problem.GetSweepType() == "AAH")
+    LogSweepSchedulerProfile(sweep_scheduler, groupset);
 
   // Perform final sweep with converged phi and delayed psi dofs. This step is necessary for
   // Krylov methods to recover the actual solution (this includes all of the PETSc methods

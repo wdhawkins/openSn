@@ -47,6 +47,17 @@ struct RuleValues
 class SweepScheduler
 {
 public:
+  struct Profile
+  {
+    double poll_seconds = 0.0;
+    double wait_seconds = 0.0;
+    std::size_t sweeps = 0;
+    std::size_t kernel_launches = 0;
+    std::size_t ready_batches = 0;
+    std::size_t ready_total = 0;
+    std::size_t ready_max = 0;
+  };
+
   SweepScheduler(SchedulingAlgorithm scheduler_type,
                  AngleAggregation& angle_agg,
                  SweepChunk& sweep_chunk);
@@ -54,6 +65,7 @@ public:
   void Sweep();
 
   void PrepareForSweep(bool use_boundary_source, bool zero_incoming_delayed_psi);
+  const Profile& GetProfile() const { return profile_; }
 
 private:
   /// Applies a first-in-first-out sweep scheduling.
@@ -83,6 +95,7 @@ private:
 
   SPMD_ThreadPool pool_;
   std::vector<std::size_t> execution_order_;
+  Profile profile_;
 };
 
 } // namespace opensn

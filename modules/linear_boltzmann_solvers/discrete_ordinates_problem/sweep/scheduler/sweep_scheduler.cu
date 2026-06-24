@@ -9,6 +9,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep_chunks/cbcd_sweep_chunk.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/discrete_ordinates_problem.h"
 #include "caribou/main.hpp"
+#include <chrono>
 #include <thread>
 #include <vector>
 
@@ -18,6 +19,9 @@ namespace opensn
 void
 SweepScheduler::ScheduleAlgoAAO(SweepChunk& sweep_chunk)
 {
+  using Clock = std::chrono::high_resolution_clock;
+  using Seconds = std::chrono::duration<double>;
+
   // copy phi and src moments to device
   auto aah_sweep_chunk = static_cast<AAHDSweepChunk&>(sweep_chunk);
   int groupset_id = angle_agg_.GetGroupsetID();
@@ -46,12 +50,15 @@ SweepScheduler::ScheduleAlgoAAO(SweepChunk& sweep_chunk)
   // poll for readiness and launch threads
   while (!execution_order_.empty())
   {
+    const auto poll_start = Clock::now();
+    std::size_t ready_count = 0;
     for (auto it = execution_order_.begin(); it != execution_order_.end();)
     {
       auto* angle_set = static_cast<AAHD_AngleSet*>(angle_agg_[*it].get());
       if (angle_set->IsReady())
       {
         pool_.Run(*it);
+        ++ready_count;
         std::swap(*it, execution_order_.back());
         execution_order_.pop_back();
       }
@@ -60,15 +67,26 @@ SweepScheduler::ScheduleAlgoAAO(SweepChunk& sweep_chunk)
         ++it;
       }
     }
+    profile_.poll_seconds += std::chrono::duration_cast<Seconds>(Clock::now() - poll_start).count();
+    if (ready_count > 0)
+    {
+      ++profile_.ready_batches;
+      profile_.ready_total += ready_count;
+      profile_.ready_max = std::max(profile_.ready_max, ready_count);
+      profile_.kernel_launches += ready_count;
+    }
   }
   pool_.WaitAll();
 
   // wait for sends and receive of delayed data
+  const auto wait_start = Clock::now();
   for (auto& angle_set : angle_agg_)
   {
     auto aahd_angle_set = static_cast<AAHD_AngleSet*>(angle_set.get());
     aahd_angle_set->WaitForDownstreamAndDelayed();
   }
+  profile_.wait_seconds += std::chrono::duration_cast<Seconds>(Clock::now() - wait_start).count();
+  ++profile_.sweeps;
 
   // copy boundary, phi and outflow data back to host
   aah_sweep_chunk.GetProblem().TransferDeviceBoundaryData(groupset_id, false);
