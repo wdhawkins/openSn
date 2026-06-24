@@ -5,6 +5,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/communicators/async_comm.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/communicators/aah_message_struct.h"
 #include "mpicpp-lite/mpicpp-lite.h"
+#include <atomic>
 #include <vector>
 
 namespace mpi = mpicpp_lite;
@@ -45,6 +46,11 @@ public:
 
   /// Send non-local outgoing psi.
   void SendDownstreamPsi(int angle_set_num, bool use_device_buffers = false);
+  void SendDownstreamPsi(int angle_set_num,
+                         bool use_device_buffers,
+                         std::atomic<long long>* message_count,
+                         std::atomic<long long>* total_doubles,
+                         std::atomic<long long>* max_message_doubles);
 
   /// Wait until all downstream messages have been sent.
   void WaitForDownstreamPsi();

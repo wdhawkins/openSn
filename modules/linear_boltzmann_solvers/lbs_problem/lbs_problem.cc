@@ -978,12 +978,20 @@ LBSProblem::InitializeMaterials()
                 block_id_to_xs_map_.end(),
                 [](const auto& mat_id_xs) { return mat_id_xs.second->GetNumPrecursors() > 0; });
 
-  if (options_.use_precursors and has_fissionable_material and not has_any_precursor_data)
+  if (options_.use_precursors and not has_fissionable_precursors)
   {
-    log.Log0Warning() << GetName()
-                      << ": options.use_precursors is enabled, but no precursor data was found "
-                         "in the active cross-section map. Running without delayed-neutron "
-                         "precursor coupling.";
+    if (has_fissionable_material and not has_any_precursor_data)
+      log.Log0Warning()
+        << GetName()
+        << ": options.use_precursors is enabled, but no precursor data was found in the active "
+           "cross-section map. Disabling delayed-neutron precursor coupling.";
+    else if (not has_fissionable_material)
+      log.Log0Verbose1()
+        << GetName()
+        << ": options.use_precursors is enabled, but no fissionable material is present. "
+           "Disabling delayed-neutron precursor coupling.";
+
+    options_.use_precursors = false;
   }
 
   // check compatibility when at least one fissionable material has delayed-neutron data

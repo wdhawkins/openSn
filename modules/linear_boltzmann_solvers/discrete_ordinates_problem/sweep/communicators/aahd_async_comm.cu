@@ -156,6 +156,16 @@ AAHD_ASynchronousCommunicator::WaitForDelayedIncomingPsi()
 void
 AAHD_ASynchronousCommunicator::SendDownstreamPsi(int angle_set_num, bool use_device_buffers)
 {
+  SendDownstreamPsi(angle_set_num, use_device_buffers, nullptr, nullptr, nullptr);
+}
+
+void
+AAHD_ASynchronousCommunicator::SendDownstreamPsi(int angle_set_num,
+                                                 bool use_device_buffers,
+                                                 std::atomic<long long>* message_count,
+                                                 std::atomic<long long>* total_doubles,
+                                                 std::atomic<long long>* max_message_doubles)
+{
 
   const auto& spds = fluds_.GetSPDS();
   const auto& location_successors = spds.GetLocationSuccessors();
@@ -176,6 +186,22 @@ AAHD_ASynchronousCommunicator::SendDownstreamPsi(int angle_set_num, bool use_dev
       {
         aahd_fluds->ValidateDeviceDeplocIOutgoingPsi(i, block_pos, size);
         buffer = aahd_fluds->DeviceDeplocIOutgoingPsi(i, block_pos);
+      }
+      if (message_count != nullptr)
+        message_count->fetch_add(1, std::memory_order_relaxed);
+      if (total_doubles != nullptr)
+        total_doubles->fetch_add(static_cast<long long>(size), std::memory_order_relaxed);
+      if (max_message_doubles != nullptr)
+      {
+        long long current_max = max_message_doubles->load(std::memory_order_relaxed);
+        const long long candidate = static_cast<long long>(size);
+        while (current_max < candidate and
+               not max_message_doubles->compare_exchange_weak(current_max,
+                                                              candidate,
+                                                              std::memory_order_relaxed,
+                                                              std::memory_order_relaxed))
+        {
+        }
       }
       deploc_msg_request_[req] = comm.isend(dest, tag, buffer, size);
     }

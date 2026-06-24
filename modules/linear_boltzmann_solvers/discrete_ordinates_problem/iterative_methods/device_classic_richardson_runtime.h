@@ -34,6 +34,9 @@ public:
     double send_copy_seconds = 0.0;
     double send_dependency_seconds = 0.0;
     double send_mpi_seconds = 0.0;
+    std::size_t send_message_count = 0;
+    std::size_t send_total_doubles = 0;
+    std::size_t send_max_message_doubles = 0;
     double finalize_seconds = 0.0;
     double wait_seconds = 0.0;
     double post_seconds = 0.0;

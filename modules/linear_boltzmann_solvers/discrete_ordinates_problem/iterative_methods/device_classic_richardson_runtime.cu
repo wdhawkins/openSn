@@ -688,6 +688,9 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
   std::atomic<long long> send_copy_time_ns{0};
   std::atomic<long long> send_dependency_time_ns{0};
   std::atomic<long long> send_mpi_time_ns{0};
+  std::atomic<long long> send_message_count{0};
+  std::atomic<long long> send_total_doubles{0};
+  std::atomic<long long> send_max_message_doubles{0};
   std::atomic<long long> finalize_time_ns{0};
   double poll_seconds = 0.0;
 
@@ -738,6 +741,9 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
        &send_copy_time_ns,
        &send_dependency_time_ns,
        &send_mpi_time_ns,
+       &send_message_count,
+       &send_total_doubles,
+       &send_max_message_doubles,
        &finalize_time_ns,
        final_download,
        download_delayed_psi](std::size_t)
@@ -754,7 +760,10 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
           angle_set->SendAfterFirstPass(use_device_buffers,
                                         &send_copy_time_ns,
                                         &send_dependency_time_ns,
-                                        &send_mpi_time_ns);
+                                        &send_mpi_time_ns,
+                                        &send_message_count,
+                                        &send_total_doubles,
+                                        &send_max_message_doubles);
           send_time_ns.fetch_add(duration_cast<nanoseconds>(Clock::now() - send_start).count(),
                                  std::memory_order_relaxed);
           const auto finalize_start = Clock::now();
@@ -810,6 +819,11 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
     sweep_profile_.send_dependency_seconds +=
       static_cast<double>(send_dependency_time_ns.load()) * 1.0e-9;
     sweep_profile_.send_mpi_seconds += static_cast<double>(send_mpi_time_ns.load()) * 1.0e-9;
+    sweep_profile_.send_message_count += static_cast<std::size_t>(send_message_count.load());
+    sweep_profile_.send_total_doubles += static_cast<std::size_t>(send_total_doubles.load());
+    sweep_profile_.send_max_message_doubles = std::max(
+      sweep_profile_.send_max_message_doubles,
+      static_cast<std::size_t>(send_max_message_doubles.load()));
     sweep_profile_.finalize_seconds += static_cast<double>(finalize_time_ns.load()) * 1.0e-9;
     sweep_profile_.wait_seconds += wait_seconds;
     sweep_profile_.post_seconds += post_seconds;

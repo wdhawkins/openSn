@@ -84,6 +84,11 @@ LogSweepProfileIfEnabled(const DeviceClassicRichardsonRuntime& runtime, const LB
   AppendNumericField(out, "send_copy_s", profile.send_copy_seconds, Fixed(3));
   AppendNumericField(out, "send_dep_s", profile.send_dependency_seconds, Fixed(3));
   AppendNumericField(out, "send_mpi_s", profile.send_mpi_seconds, Fixed(3));
+  out << ", send_msgs = " << profile.send_message_count;
+  out << ", send_avg_doubles = "
+      << (profile.send_message_count > 0 ? profile.send_total_doubles / profile.send_message_count
+                                         : 0);
+  out << ", send_max_doubles = " << profile.send_max_message_doubles;
   AppendNumericField(out, "finalize_s", profile.finalize_seconds, Fixed(3));
   AppendNumericField(out, "wait_s", profile.wait_seconds, Fixed(3));
   AppendNumericField(out, "post_s", profile.post_seconds, Fixed(3));

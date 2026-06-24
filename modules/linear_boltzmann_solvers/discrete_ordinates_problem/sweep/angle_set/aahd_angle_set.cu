@@ -88,14 +88,17 @@ AAHD_AngleSet::SweepKernelAndSync(SweepChunk& sweep_chunk, bool incoming_psi_on_
 void
 AAHD_AngleSet::SendAfterFirstPass(bool use_device_buffers)
 {
-  SendAfterFirstPass(use_device_buffers, nullptr, nullptr, nullptr);
+  SendAfterFirstPass(use_device_buffers, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
 }
 
 void
 AAHD_AngleSet::SendAfterFirstPass(bool use_device_buffers,
                                   std::atomic<long long>* copy_time_ns,
                                   std::atomic<long long>* dependency_time_ns,
-                                  std::atomic<long long>* mpi_send_time_ns)
+                                  std::atomic<long long>* mpi_send_time_ns,
+                                  std::atomic<long long>* message_count,
+                                  std::atomic<long long>* total_doubles,
+                                  std::atomic<long long>* max_message_doubles)
 {
   using Clock = std::chrono::high_resolution_clock;
 
@@ -126,10 +129,18 @@ AAHD_AngleSet::SendAfterFirstPass(bool use_device_buffers,
   if (use_device_buffers)
   {
     std::scoped_lock lk(m);
-    async_comm_.SendDownstreamPsi(static_cast<int>(this->GetID()), use_device_buffers);
+    async_comm_.SendDownstreamPsi(static_cast<int>(this->GetID()),
+                                  use_device_buffers,
+                                  message_count,
+                                  total_doubles,
+                                  max_message_doubles);
   }
   else
-    async_comm_.SendDownstreamPsi(static_cast<int>(this->GetID()), use_device_buffers);
+    async_comm_.SendDownstreamPsi(static_cast<int>(this->GetID()),
+                                  use_device_buffers,
+                                  message_count,
+                                  total_doubles,
+                                  max_message_doubles);
   if (mpi_send_time_ns != nullptr)
     mpi_send_time_ns->fetch_add(
       std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - mpi_send_start).count(),
