@@ -37,6 +37,11 @@ public:
     double batch_send_wall_seconds = 0.0;
     double batch_finalize_wall_seconds = 0.0;
     std::size_t kernel_launch_count = 0;
+    std::size_t actual_kernel_launch_count = 0;
+    std::size_t total_levels = 0;
+    std::size_t max_levels_per_angle_set = 0;
+    std::size_t total_level_cells = 0;
+    std::size_t max_level_cells = 0;
     std::size_t ready_batch_count = 0;
     std::size_t ready_batch_total_size = 0;
     std::size_t ready_batch_max_size = 0;

@@ -18,6 +18,24 @@ namespace crb = caribou;
 namespace opensn
 {
 
+namespace
+{
+
+void
+AtomicStoreMax(std::atomic<std::size_t>& target, std::size_t value)
+{
+  auto current = target.load(std::memory_order_relaxed);
+  while (current < value and
+         not target.compare_exchange_weak(current,
+                                          value,
+                                          std::memory_order_relaxed,
+                                          std::memory_order_relaxed))
+  {
+  }
+}
+
+} // namespace
+
 AAHDSweepChunk::AAHDSweepChunk(DiscreteOrdinatesProblem& problem, LBSGroupset& groupset)
   : SweepChunk(problem.GetPhiNewLocal(),
                problem.GetPsiNewLocal()[groupset.id],
@@ -49,6 +67,10 @@ AAHDSweepChunk::Sweep(AngleSet& angle_set)
   // retrieve SPDS levels
   const auto& spds = static_cast<const AAH_SPDS&>(aahd_angle_set.GetSPDS());
   const auto& levelized_spls = spds.GetLevelizedLocalSubgrid();
+  const auto levels_in_angle_set = levelized_spls.size();
+  angle_set_sweep_count_.fetch_add(1, std::memory_order_relaxed);
+  total_level_count_.fetch_add(levels_in_angle_set, std::memory_order_relaxed);
+  AtomicStoreMax(max_levels_per_angle_set_, levels_in_angle_set);
   // compute block size
   unsigned int stride_size =
     gpu_kernel::RoundUp(static_cast<unsigned int>(args.flud_data.stride_size));
@@ -60,6 +82,9 @@ AAHDSweepChunk::Sweep(AngleSet& angle_set)
   {
     // compute grid size
     std::size_t level_size = levelized_spls[level].size();
+    actual_kernel_launch_count_.fetch_add(1, std::memory_order_relaxed);
+    total_level_cell_count_.fetch_add(level_size, std::memory_order_relaxed);
+    AtomicStoreMax(max_level_cell_count_, level_size);
     unsigned int grid_size_y = (level_size + block_size_y - 1) / block_size_y;
     crb::Dim3 grid_size(grid_size_x, grid_size_y);
     // perform the sweep on device
@@ -76,6 +101,28 @@ AAHDSweepChunk::Sweep(AngleSet& angle_set)
                         });
 #endif
   }
+}
+
+void
+AAHDSweepChunk::ResetLaunchProfile()
+{
+  angle_set_sweep_count_.store(0, std::memory_order_relaxed);
+  actual_kernel_launch_count_.store(0, std::memory_order_relaxed);
+  total_level_count_.store(0, std::memory_order_relaxed);
+  max_levels_per_angle_set_.store(0, std::memory_order_relaxed);
+  total_level_cell_count_.store(0, std::memory_order_relaxed);
+  max_level_cell_count_.store(0, std::memory_order_relaxed);
+}
+
+AAHDSweepChunk::LaunchProfile
+AAHDSweepChunk::GetLaunchProfile() const
+{
+  return {.angle_set_sweeps = angle_set_sweep_count_.load(std::memory_order_relaxed),
+          .actual_kernel_launches = actual_kernel_launch_count_.load(std::memory_order_relaxed),
+          .total_levels = total_level_count_.load(std::memory_order_relaxed),
+          .max_levels_per_angle_set = max_levels_per_angle_set_.load(std::memory_order_relaxed),
+          .total_level_cells = total_level_cell_count_.load(std::memory_order_relaxed),
+          .max_level_cells = max_level_cell_count_.load(std::memory_order_relaxed)};
 }
 
 } // namespace opensn

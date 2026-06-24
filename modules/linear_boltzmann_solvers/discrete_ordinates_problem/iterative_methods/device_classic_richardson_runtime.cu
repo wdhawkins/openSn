@@ -682,6 +682,7 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
 #else
   constexpr bool use_device_buffers = false;
 #endif
+  sweep_chunk_->ResetLaunchProfile();
   constexpr bool delayed_psi_on_device = true;
   const bool download_delayed_psi = final_download;
   std::atomic<long long> incoming_copy_time_ns{0};
@@ -845,6 +846,8 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
       static_cast<AAHD_FLUDS*>(&angle_set->GetFLUDS())->UploadDelayedIncomingPsiCurrentToDevice();
   }
 
+  const auto launch_profile = sweep_chunk_->GetLaunchProfile();
+
   double local_max_change = 0.0;
   for (auto* angle_set : angle_sets_)
   {
@@ -879,6 +882,13 @@ DeviceClassicRichardsonRuntime::ExecuteSweepPass(bool final_download)
     sweep_profile_.batch_send_wall_seconds += batch_send_wall_seconds;
     sweep_profile_.batch_finalize_wall_seconds += batch_finalize_wall_seconds;
     sweep_profile_.kernel_launch_count += static_cast<std::size_t>(kernel_launch_count.load());
+    sweep_profile_.actual_kernel_launch_count += launch_profile.actual_kernel_launches;
+    sweep_profile_.total_levels += launch_profile.total_levels;
+    sweep_profile_.max_levels_per_angle_set =
+      std::max(sweep_profile_.max_levels_per_angle_set, launch_profile.max_levels_per_angle_set);
+    sweep_profile_.total_level_cells += launch_profile.total_level_cells;
+    sweep_profile_.max_level_cells =
+      std::max(sweep_profile_.max_level_cells, launch_profile.max_level_cells);
     sweep_profile_.ready_batch_count += ready_batch_count;
     sweep_profile_.ready_batch_total_size += ready_batch_total_size;
     sweep_profile_.ready_batch_max_size =

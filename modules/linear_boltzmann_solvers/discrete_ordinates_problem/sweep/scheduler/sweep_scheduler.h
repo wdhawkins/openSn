@@ -53,6 +53,11 @@ public:
     double wait_seconds = 0.0;
     std::size_t sweeps = 0;
     std::size_t kernel_launches = 0;
+    std::size_t actual_kernel_launches = 0;
+    std::size_t total_levels = 0;
+    std::size_t max_levels_per_angle_set = 0;
+    std::size_t total_level_cells = 0;
+    std::size_t max_level_cells = 0;
     std::size_t ready_batches = 0;
     std::size_t ready_total = 0;
     std::size_t ready_max = 0;

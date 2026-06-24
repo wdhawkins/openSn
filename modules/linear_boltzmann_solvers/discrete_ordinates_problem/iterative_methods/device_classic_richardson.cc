@@ -88,6 +88,15 @@ LogSweepProfileIfEnabled(const DeviceClassicRichardsonRuntime& runtime, const LB
   AppendNumericField(
     out, "batch_finalize_wall_s", profile.batch_finalize_wall_seconds, Fixed(3));
   out << ", kernel_launches = " << profile.kernel_launch_count;
+  out << ", actual_kernel_launches = " << profile.actual_kernel_launch_count;
+  out << ", levels_per_angleset_avg = "
+      << (profile.kernel_launch_count > 0 ? profile.total_levels / profile.kernel_launch_count : 0);
+  out << ", levels_per_angleset_max = " << profile.max_levels_per_angle_set;
+  out << ", level_cells_avg = "
+      << (profile.actual_kernel_launch_count > 0
+            ? profile.total_level_cells / profile.actual_kernel_launch_count
+            : 0);
+  out << ", level_cells_max = " << profile.max_level_cells;
   out << ", ready_batches = " << profile.ready_batch_count;
   out << ", ready_avg = "
       << (profile.ready_batch_count > 0 ? profile.ready_batch_total_size / profile.ready_batch_count

@@ -57,6 +57,15 @@ LogSweepSchedulerProfile(const SweepScheduler& scheduler, const LBSGroupset& gro
   AppendNumericField(out, "poll_s", profile.poll_seconds, Fixed(3));
   AppendNumericField(out, "wait_s", profile.wait_seconds, Fixed(3));
   out << ", kernel_launches = " << profile.kernel_launches;
+  out << ", actual_kernel_launches = " << profile.actual_kernel_launches;
+  out << ", levels_per_angleset_avg = "
+      << (profile.kernel_launches > 0 ? profile.total_levels / profile.kernel_launches : 0);
+  out << ", levels_per_angleset_max = " << profile.max_levels_per_angle_set;
+  out << ", level_cells_avg = "
+      << (profile.actual_kernel_launches > 0
+            ? profile.total_level_cells / profile.actual_kernel_launches
+            : 0);
+  out << ", level_cells_max = " << profile.max_level_cells;
   out << ", ready_batches = " << profile.ready_batches;
   out << ", ready_avg = "
       << (profile.ready_batches > 0 ? profile.ready_total / profile.ready_batches : 0);
