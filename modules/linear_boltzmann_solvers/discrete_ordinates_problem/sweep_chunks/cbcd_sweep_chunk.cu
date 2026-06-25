@@ -64,14 +64,15 @@ CBCDSweepChunk::Sweep(const std::vector<std::uint32_t>& cell_local_ids, std::siz
   auto* host_cell_local_ids_data = host_cell_local_ids.data();
 #if defined(__NVCC__) || defined(__HIPCC__)
   gpu_kernel::SweepKernel<gpu_kernel::SweepType::CBC><<<grid_size, block_size, 0, stream>>>(
-    args, host_cell_local_ids_data, num_ready_cells, device_saved_psi);
+    args, host_cell_local_ids_data, num_ready_cells, nullptr, nullptr, 0, device_saved_psi);
 #elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
   stream.synchronize();
   stream.parallel_for(sycl::nd_range<3>(grid_size * block_size, block_size),
                       [=](sycl::nd_item<3> work_index)
                       {
                         gpu_kernel::SweepKernel<gpu_kernel::SweepType::CBC>(
-                          args, host_cell_local_ids_data, num_ready_cells, device_saved_psi);
+                          args, host_cell_local_ids_data, num_ready_cells, nullptr, nullptr, 0,
+                          device_saved_psi);
                       });
 #endif
 }

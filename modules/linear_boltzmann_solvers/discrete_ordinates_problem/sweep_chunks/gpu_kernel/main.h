@@ -53,6 +53,9 @@ __CRB_GLOBAL_FUNC__ void
 SweepKernel(Arguments<t> args,
             const std::uint32_t* cells_to_sweep,
             unsigned int num_cells,
+            const std::uint64_t* level_node_data,
+            const std::uint32_t* level_cell_starts,
+            std::uint32_t level_abs_start,
             double* saved_psi)
 {
 #if defined(__NVCC__) || defined(__HIPCC__)
@@ -72,7 +75,16 @@ SweepKernel(Arguments<t> args,
   MeshView(args.mesh_data).GetCellView(cell, cell_local_idx);
   if (cell.num_nodes == 0)
     return;
-  auto [cell_edge_data, _] = GetCellDataIndex(args.flud_index, cell_local_idx);
+  // Use level-traversal-ordered face node data when available (sequential access pattern),
+  // falling back to the scattered global-order index for non-level-kernel paths.
+  const std::uint64_t* cell_edge_data;
+  if (level_node_data != nullptr)
+    cell_edge_data = level_node_data + level_cell_starts[level_abs_start + cell_idx];
+  else
+  {
+    auto [ced, ignored] = GetCellDataIndex(args.flud_index, cell_local_idx);
+    cell_edge_data = ced;
+  }
   std::uint32_t num_moments;
   std::uint32_t direction_num = args.directions[angle_idx];
   DirectionView direction;

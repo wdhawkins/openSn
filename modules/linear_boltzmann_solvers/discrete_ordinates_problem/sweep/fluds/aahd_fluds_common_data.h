@@ -11,6 +11,7 @@
 #include <limits>
 #include <map>
 #include <stdexcept>
+#include <vector>
 
 namespace opensn
 {
@@ -77,6 +78,12 @@ public:
 
   /// Get pointer to indexes on device.
   const std::uint64_t* GetDeviceIndex() const { return device_node_indexes_; }
+  /// Get pointer to level-traversal-ordered face node data on device.
+  const std::uint64_t* GetDeviceLevelNodeData() const { return device_level_node_data_; }
+  /// Get pointer to per-absolute-cell start indices into level node data on device.
+  const std::uint32_t* GetDeviceLevelCellStarts() const { return device_level_cell_starts_; }
+  /// Get the absolute cell index at the start of the given sweep level.
+  std::uint32_t GetLevelAbsStart(std::size_t level) const { return level_abs_starts_[level]; }
 
   /// Append an associated angle set pointer.
   void AddAssociatedAngleSet(AAHD_AngleSet* as) const { associated_anglesets_.push_back(as); }
@@ -117,8 +124,15 @@ protected:
 
   /// \name Device storage for node indexes
   /// \{
-  /// Device storage for node indexes.
+  /// Device storage for node indexes (global cell order).
   std::uint64_t* device_node_indexes_ = nullptr;
+  /// Device storage for face node indices in level-traversal order.
+  std::uint64_t* device_level_node_data_ = nullptr;
+  /// Device storage: start position in device_level_node_data_ for each absolute cell (level order).
+  std::uint32_t* device_level_cell_starts_ = nullptr;
+  /// Host-side cumulative cell counts per level: level_abs_starts_[L] is the start index of
+  /// level L's cells in device_level_cell_starts_.
+  std::vector<std::uint32_t> level_abs_starts_;
   /// Construct flatten node index structure and copy it to device.
   void CopyFlattenNodeIndexToDevice(const SpatialDiscretization& sdm);
   /// \}

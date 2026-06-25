@@ -129,6 +129,50 @@ AAHD_FLUDSCommonData::CopyFlattenNodeIndexToDevice(const SpatialDiscretization& 
   crb::copy(device_mem_ptr, cell_offset, cell_offset.size());
   crb::copy(device_mem_ptr, data, data.size(), 0, cell_offset.size());
   device_node_indexes_ = device_mem_ptr.release();
+
+  // Build level-traversal-ordered face node data for cache-friendly kernel access.
+  // Within each level, cells are stored in sweep-dependency order, so sequential reads
+  // of level_cell_starts[level_abs_start + cell_idx] hit the same cache lines for
+  // the 100+ cells processed by a level kernel.
+  const auto& topo_levels = spds_.GetLevelizedLocalSubgrid();
+  crb::HostVector<std::uint64_t> level_node_data_host;
+  crb::HostVector<std::uint32_t> level_cell_starts_host;
+  level_abs_starts_.clear();
+  std::uint32_t abs_cell = 0;
+  for (const auto& level : topo_levels)
+  {
+    level_abs_starts_.push_back(abs_cell);
+    for (const std::uint32_t cell_local_idx : level)
+    {
+      level_cell_starts_host.push_back(static_cast<std::uint32_t>(level_node_data_host.size()));
+      const Cell& cell2 = grid.local_cells[cell_local_idx];
+      for (std::uint32_t f = 0; f < cell2.faces.size(); ++f)
+      {
+        const std::uint32_t nfn = sdm.GetCellMapping(cell2).GetNumFaceNodes(f);
+        for (std::uint32_t fnode = 0; fnode < nfn; ++fnode)
+        {
+          FaceNode fn(cell_local_idx, f, fnode);
+          level_node_data_host.push_back(node_tracker_.at(fn).GetCoreValue());
+        }
+      }
+      ++abs_cell;
+    }
+  }
+  level_abs_starts_.push_back(abs_cell);
+  level_cell_starts_host.push_back(static_cast<std::uint32_t>(level_node_data_host.size()));
+
+  if (!level_node_data_host.empty())
+  {
+    crb::DeviceMemory<std::uint64_t> lnd(level_node_data_host.size());
+    crb::copy(lnd, level_node_data_host, level_node_data_host.size());
+    device_level_node_data_ = lnd.release();
+  }
+  if (!level_cell_starts_host.empty())
+  {
+    crb::DeviceMemory<std::uint32_t> lcs(level_cell_starts_host.size());
+    crb::copy(lcs, level_cell_starts_host, level_cell_starts_host.size());
+    device_level_cell_starts_ = lcs.release();
+  }
 }
 
 void
@@ -139,6 +183,18 @@ AAHD_FLUDSCommonData::DeallocateDeviceMemory()
     crb::DeviceMemory<std::uint64_t> device_mem_ptr(device_node_indexes_);
     device_mem_ptr.reset();
     device_node_indexes_ = nullptr;
+  }
+  if (device_level_node_data_)
+  {
+    crb::DeviceMemory<std::uint64_t> p(device_level_node_data_);
+    p.reset();
+    device_level_node_data_ = nullptr;
+  }
+  if (device_level_cell_starts_)
+  {
+    crb::DeviceMemory<std::uint32_t> p(device_level_cell_starts_);
+    p.reset();
+    device_level_cell_starts_ = nullptr;
   }
 }
 
