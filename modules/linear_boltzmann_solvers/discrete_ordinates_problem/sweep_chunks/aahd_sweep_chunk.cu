@@ -54,6 +54,17 @@ GetAAHSweepThreadBudget()
 #endif
 }
 
+#if defined(__NVCC__) || defined(__HIPCC__)
+bool
+UseGraphSweep()
+{
+  const char* env =
+    std::getenv("OPENSN_AAH_GRAPH_SWEEP"); // NOLINT(concurrency-mt-unsafe)
+  // Enabled by default; set OPENSN_AAH_GRAPH_SWEEP=0 to disable
+  return env == nullptr || env[0] != '0' || env[1] != '\0';
+}
+#endif
+
 } // namespace
 
 AAHDSweepChunk::AAHDSweepChunk(DiscreteOrdinatesProblem& problem, LBSGroupset& groupset)
@@ -74,27 +85,84 @@ AAHDSweepChunk::AAHDSweepChunk(DiscreteOrdinatesProblem& problem, LBSGroupset& g
 {
 }
 
+AAHDSweepChunk::~AAHDSweepChunk()
+{
+#if defined(__NVCC__) || defined(__HIPCC__)
+  for (auto& [aset, graph_exec] : sweep_graphs_)
+  {
+    if (graph_exec != nullptr)
+      GPU_API(GraphExecDestroy)(graph_exec);
+  }
+#endif
+}
+
 void
 AAHDSweepChunk::Sweep(AngleSet& angle_set)
 {
-  // prepare arguments
   auto& aahd_angle_set = static_cast<AAHD_AngleSet&>(angle_set);
   auto& fluds = static_cast<AAHD_FLUDS&>(aahd_angle_set.GetFLUDS());
   auto& stream = aahd_angle_set.GetStream();
-  gpu_kernel::Arguments<gpu_kernel::SweepType::AAH> args(
-    problem_, groupset_, aahd_angle_set, fluds, surface_source_active_);
-  double* saved_psi = fluds.GetSavedAngularFluxDevicePointer();
-  // retrieve SPDS levels and precomputed level-sorted FLUDS data
+
   const auto& spds = static_cast<const AAH_SPDS&>(aahd_angle_set.GetSPDS());
   const auto& levelized_spls = spds.GetLevelizedLocalSubgrid();
-  const auto& common_data = fluds.GetCommonData();
-  const std::uint64_t* level_node_data = common_data.GetDeviceLevelNodeData();
-  const std::uint32_t* level_cell_starts = common_data.GetDeviceLevelCellStarts();
   const auto levels_in_angle_set = levelized_spls.size();
+
   angle_set_sweep_count_.fetch_add(1, std::memory_order_relaxed);
   total_level_count_.fetch_add(levels_in_angle_set, std::memory_order_relaxed);
   AtomicStoreMax(max_levels_per_angle_set_, levels_in_angle_set);
-  // compute block size
+
+#if defined(__NVCC__) || defined(__HIPCC__)
+  // graph_capture_started tracks whether this invocation called StreamBeginCapture
+  // so the matching StreamEndCapture is only called from the same invocation.
+  bool graph_capture_started = false;
+  if (UseGraphSweep())
+  {
+    GPU_API(GraphExec_t) existing_graph = nullptr;
+    bool first_call = false;
+    {
+      std::lock_guard<std::mutex> lock(graph_mutex_);
+      auto it = sweep_graphs_.find(&aahd_angle_set);
+      if (it != sweep_graphs_.end())
+        existing_graph = it->second;
+      else
+      {
+        sweep_graphs_[&aahd_angle_set] = nullptr; // sentinel: capture in progress
+        first_call = true;
+      }
+    }
+
+    if (existing_graph != nullptr)
+    {
+      // Fast path: replay captured graph with a single dispatch.
+      for (std::uint32_t level = 0; level < levels_in_angle_set; ++level)
+      {
+        const std::size_t level_size = levelized_spls[level].size();
+        actual_kernel_launch_count_.fetch_add(1, std::memory_order_relaxed);
+        total_level_cell_count_.fetch_add(level_size, std::memory_order_relaxed);
+        AtomicStoreMax(max_level_cell_count_, level_size);
+      }
+      GPU_API(GraphLaunch)(existing_graph, static_cast<GPU_API(Stream_t)>(stream));
+      return;
+    }
+
+    if (first_call)
+    {
+      GPU_API(StreamBeginCapture)(static_cast<GPU_API(Stream_t)>(stream),
+                                  GPU_API(StreamCaptureModeRelaxed));
+      graph_capture_started = true;
+    }
+  }
+#endif
+
+  // Level loop — runs in normal execution mode OR in graph-capture mode.
+  // During capture the kernel launches are recorded but not executed;
+  // a GraphLaunch at the end of this function performs the actual execution.
+  gpu_kernel::Arguments<gpu_kernel::SweepType::AAH> args(
+    problem_, groupset_, aahd_angle_set, fluds, surface_source_active_);
+  double* saved_psi = fluds.GetSavedAngularFluxDevicePointer();
+  const auto& common_data = fluds.GetCommonData();
+  const std::uint64_t* level_node_data = common_data.GetDeviceLevelNodeData();
+  const std::uint32_t* level_cell_starts = common_data.GetDeviceLevelCellStarts();
   const unsigned int thread_budget = GetAAHSweepThreadBudget();
   unsigned int stride_size =
     gpu_kernel::RoundUp(static_cast<unsigned int>(args.flud_data.stride_size));
@@ -104,14 +172,12 @@ AAHDSweepChunk::Sweep(AngleSet& angle_set)
   unsigned int grid_size_x = (stride_size + thread_budget - 1) / thread_budget;
   for (std::uint32_t level = 0; level < levelized_spls.size(); ++level)
   {
-    // compute grid size
     std::size_t level_size = levelized_spls[level].size();
     actual_kernel_launch_count_.fetch_add(1, std::memory_order_relaxed);
     total_level_cell_count_.fetch_add(level_size, std::memory_order_relaxed);
     AtomicStoreMax(max_level_cell_count_, level_size);
     unsigned int grid_size_y = (level_size + block_size_y - 1) / block_size_y;
     crb::Dim3 grid_size(grid_size_x, grid_size_y);
-    // perform the sweep on device
     const std::uint32_t* level_data = spds.GetDeviceLevelVector(level);
     const auto level_abs_start = common_data.GetLevelAbsStart(level);
 #if defined(__NVCC__) || defined(__HIPCC__)
@@ -138,6 +204,24 @@ AAHDSweepChunk::Sweep(AngleSet& angle_set)
                         });
 #endif
   }
+
+#if defined(__NVCC__) || defined(__HIPCC__)
+  if (graph_capture_started)
+  {
+    GPU_API(Stream_t) sh = static_cast<GPU_API(Stream_t)>(stream);
+    GPU_API(Graph_t) graph;
+    GPU_API(StreamEndCapture)(sh, &graph);
+    GPU_API(GraphExec_t) graph_exec = nullptr;
+    GPU_API(GraphInstantiate)(&graph_exec, graph, nullptr, nullptr, 0);
+    GPU_API(GraphDestroy)(graph);
+    {
+      std::lock_guard<std::mutex> lock(graph_mutex_);
+      sweep_graphs_[&aahd_angle_set] = graph_exec;
+    }
+    // First sweep pass: execute the captured sequence via a single graph dispatch.
+    GPU_API(GraphLaunch)(graph_exec, sh);
+  }
+#endif
 }
 
 void
