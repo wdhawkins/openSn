@@ -50,6 +50,20 @@ public:
     return device_levelized_spls_ + contiguous_offset_[level];
   }
 
+  /// Base pointer of the flat contiguous level-cell array on device.
+  const std::uint32_t* GetDeviceLevelFlat() const { return device_levelized_spls_; }
+  /// Per-level offsets (prefix sums of level sizes) on device.
+  const std::uint32_t* GetDeviceLevelOffsets() const { return device_level_offsets_; }
+  /// Per-level cell counts on device.
+  const std::uint32_t* GetDeviceLevelSizes() const { return device_level_sizes_; }
+  /// Maximum cell count across all levels.
+  std::uint32_t GetMaxLevelSize() const { return max_level_size_; }
+  /// Number of levels in this SPDS.
+  std::uint32_t GetNumLevels() const
+  {
+    return static_cast<std::uint32_t>(levelized_spls_.size());
+  }
+
   /// Returns the global sweep FAS as a vector of edges.
   std::vector<int> GetGlobalSweepFAS() { return global_sweep_fas_; }
 
@@ -86,8 +100,14 @@ private:
   std::vector<double> global_edge_weights_;
   /// Levelized SPLS structure on GPU (only visible to GPU implementation).
   std::uint32_t* device_levelized_spls_ = nullptr;
-  /// Per-level offset into the contiguous level data.
+  /// Per-level offset into the contiguous level data (host, uint64 for large meshes).
   std::vector<std::uint64_t> contiguous_offset_;
+  /// Per-level offsets as uint32 on device (same values as contiguous_offset_).
+  std::uint32_t* device_level_offsets_ = nullptr;
+  /// Per-level cell counts on device.
+  std::uint32_t* device_level_sizes_ = nullptr;
+  /// Maximum cell count across all levels.
+  std::uint32_t max_level_size_ = 0;
 };
 
 } // namespace opensn
