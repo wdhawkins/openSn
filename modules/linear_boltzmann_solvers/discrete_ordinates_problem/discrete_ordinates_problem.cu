@@ -14,6 +14,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep_chunks/cbcd_sweep_chunk.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/device/device_vector_mirror.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/outflow/outflow_carrier.h"
+#include <thread>
 
 namespace opensn
 {
@@ -50,14 +51,45 @@ DiscreteOrdinatesProblem::ResetBoundaryCarrier()
 void
 DiscreteOrdinatesProblem::CreateAAHD_FLUDSCommonData()
 {
-  for (const auto& [quadrature, spds_list] : quadrature_spds_map_)
+  // Flatten to a vector so we can use the strided thread pattern.
+  // AAHD_FLUDSCommonData constructor is pure CPU (no CUDA API); device copy is deferred to
+  // UpdateBoundaryAndSyncWithDevice. All inputs (spds, grid_nodal_mappings_, discretization_)
+  // are read-only from multiple threads.
+  struct Work
   {
+    std::shared_ptr<AngularQuadrature> quadrature;
+    SPDS* spds;
+  };
+  std::vector<Work> work;
+  for (const auto& [quadrature, spds_list] : quadrature_spds_map_)
     for (const auto& spds : spds_list)
-    {
-      quadrature_fluds_commondata_map_[quadrature].push_back(
-        std::make_unique<AAHD_FLUDSCommonData>(*spds, grid_nodal_mappings_, *discretization_));
-    }
+      work.push_back({quadrature, spds.get()});
+
+  const size_t n = work.size();
+  std::vector<std::unique_ptr<AAHD_FLUDSCommonData>> flat(n);
+  {
+    const size_t nthreads = std::min<size_t>(std::max(1U, opensn_num_threads), n);
+    std::vector<std::thread> workers;
+    workers.reserve(nthreads - 1);
+    for (size_t tid = 1; tid < nthreads; ++tid)
+      workers.emplace_back(
+        [&, tid]()
+        {
+          for (size_t i = tid; i < n; i += nthreads)
+            flat[i] = std::make_unique<AAHD_FLUDSCommonData>(
+              *work[i].spds, grid_nodal_mappings_, *discretization_);
+        });
+    for (size_t i = 0; i < n; i += nthreads)
+      flat[i] =
+        std::make_unique<AAHD_FLUDSCommonData>(*work[i].spds, grid_nodal_mappings_, *discretization_);
+    for (auto& w : workers)
+      w.join();
   }
+
+  size_t idx = 0;
+  for (const auto& [quadrature, spds_list] : quadrature_spds_map_)
+    for (size_t j = 0; j < spds_list.size(); ++j)
+      quadrature_fluds_commondata_map_[quadrature].push_back(std::move(flat[idx++]));
 }
 
 void

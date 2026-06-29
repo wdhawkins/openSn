@@ -22,6 +22,11 @@ AAH_FLUDSCommonData::AAH_FLUDSCommonData(
   : FLUDSCommonData(spds, grid_nodal_mappings)
 {
   this->InitializeAlphaElements(spds, grid_face_histogram);
+}
+
+void
+AAH_FLUDSCommonData::FinalizeBeta(const SPDS& spds)
+{
   this->InitializeBetaElements(spds); // NOLINT
 }
 
@@ -45,6 +50,7 @@ AAH_FLUDSCommonData::InitializeAlphaElements(const SPDS& spds,
   size_t num_of_deplocs = spds.GetLocationSuccessors().size();
   deplocI_face_dof_count_.resize(num_of_deplocs, 0);
   deplocI_cell_views_.resize(num_of_deplocs);
+  deplocI_cell_idx_.resize(num_of_deplocs);
 
   // PERFORM SLOT DYNAMICS
   // Loop over cells in sweep order
@@ -74,7 +80,6 @@ AAH_FLUDSCommonData::InitializeAlphaElements(const SPDS& spds,
   } // for csoi
 
   log.Log(Logger::LOG_LVL::LOG_0VERBOSE_2) << "Done with Slot Dynamics.";
-  opensn::mpi_comm.barrier();
 
   // PERFORM INCIDENT MAPPING
   // Loop over cells in sweep order
@@ -101,7 +106,6 @@ AAH_FLUDSCommonData::InitializeAlphaElements(const SPDS& spds,
   delayed_local_psi_Gn_block_strideG_ = delayed_local_psi_Gn_block_stride_ * /*G=*/1;
 
   log.Log(Logger::LOG_LVL::LOG_0VERBOSE_2) << "Done with Local Incidence mapping.";
-  opensn::mpi_comm.barrier();
 
   // Clean up
   so_cell_outb_face_slot_indices_.shrink_to_fit();
@@ -284,27 +288,20 @@ AAH_FLUDSCommonData::AddFaceViewToDepLocI(int deplocI,
                                           uint64_t face_slot,
                                           const CellFace& face)
 {
-
-  // Check if cell is already there
-  bool cell_already_there = false;
-  for (auto& cell_view : deplocI_cell_views_[deplocI])
+  auto& idx_map = deplocI_cell_idx_[deplocI];
+  auto it = idx_map.find(cell_g_index);
+  if (it != idx_map.end())
   {
-    if (cell_view.first == cell_g_index)
-    {
-      cell_already_there = true;
-      cell_view.second.emplace_back(face_slot, face.vertex_ids);
-      break;
-    }
+    deplocI_cell_views_[deplocI][it->second].second.emplace_back(face_slot, face.vertex_ids);
   }
-
-  // If the cell is not there yet
-  if (not cell_already_there)
+  else
   {
+    const size_t pos = deplocI_cell_views_[deplocI].size();
     CompactCellView new_cell_view;
     new_cell_view.first = cell_g_index;
     new_cell_view.second.emplace_back(face_slot, face.vertex_ids);
-
-    deplocI_cell_views_[deplocI].push_back(new_cell_view);
+    deplocI_cell_views_[deplocI].push_back(std::move(new_cell_view));
+    idx_map.emplace(cell_g_index, pos);
   }
 }
 
@@ -478,9 +475,17 @@ AAH_FLUDSCommonData::InitializeBetaElements(const SPDS& spds, int tag_index /*=0
   multi_face_indices.clear();
   multi_face_indices.shrink_to_fit();
 
-  // In the next process we loop over cells in the sweep order and perform
-  // the non-local face mappings. This is dependent on having the compact
-  // cellviews on the partition interfaces.
+  // Build O(1) lookup tables: cell global_id → index in *_cell_views_[prelocI].
+  // Without these the linear scan inside NonLocalIncidentMapping is O(N_boundary²).
+  std::vector<std::unordered_map<uint64_t, int>> prelocI_idx(prelocI_cell_views_.size());
+  for (size_t pi = 0; pi < prelocI_cell_views_.size(); ++pi)
+    for (int c = 0; c < static_cast<int>(prelocI_cell_views_[pi].size()); ++c)
+      prelocI_idx[pi].emplace(prelocI_cell_views_[pi][c].first, c);
+
+  std::vector<std::unordered_map<uint64_t, int>> dprelocI_idx(delayed_prelocI_cell_views_.size());
+  for (size_t pi = 0; pi < delayed_prelocI_cell_views_.size(); ++pi)
+    for (int c = 0; c < static_cast<int>(delayed_prelocI_cell_views_[pi].size()); ++c)
+      dprelocI_idx[pi].emplace(delayed_prelocI_cell_views_[pi][c].first, c);
 
   // Loop over cells in sorder
   for (auto csoi = 0; csoi < spls.size(); ++csoi)
@@ -488,11 +493,13 @@ AAH_FLUDSCommonData::InitializeBetaElements(const SPDS& spds, int tag_index /*=0
     auto cell_local_index = spls[csoi];
     const auto& cell = grid->local_cells[cell_local_index];
 
-    NonLocalIncidentMapping(cell, spds);
+    NonLocalIncidentMapping(cell, spds, prelocI_idx, dprelocI_idx);
   } // for csoi
 
   deplocI_cell_views_.clear();
   deplocI_cell_views_.shrink_to_fit();
+  deplocI_cell_idx_.clear();
+  deplocI_cell_idx_.shrink_to_fit();
 
   prelocI_cell_views_.clear();
   prelocI_cell_views_.shrink_to_fit();
@@ -500,7 +507,7 @@ AAH_FLUDSCommonData::InitializeBetaElements(const SPDS& spds, int tag_index /*=0
   delayed_prelocI_cell_views_.clear();
   delayed_prelocI_cell_views_.shrink_to_fit();
 
-  // Clear unneccesary data
+  // Clear unnecessary data
   auto empty_vector = std::vector<std::vector<CompactCellView>>(0);
   deplocI_cell_views_.swap(empty_vector);
 
@@ -609,7 +616,11 @@ AAH_FLUDSCommonData::DeSerializeCellInfo(std::vector<CompactCellView>& cell_view
 }
 
 void
-AAH_FLUDSCommonData::NonLocalIncidentMapping(const Cell& cell, const SPDS& spds)
+AAH_FLUDSCommonData::NonLocalIncidentMapping(
+  const Cell& cell,
+  const SPDS& spds,
+  const std::vector<std::unordered_map<uint64_t, int>>& prelocI_idx,
+  const std::vector<std::unordered_map<uint64_t, int>>& dprelocI_idx)
 {
 
   const auto grid = spds.GetGrid();
@@ -631,17 +642,9 @@ AAH_FLUDSCommonData::NonLocalIncidentMapping(const Cell& cell, const SPDS& spds)
 
         if (prelocI >= 0)
         {
-          // Find the cell in prelocI cell views
-          int adj_cell = -1;
-          for (auto c = 0; c < prelocI_cell_views_[prelocI].size(); ++c)
-          {
-            if (std::cmp_equal(prelocI_cell_views_[prelocI][c].first, face.neighbor_id))
-            {
-              adj_cell = c;
-              break;
-            }
-          }
-          if (adj_cell < 0)
+          // Find the cell in prelocI cell views via hash lookup (was O(N) linear scan)
+          const auto cell_it = prelocI_idx[prelocI].find(face.neighbor_id);
+          if (cell_it == prelocI_idx[prelocI].end())
           {
             std::ostringstream oss;
             oss << "AAH_FLUDSCommonData: Required predecessor cell not found in call to "
@@ -650,22 +653,19 @@ AAH_FLUDSCommonData::NonLocalIncidentMapping(const Cell& cell, const SPDS& spds)
                 << ")";
             throw std::runtime_error(oss.str());
           }
+          const int adj_cell = cell_it->second;
 
-          // Find associated face
-          std::set<uint64_t> cfvids(face.vertex_ids.begin(), face.vertex_ids.end());
+          // Find associated face using sorted vertex id comparison (avoids per-face set allocs)
+          std::vector<uint64_t> cfvids(face.vertex_ids.begin(), face.vertex_ids.end());
+          std::sort(cfvids.begin(), cfvids.end());
           CompactCellView* adj_cell_view = &prelocI_cell_views_[prelocI][adj_cell];
           int adj_face_idx = -1, af = -1;
           for (auto& adj_face : adj_cell_view->second)
           {
             ++af;
-            bool face_matches = true;
-
-            std::set<uint64_t> afvids(adj_face.second.begin(), adj_face.second.end());
-
-            if (cfvids != afvids)
-              face_matches = false;
-
-            if (face_matches)
+            std::vector<uint64_t> afvids(adj_face.second.begin(), adj_face.second.end());
+            std::sort(afvids.begin(), afvids.end());
+            if (cfvids == afvids)
             {
               adj_face_idx = af;
               break;
@@ -712,17 +712,9 @@ AAH_FLUDSCommonData::NonLocalIncidentMapping(const Cell& cell, const SPDS& spds)
         else
         {
           int delayed_preLocI = abs(prelocI) - 1;
-          // Find the cell in prelocI cell views
-          int ass_cell = -1;
-          for (auto c = 0; c < delayed_prelocI_cell_views_[delayed_preLocI].size(); ++c)
-          {
-            if (delayed_prelocI_cell_views_[delayed_preLocI][c].first == face.neighbor_id)
-            {
-              ass_cell = c;
-              break;
-            }
-          }
-          if (ass_cell < 0)
+          // Find the cell via hash lookup (was O(N) linear scan)
+          const auto dcell_it = dprelocI_idx[delayed_preLocI].find(face.neighbor_id);
+          if (dcell_it == dprelocI_idx[delayed_preLocI].end())
           {
             std::ostringstream oss;
             oss << "AAH_FLUDSCommonData: Required predecessor cell not located in call to "
@@ -731,6 +723,7 @@ AAH_FLUDSCommonData::NonLocalIncidentMapping(const Cell& cell, const SPDS& spds)
                 << ", cell = " << face.neighbor_id << ")";
             throw std::runtime_error(oss.str());
           }
+          const int ass_cell = dcell_it->second;
 
           // Find associated face
           CompactCellView* adj_cell_view = &delayed_prelocI_cell_views_[delayed_preLocI][ass_cell];

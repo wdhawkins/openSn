@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <queue>
 #include <set>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -42,6 +43,25 @@ AAHD_FLUDSCommonData::ComputeNodeIndexForNonDelayedLocalFaces(const SpatialDiscr
   const MeshContinuum& grid = *(spds_.GetGrid());
   std::vector<AAHD_DirectedEdgeNode> local_node_stack;
   std::queue<std::uint64_t> idle_slots;
+
+  // Side-index: downwind_cell_local_idx → stack positions with that downwind cell.
+  // Replaces the O(N_stack) linear scan per cell with O(1) lookup.
+  // Invariant: when cell C is processed, all entries in downwind_index[C] are live
+  // (pointing to C), because slots are only freed when their downwind cell is processed,
+  // and C has not been processed yet.
+  std::unordered_map<std::uint32_t, std::vector<std::uint64_t>> downwind_index;
+  downwind_index.reserve(grid.local_cells.size());
+
+  // Helper: place a directed edge node at stack_index and register it in the side-index.
+  auto register_node = [&](std::uint64_t stack_index, const AAHD_DirectedEdgeNode& new_node)
+  {
+    downwind_index[new_node.downwind_node.GetCellIndex()].push_back(stack_index);
+    node_tracker_.emplace(new_node.upwind_node,
+                          AAHD_NodeIndex(stack_index, true, false, true, false));
+    node_tracker_.emplace(new_node.downwind_node,
+                          AAHD_NodeIndex(stack_index, false, false, true, false));
+  };
+
   for (const std::vector<std::uint32_t>& level : topological_levels)
   {
     std::queue<std::uint64_t> level_idle_slots;
@@ -49,15 +69,20 @@ AAHD_FLUDSCommonData::ComputeNodeIndexForNonDelayedLocalFaces(const SpatialDiscr
     for (const auto& cell_local_idx : level)
     {
       std::queue<std::uint64_t> cell_idle_slots;
-      // push incoming face nodes in the cell's queue of idle slots
-      for (std::uint32_t i_node = 0; i_node < local_node_stack.size(); ++i_node)
+      // Collect idle slots for this cell via side-index (O(1) lookup, not O(N_stack) scan).
+      auto it = downwind_index.find(cell_local_idx);
+      if (it != downwind_index.end())
       {
-        AAHD_DirectedEdgeNode& node = local_node_stack[i_node];
-        if (node.IsInitialized() && node.downwind_node.GetCellIndex() == cell_local_idx)
+        for (std::uint64_t pos : it->second)
         {
-          cell_idle_slots.push(i_node);
-          node = AAHD_DirectedEdgeNode();
+          AAHD_DirectedEdgeNode& node = local_node_stack[pos];
+          if (node.IsInitialized() && node.downwind_node.GetCellIndex() == cell_local_idx)
+          {
+            cell_idle_slots.push(pos);
+            node = AAHD_DirectedEdgeNode();
+          }
         }
+        it->second.clear();
       }
       // build a list of outgoing nodes for the current cell
       const Cell& cell = grid.local_cells[cell_local_idx];
@@ -112,12 +137,7 @@ AAHD_FLUDSCommonData::ComputeNodeIndexForNonDelayedLocalFaces(const SpatialDiscr
           stack_index = local_node_stack.size();
           local_node_stack.push_back(new_node);
         }
-        // record the stack index
-        node_tracker_.emplace(new_node.upwind_node,
-                              AAHD_NodeIndex(stack_index, true, false, true, false));
-        node_tracker_.emplace(new_node.downwind_node,
-                              AAHD_NodeIndex(stack_index, false, false, true, false));
-        ++stack_index;
+        register_node(stack_index, new_node);
       }
       // merge cell idle slots to level idle slots
       while (!cell_idle_slots.empty())
@@ -183,12 +203,13 @@ AAHD_FLUDSCommonData::ComputeNodeIndexForNonLocalFaces(const SpatialDiscretizati
 {
   // get reference to the mesh
   const MeshContinuum& grid = *(spds_.GetGrid());
-  // initialize index for boundary nodes and banks for tracking non-local nodes for each location
-  std::vector<std::set<AAHD_NonLocalFaceNode>> incoming_bank, delayed_incoming_bank, outgoing_bank;
+  // Use vectors for O(1) append, then sort once — avoids per-element tree allocations from set.
+  // The sorted order produced by std::sort with operator< is identical to std::set iteration order,
+  // so the node_index assignments are unchanged. No duplicates can exist (each face node is unique).
+  std::vector<std::vector<AAHD_NonLocalFaceNode>> incoming_bank, delayed_incoming_bank, outgoing_bank;
   incoming_bank.resize(spds_.GetLocationDependencies().size());
   delayed_incoming_bank.resize(spds_.GetDelayedLocationDependencies().size());
   outgoing_bank.resize(spds_.GetLocationSuccessors().size());
-  std::uint64_t incremental_boundary_index = 0;
   // loop for each cell and isolate the non-local neighbor or boundary faces
   for (const Cell& cell : grid.local_cells)
   {
@@ -223,23 +244,33 @@ AAHD_FLUDSCommonData::ComputeNodeIndexForNonLocalFaces(const SpatialDiscretizati
         // non-delayed incoming
         if (preloc >= 0)
         {
-          incoming_bank[preloc].insert(nl_en_vec.begin(), nl_en_vec.end());
+          incoming_bank[preloc].insert(incoming_bank[preloc].end(),
+                                      nl_en_vec.begin(), nl_en_vec.end());
         }
         // delayed incoming
         else
         {
           preloc = -preloc - 1;
-          delayed_incoming_bank[preloc].insert(nl_en_vec.begin(), nl_en_vec.end());
+          delayed_incoming_bank[preloc].insert(delayed_incoming_bank[preloc].end(),
+                                              nl_en_vec.begin(), nl_en_vec.end());
         }
       }
       // append to outgoing bank
       else if (orientation == FaceOrientation::OUTGOING)
       {
         int deploc = spds_.MapLocJToDeplocI(loc);
-        outgoing_bank[deploc].insert(nl_en_vec.begin(), nl_en_vec.end());
+        outgoing_bank[deploc].insert(outgoing_bank[deploc].end(),
+                                    nl_en_vec.begin(), nl_en_vec.end());
       }
     }
   }
+  // Sort each bank to match the ordering std::set would have produced.
+  for (auto& bank : incoming_bank)
+    std::sort(bank.begin(), bank.end());
+  for (auto& bank : delayed_incoming_bank)
+    std::sort(bank.begin(), bank.end());
+  for (auto& bank : outgoing_bank)
+    std::sort(bank.begin(), bank.end());
   // for each bank, loop in lexicographic order and retrieve the index
   std::uint64_t node_index = 0;
   for (std::uint32_t loc_idx = 0; loc_idx < incoming_bank.size(); ++loc_idx)
@@ -271,26 +302,26 @@ AAHD_FLUDSCommonData::ComputeNodeIndexForNonLocalFaces(const SpatialDiscretizati
   // store size
   std::size_t cumulative_offset = 0;
   nonlocal_incoming_node_offsets_ = {0};
-  for (const std::set<AAHD_NonLocalFaceNode>& nl_en_set : incoming_bank)
+  for (const auto& bank : incoming_bank)
   {
-    nonlocal_incoming_node_sizes_.push_back(nl_en_set.size());
-    cumulative_offset += nl_en_set.size();
+    nonlocal_incoming_node_sizes_.push_back(bank.size());
+    cumulative_offset += bank.size();
     nonlocal_incoming_node_offsets_.push_back(cumulative_offset);
   }
   cumulative_offset = 0;
   nonlocal_delayed_incoming_node_offsets_ = {0};
-  for (const std::set<AAHD_NonLocalFaceNode>& nl_en_set : delayed_incoming_bank)
+  for (const auto& bank : delayed_incoming_bank)
   {
-    nonlocal_delayed_incoming_node_sizes_.push_back(nl_en_set.size());
-    cumulative_offset += nl_en_set.size();
+    nonlocal_delayed_incoming_node_sizes_.push_back(bank.size());
+    cumulative_offset += bank.size();
     nonlocal_delayed_incoming_node_offsets_.push_back(cumulative_offset);
   }
   cumulative_offset = 0;
   nonlocal_outgoing_node_offsets_ = {0};
-  for (const std::set<AAHD_NonLocalFaceNode>& nl_en_set : outgoing_bank)
+  for (const auto& bank : outgoing_bank)
   {
-    nonlocal_outgoing_node_sizes_.push_back(nl_en_set.size());
-    cumulative_offset += nl_en_set.size();
+    nonlocal_outgoing_node_sizes_.push_back(bank.size());
+    cumulative_offset += bank.size();
     nonlocal_outgoing_node_offsets_.push_back(cumulative_offset);
   }
 }

@@ -23,11 +23,15 @@ public:
   AAH_SPDS(int id,
            const Vector3& omega,
            std::shared_ptr<MeshContinuum> grid,
+           const SPDSFaceNeighborInfoVec& face_neighbor_info,
            bool allow_cycles,
            bool use_gpus = false);
 
   /// Returns the id of this SPDS.
   int GetId() const { return id_; }
+
+  /// Returns true if this SPDS is allowed to remove local and global sweep cycles.
+  bool AllowCycles() const { return allow_cycles_; }
 
   /// Return the levelized global sweep TDG.
   const std::vector<STDG>& GetGlobalSweepPlanes() const { return global_sweep_planes_; }
@@ -66,6 +70,12 @@ public:
   void SetGlobalEdgeWeights(std::vector<double>& weights)
   {
     global_edge_weights_ = std::move(weights);
+  }
+
+  /// Sets the global location-to-location dependencies (result of BatchCommunicateLocationDeps).
+  void SetGlobalDependencies(std::vector<std::vector<int>> deps)
+  {
+    global_dependencies_ = std::move(deps);
   }
 
   /// Destructor.

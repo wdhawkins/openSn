@@ -5,6 +5,7 @@
 
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/fluds/fluds_common_data.h"
 #include <set>
+#include <unordered_map>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -45,6 +46,10 @@ public:
   explicit AAH_FLUDSCommonData(const std::vector<CellFaceNodalMapping>& grid_nodal_mappings,
                                const SPDS& spds,
                                const GridFaceHistogram& grid_face_histogram);
+
+  /// Complete construction: exchange inter-rank face data (MPI). Must be called sequentially
+  /// across all SPDS in the same order on all ranks after the constructor.
+  void FinalizeBeta(const SPDS& spds);
 
 protected:
   friend class AAH_FLUDS;
@@ -87,6 +92,8 @@ protected:
    * Cleared after beta-pass.
    */
   std::vector<std::vector<CompactCellView>> deplocI_cell_views_;
+  /// O(1) lookup index: cell global_id → index in deplocI_cell_views_[deplocI]. Transient.
+  std::vector<std::unordered_map<uint64_t, size_t>> deplocI_cell_idx_;
 
   /**
    * This is a vector [cell_sweep_order_index][outgoing_face_count] which holds the slot address in
@@ -135,7 +142,10 @@ private:
 
   void InitializeBetaElements(const SPDS& spds, int tag_index = 0);
 
-  void NonLocalIncidentMapping(const Cell& cell, const SPDS& spds);
+  void NonLocalIncidentMapping(const Cell& cell,
+                               const SPDS& spds,
+                               const std::vector<std::unordered_map<uint64_t, int>>& prelocI_idx,
+                               const std::vector<std::unordered_map<uint64_t, int>>& dprelocI_idx);
 
   std::vector<std::vector<INCOMING_FACE_INFO>> so_cell_inco_face_dof_indices_;
 

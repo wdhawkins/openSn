@@ -55,6 +55,11 @@ struct STDG
 void CommunicateLocationDependencies(const std::vector<int>& location_dependencies,
                                      std::vector<std::vector<int>>& global_dependencies);
 
+/// Batched variant of CommunicateLocationDependencies: gathers dependencies for all N SPDS in 2
+/// MPI collectives instead of 2*N. Returns global_deps[s][rank] for each SPDS s and MPI rank.
+std::vector<std::vector<std::vector<int>>>
+BatchCommunicateLocationDependencies(const std::vector<std::vector<int>>& local_deps);
+
 /// Print a sweep ordering to file.
 void PrintSweepOrdering(SPDS* sweep_order, std::shared_ptr<MeshContinuum> vol_continuum);
 

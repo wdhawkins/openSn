@@ -47,6 +47,8 @@
 #include <cmath>
 #include <iomanip>
 #include <sstream>
+#include <thread>
+#include <unordered_map>
 #include <stdexcept>
 
 namespace opensn
@@ -1343,6 +1345,8 @@ DiscreteOrdinatesProblem::InitializeSweepDataStructures()
       quadrature_allow_cycles_map_[groupset.quadrature] = groupset.allow_cycles;
   }
 
+  const auto face_neighbor_info = BuildSPDSFaceNeighborInfo(*grid_);
+
   // Build sweep orderings
   quadrature_spds_map_.clear();
   if (sweep_type_ == "AAH")
@@ -1355,133 +1359,261 @@ DiscreteOrdinatesProblem::InitializeSweepDataStructures()
     // 3) Gather the FAS for each SPDS on all ranks.
     // 4) Build the global sweep task dependency graph (TDG) for each SPDS.
 
-    // Initalize SPDS. All ranks initialize a SPDS for each angleset.
+    // Initalize SPDS. All ranks initialize a SPDS for each angleset. The constructor does only
+    // local computation (graph build + topological sort); MPI communication for global location
+    // dependencies is deferred and batched into 2 collectives after parallel construction.
     log.Log0Verbose1() << program_timer.GetTimeString() << " Initializing AAH SPDS.";
-    for (const auto& [quadrature, info] : quadrature_unq_so_grouping_map_)
+
+    struct AAHWorkItem
     {
-      int id = 0;
-      const auto& unique_so_groupings = info.first;
-      for (const auto& so_grouping : unique_so_groupings)
-      {
-        if (so_grouping.empty())
-          continue;
-
-        const size_t master_dir_id = so_grouping.front();
-        const auto& omega = quadrature->GetOmega(master_dir_id);
-        const auto new_swp_order = std::make_shared<AAH_SPDS>(
-          id, omega, this->grid_, quadrature_allow_cycles_map_[quadrature], use_gpus_);
-        quadrature_spds_map_[quadrature].push_back(new_swp_order);
-        ++id;
-      }
-    }
-
-    // Accumulate global edge weights for each SPDS on the owning rank only.
-    const int comm_size = opensn::mpi_comm.size();
-    const int matrix_size = comm_size * comm_size;
-    std::vector<int> recv_counts(opensn::mpi_comm.size(), comm_size);
-    std::vector<int> recv_displacements(opensn::mpi_comm.size(), 0);
-    for (int loc = 0; loc < opensn::mpi_comm.size(); ++loc)
-      recv_displacements[loc] = loc * comm_size;
-    for (const auto& [quadrature, spds_list] : quadrature_spds_map_)
+      std::shared_ptr<AngularQuadrature> quadrature;
+      Vector3 omega;
+      int id;
+      bool allow_cycles;
+    };
+    std::vector<AAHWorkItem> aah_work;
+    bool any_aah_spds_allows_cycles = false;
     {
-      for (const auto& spds : spds_list)
+      int next_id = 0;
+      for (const auto& [quadrature, info] : quadrature_unq_so_grouping_map_)
       {
-        auto aah_spds = std::static_pointer_cast<AAH_SPDS>(spds);
-        const int owner = aah_spds->GetId() % opensn::mpi_comm.size();
-
-        // Local contributions - weights from this rank to all others for this SPDS
-        const auto local_row = aah_spds->ComputeLocalLocationEdgeWeights();
-        std::vector<double> recv;
-        if (opensn::mpi_comm.rank() == owner)
-          recv.assign(matrix_size, 0.0);
-        opensn::mpi_comm.gather(local_row, recv, recv_counts, recv_displacements, owner);
-
-        if (opensn::mpi_comm.rank() == owner)
-          aah_spds->SetGlobalEdgeWeights(recv);
-      }
-    }
-
-    // Generate the global sweep FAS for each SPDS. This is an expensive operation. It is
-    // distributed via MPI so that multiple MPI ranks can compute the FAS for one or more SPDS
-    // independently.
-    log.Log0Verbose1() << program_timer.GetTimeString() << " Build global sweep FAS for each SPDS.";
-    for (const auto& quadrature : quadrature_spds_map_)
-    {
-      for (const auto& spds : quadrature.second)
-      {
-        auto aah_spds = std::static_pointer_cast<AAH_SPDS>(spds);
-        auto id = aah_spds->GetId();
-        if (opensn::mpi_comm.rank() == (id % opensn::mpi_comm.size()))
-          aah_spds->BuildGlobalSweepFAS();
-      }
-    }
-
-    // Communicate the FAS for each SPDS to all ranks.
-    log.Log0Verbose1() << program_timer.GetTimeString() << " Gather FAS for each SPDS.";
-    std::vector<int> local_edges_to_remove;
-    for (const auto& quadrature : quadrature_spds_map_)
-    {
-      for (const auto& spds : quadrature.second)
-      {
-        auto aah_spds = std::static_pointer_cast<AAH_SPDS>(spds);
-        auto id = aah_spds->GetId();
-        if ((id % opensn::mpi_comm.size()) == opensn::mpi_comm.rank())
+        for (const auto& so_grouping : info.first)
         {
-          auto edges_to_remove = aah_spds->GetGlobalSweepFAS();
-          local_edges_to_remove.push_back(id);
-          local_edges_to_remove.push_back(static_cast<int>(edges_to_remove.size()));
-          local_edges_to_remove.insert(
-            local_edges_to_remove.end(), edges_to_remove.begin(), edges_to_remove.end());
+          if (so_grouping.empty())
+            continue;
+          const bool allow_cycles = quadrature_allow_cycles_map_[quadrature];
+          any_aah_spds_allows_cycles = any_aah_spds_allows_cycles or allow_cycles;
+          aah_work.push_back({quadrature,
+                              quadrature->GetOmega(so_grouping.front()),
+                              next_id++,
+                              allow_cycles});
         }
       }
     }
 
-    int local_size = static_cast<int>(local_edges_to_remove.size());
-    std::vector<int> receive_counts(opensn::mpi_comm.size(), 0);
-    std::vector<int> displacements(opensn::mpi_comm.size(), 0);
-    mpi_comm.all_gather(local_size, receive_counts);
-
-    int total_size = 0;
-    for (auto i = 0; i < receive_counts.size(); ++i)
+    const size_t num_spds = aah_work.size();
+    std::vector<std::shared_ptr<AAH_SPDS>> flat_spds(num_spds);
     {
-      displacements[i] = total_size;
-      total_size += receive_counts[i];
+      const size_t nthreads = std::min<size_t>(std::max(1U, opensn_num_threads), num_spds);
+      log.Log() << program_timer.GetTimeString() << " SPDS construction: " << num_spds
+                << " directions, " << nthreads << " thread(s).";
+      std::vector<std::thread> workers;
+      workers.reserve(nthreads - 1);
+      for (size_t tid = 1; tid < nthreads; ++tid)
+        workers.emplace_back(
+          [&, tid]()
+          {
+            for (size_t i = tid; i < num_spds; i += nthreads)
+              flat_spds[i] = std::make_shared<AAH_SPDS>(aah_work[i].id,
+                                                         aah_work[i].omega,
+                                                         this->grid_,
+                                                         face_neighbor_info,
+                                                         aah_work[i].allow_cycles,
+                                                         use_gpus_);
+          });
+      for (size_t i = 0; i < num_spds; i += nthreads)
+        flat_spds[i] = std::make_shared<AAH_SPDS>(aah_work[i].id,
+                                                   aah_work[i].omega,
+                                                   this->grid_,
+                                                   face_neighbor_info,
+                                                   aah_work[i].allow_cycles,
+                                                   use_gpus_);
+      for (auto& w : workers)
+        w.join();
+      log.Log() << program_timer.GetTimeString() << " SPDS construction done.";
     }
 
-    std::vector<int> global_edges_to_remove(total_size, 0);
-    mpi_comm.all_gather(
-      local_edges_to_remove, global_edges_to_remove, receive_counts, displacements);
-
-    // Unpack the gathered data and update SPDS on all ranks.
-    int offset = 0;
-    while (offset < global_edges_to_remove.size())
+    // Batch all location-dependency communication into 2 MPI collectives, then distribute.
     {
-      auto spds_id = global_edges_to_remove[offset++];
-      auto num_edges = global_edges_to_remove[offset++];
-      std::vector<int> edges;
-      edges.reserve(num_edges);
-      for (auto i = 0; i < num_edges; ++i)
-        edges.emplace_back(global_edges_to_remove[offset++]);
+      log.Log() << program_timer.GetTimeString() << " Batch MPI location dependencies.";
+      std::vector<std::vector<int>> local_deps(num_spds);
+      for (size_t i = 0; i < num_spds; ++i)
+        local_deps[i] = flat_spds[i]->GetLocationDependencies();
+      auto global_deps = BatchCommunicateLocationDependencies(local_deps);
+      for (size_t i = 0; i < num_spds; ++i)
+        flat_spds[i]->SetGlobalDependencies(std::move(global_deps[i]));
+      log.Log() << program_timer.GetTimeString() << " Batch MPI done.";
+    }
 
+    // Populate quadrature_spds_map_ from the ordered flat list (same iteration order as fill).
+    {
+      size_t idx = 0;
+      for (const auto& [quadrature, info] : quadrature_unq_so_grouping_map_)
+        for (const auto& so_grouping : info.first)
+        {
+          if (so_grouping.empty())
+            continue;
+          quadrature_spds_map_[quadrature].push_back(flat_spds[idx++]);
+        }
+    }
+
+    if (any_aah_spds_allows_cycles)
+    {
+      // Accumulate global edge weights for all cycle-enabled SPDS in a single alltoall.
+      // Each rank sends its local row (comm_size doubles) for each cycle-enabled SPDS to that
+      // SPDS's owner rank. All sends are batched into one MPI_Alltoallv, replacing the previous
+      // N_spds sequential MPI_Gather calls (one per SPDS) with a single round-trip.
+      const int comm_size = opensn::mpi_comm.size();
+      const int my_rank = opensn::mpi_comm.rank();
+      const int matrix_size = comm_size * comm_size;
+
+      // Collect cycle-enabled SPDS in a consistent order (quadrature_spds_map_ is a std::map,
+      // so the iteration order is deterministic and identical on all ranks).
+      std::vector<std::shared_ptr<AAH_SPDS>> cycle_spds;
+      for (const auto& [quadrature, spds_list] : quadrature_spds_map_)
+        for (const auto& spds : spds_list)
+        {
+          auto aah_spds = std::static_pointer_cast<AAH_SPDS>(spds);
+          if (aah_spds->AllowCycles())
+            cycle_spds.push_back(aah_spds);
+        }
+
+      // Count SPDS owned by each rank. Ownership is id % comm_size — deterministic, no MPI needed.
+      std::vector<int> spds_per_rank(comm_size, 0);
+      for (const auto& spds : cycle_spds)
+        ++spds_per_rank[spds->GetId() % comm_size];
+
+      // Build alltoall counts and displacements (units: doubles).
+      // To rank r: one comm_size-element row per SPDS owned by r.
+      // From rank r: one comm_size-element row per SPDS I own.
+      const int n_owned = spds_per_rank[my_rank];
+      std::vector<int> sendcounts(comm_size), senddispls(comm_size, 0);
+      std::vector<int> recvcounts(comm_size, n_owned * comm_size), recvdispls(comm_size, 0);
+      for (int r = 0; r < comm_size; ++r)
+        sendcounts[r] = spds_per_rank[r] * comm_size;
+      for (int r = 1; r < comm_size; ++r)
+      {
+        senddispls[r] = senddispls[r - 1] + sendcounts[r - 1];
+        recvdispls[r] = recvdispls[r - 1] + recvcounts[r - 1];
+      }
+
+      // Pack send buffer: for each destination rank, emit local rows for SPDS it owns, in order.
+      std::vector<int> fill_pos = senddispls;
+      std::vector<double> sendbuf(senddispls.back() + sendcounts.back());
+      for (const auto& spds : cycle_spds)
+      {
+        const int owner = spds->GetId() % comm_size;
+        const auto local_row = spds->ComputeLocalLocationEdgeWeights();
+        std::copy(local_row.begin(), local_row.end(), sendbuf.begin() + fill_pos[owner]);
+        fill_pos[owner] += comm_size;
+      }
+
+      // Single alltoallv: exchange all local rows in one round-trip.
+      std::vector<double> recvbuf(recvdispls.back() + recvcounts.back());
+      opensn::mpi_comm.all_to_all(sendbuf, sendcounts, senddispls, recvbuf, recvcounts, recvdispls);
+
+      // Unpack: for each SPDS I own, assemble the full comm_size×comm_size weight matrix.
+      // From rank r, my k-th owned SPDS's row is at recvbuf[recvdispls[r] + k * comm_size].
+      int owned_idx = 0;
+      for (const auto& spds : cycle_spds)
+      {
+        if (spds->GetId() % comm_size != my_rank)
+          continue;
+        std::vector<double> global_weights(matrix_size);
+        for (int r = 0; r < comm_size; ++r)
+        {
+          const double* src = recvbuf.data() + recvdispls[r] + owned_idx * comm_size;
+          std::copy(src, src + comm_size, global_weights.data() + r * comm_size);
+        }
+        spds->SetGlobalEdgeWeights(global_weights);
+        ++owned_idx;
+      }
+
+      // Generate the global sweep FAS for each SPDS. This is an expensive operation. It is
+      // distributed via MPI so that multiple MPI ranks can compute the FAS for one or more SPDS
+      // independently.
+      log.Log0Verbose1() << program_timer.GetTimeString() << " Build global sweep FAS for each SPDS.";
       for (const auto& quadrature : quadrature_spds_map_)
       {
         for (const auto& spds : quadrature.second)
         {
           auto aah_spds = std::static_pointer_cast<AAH_SPDS>(spds);
-          if (aah_spds->GetId() == spds_id)
+          auto id = aah_spds->GetId();
+          if (aah_spds->AllowCycles() and opensn::mpi_comm.rank() == (id % opensn::mpi_comm.size()))
+            aah_spds->BuildGlobalSweepFAS();
+        }
+      }
+
+      // Communicate the FAS for each SPDS to all ranks.
+      log.Log0Verbose1() << program_timer.GetTimeString() << " Gather FAS for each SPDS.";
+      std::vector<int> local_edges_to_remove;
+      for (const auto& quadrature : quadrature_spds_map_)
+      {
+        for (const auto& spds : quadrature.second)
+        {
+          auto aah_spds = std::static_pointer_cast<AAH_SPDS>(spds);
+          auto id = aah_spds->GetId();
+          if (aah_spds->AllowCycles() and (id % opensn::mpi_comm.size()) == opensn::mpi_comm.rank())
           {
-            aah_spds->SetGlobalSweepFAS(edges);
-            break;
+            auto edges_to_remove = aah_spds->GetGlobalSweepFAS();
+            local_edges_to_remove.push_back(id);
+            local_edges_to_remove.push_back(static_cast<int>(edges_to_remove.size()));
+            local_edges_to_remove.insert(
+              local_edges_to_remove.end(), edges_to_remove.begin(), edges_to_remove.end());
           }
         }
       }
+
+      int local_size = static_cast<int>(local_edges_to_remove.size());
+      std::vector<int> receive_counts(opensn::mpi_comm.size(), 0);
+      std::vector<int> displacements(opensn::mpi_comm.size(), 0);
+      mpi_comm.all_gather(local_size, receive_counts);
+
+      int total_size = 0;
+      for (std::size_t i = 0; i < receive_counts.size(); ++i)
+      {
+        displacements[i] = total_size;
+        total_size += receive_counts[i];
+      }
+
+      std::vector<int> global_edges_to_remove(total_size, 0);
+      mpi_comm.all_gather(
+        local_edges_to_remove, global_edges_to_remove, receive_counts, displacements);
+
+      std::unordered_map<int, std::shared_ptr<AAH_SPDS>> aah_spds_by_id;
+      for (const auto& [quadrature, spds_list] : quadrature_spds_map_)
+        for (const auto& spds : spds_list)
+        {
+          auto aah_spds = std::static_pointer_cast<AAH_SPDS>(spds);
+          aah_spds_by_id[aah_spds->GetId()] = aah_spds;
+        }
+
+      // Unpack the gathered data and update SPDS on all ranks.
+      std::size_t offset = 0;
+      while (offset < global_edges_to_remove.size())
+      {
+        auto spds_id = global_edges_to_remove[offset++];
+        auto num_edges = global_edges_to_remove[offset++];
+        std::vector<int> edges;
+        edges.reserve(num_edges);
+        for (auto i = 0; i < num_edges; ++i)
+          edges.emplace_back(global_edges_to_remove[offset++]);
+
+        auto spds_it = aah_spds_by_id.find(spds_id);
+        if (spds_it != aah_spds_by_id.end())
+          spds_it->second->SetGlobalSweepFAS(edges);
+      }
     }
 
-    // Build TDG for each SPDS on all ranks.
-    log.Log0Verbose1() << program_timer.GetTimeString() << " Build global sweep TDGs.";
-    for (const auto& quadrature : quadrature_spds_map_)
-      for (const auto& spds : quadrature.second)
-        std::static_pointer_cast<AAH_SPDS>(spds)->BuildGlobalSweepTDG();
+    // Build TDG for each SPDS on all ranks (parallel across SPDS; no MPI inside BuildGlobalSweepTDG).
+    {
+      const size_t nthreads = std::min<size_t>(std::max(1U, opensn_num_threads), num_spds);
+      log.Log() << program_timer.GetTimeString() << " TDG build (" << nthreads << " thread(s)).";
+      std::vector<std::thread> workers;
+      workers.reserve(nthreads - 1);
+      for (size_t tid = 1; tid < nthreads; ++tid)
+        workers.emplace_back(
+          [&, tid]()
+          {
+            for (size_t i = tid; i < num_spds; i += nthreads)
+              flat_spds[i]->BuildGlobalSweepTDG();
+          });
+      for (size_t i = 0; i < num_spds; i += nthreads)
+        flat_spds[i]->BuildGlobalSweepTDG();
+      for (auto& w : workers)
+        w.join();
+      log.Log() << program_timer.GetTimeString() << " TDG build done.";
+    }
 
     // Print ghosted sweep graph if requested
     if (not verbose_sweep_angles_.empty())
@@ -1502,45 +1634,114 @@ DiscreteOrdinatesProblem::InitializeSweepDataStructures()
   }
   else if (sweep_type_ == "CBC")
   {
-    // Build SPDS
-    for (const auto& [quadrature, info] : quadrature_unq_so_grouping_map_)
+    // Collect work items then construct SPDS in parallel (no MPI inside CBC_SPDS constructor).
+    struct CBCWorkItem
     {
-      const auto& unique_so_groupings = info.first;
-      for (const auto& so_grouping : unique_so_groupings)
+      std::shared_ptr<AngularQuadrature> quadrature;
+      Vector3 omega;
+      bool allow_cycles;
+    };
+    std::vector<CBCWorkItem> cbc_work;
+    for (const auto& [quadrature, info] : quadrature_unq_so_grouping_map_)
+      for (const auto& so_grouping : info.first)
       {
         if (so_grouping.empty())
           continue;
-
-        const size_t master_dir_id = so_grouping.front();
-        const auto& omega = quadrature->GetOmega(master_dir_id);
-        const auto new_swp_order =
-          std::make_shared<CBC_SPDS>(omega, this->grid_, quadrature_allow_cycles_map_[quadrature]);
-        quadrature_spds_map_[quadrature].push_back(new_swp_order);
+        cbc_work.push_back({quadrature,
+                            quadrature->GetOmega(so_grouping.front()),
+                            quadrature_allow_cycles_map_[quadrature]});
       }
+
+    const size_t num_cbc = cbc_work.size();
+    std::vector<std::shared_ptr<CBC_SPDS>> flat_cbc(num_cbc);
+    {
+      const size_t nthreads = std::min<size_t>(std::max(1U, opensn_num_threads), num_cbc);
+      std::vector<std::thread> workers;
+      workers.reserve(nthreads - 1);
+      for (size_t tid = 1; tid < nthreads; ++tid)
+        workers.emplace_back(
+          [&, tid]()
+          {
+            for (size_t i = tid; i < num_cbc; i += nthreads)
+              flat_cbc[i] = std::make_shared<CBC_SPDS>(
+                cbc_work[i].omega, this->grid_, face_neighbor_info, cbc_work[i].allow_cycles);
+          });
+      for (size_t i = 0; i < num_cbc; i += nthreads)
+        flat_cbc[i] = std::make_shared<CBC_SPDS>(
+          cbc_work[i].omega, this->grid_, face_neighbor_info, cbc_work[i].allow_cycles);
+      for (auto& w : workers)
+        w.join();
     }
+
+    size_t idx = 0;
+    for (const auto& [quadrature, info] : quadrature_unq_so_grouping_map_)
+      for (const auto& so_grouping : info.first)
+      {
+        if (so_grouping.empty())
+          continue;
+        quadrature_spds_map_[quadrature].push_back(flat_cbc[idx++]);
+      }
   }
   else
     OpenSnInvalidArgument("Unsupported sweep type \"" + sweep_type_ + "\"");
 
+  log.Log() << program_timer.GetTimeString() << " Barrier before FLUDS.";
   opensn::mpi_comm.barrier();
+  log.Log() << program_timer.GetTimeString() << " Barrier done.";
 
   // Build FLUDS templates
   quadrature_fluds_commondata_map_.clear();
   if (sweep_type_ == "AAH" && use_gpus_)
   {
+    log.Log() << program_timer.GetTimeString() << " GPU FLUDS construction (parallel).";
     CreateAAHD_FLUDSCommonData();
+    log.Log() << program_timer.GetTimeString() << " GPU FLUDS construction done.";
   }
   else if (sweep_type_ == "AAH")
   {
-    for (const auto& [quadrature, spds_list] : quadrature_spds_map_)
+    // Flatten (quadrature, spds) pairs in map order for ordered two-phase FLUDS construction.
+    // Phase 1 (parallel): InitializeAlphaElements — slot dynamics + local incident mapping, no MPI.
+    // Phase 2 (sequential): FinalizeBeta — inter-rank face exchange via MPI, must stay in order.
+    struct FLUDSWork
     {
+      std::shared_ptr<AngularQuadrature> quadrature;
+      SPDS* spds;
+    };
+    std::vector<FLUDSWork> fluds_work;
+    for (const auto& [quadrature, spds_list] : quadrature_spds_map_)
       for (const auto& spds : spds_list)
-      {
-        quadrature_fluds_commondata_map_[quadrature].push_back(
-          std::make_unique<AAH_FLUDSCommonData>(
-            grid_nodal_mappings_, *spds, *grid_face_histogram_));
-      }
+        fluds_work.push_back({quadrature, spds.get()});
+
+    const size_t num_fluds = fluds_work.size();
+    std::vector<std::unique_ptr<AAH_FLUDSCommonData>> flat_fluds(num_fluds);
+    {
+      const size_t nthreads = std::min<size_t>(std::max(1U, opensn_num_threads), num_fluds);
+      log.Log() << program_timer.GetTimeString() << " FLUDS alpha (" << nthreads << " thread(s)).";
+      std::vector<std::thread> workers;
+      workers.reserve(nthreads - 1);
+      for (size_t tid = 1; tid < nthreads; ++tid)
+        workers.emplace_back(
+          [&, tid]()
+          {
+            for (size_t i = tid; i < num_fluds; i += nthreads)
+              flat_fluds[i] = std::make_unique<AAH_FLUDSCommonData>(
+                grid_nodal_mappings_, *fluds_work[i].spds, *grid_face_histogram_);
+          });
+      for (size_t i = 0; i < num_fluds; i += nthreads)
+        flat_fluds[i] = std::make_unique<AAH_FLUDSCommonData>(
+          grid_nodal_mappings_, *fluds_work[i].spds, *grid_face_histogram_);
+      for (auto& w : workers)
+        w.join();
+      log.Log() << program_timer.GetTimeString() << " FLUDS alpha done.";
     }
+    log.Log() << program_timer.GetTimeString() << " FLUDS beta (sequential, " << num_fluds << " SPDS).";
+    for (size_t i = 0; i < num_fluds; ++i)
+      flat_fluds[i]->FinalizeBeta(*fluds_work[i].spds);
+    log.Log() << program_timer.GetTimeString() << " FLUDS beta done.";
+    size_t idx = 0;
+    for (const auto& [quadrature, spds_list] : quadrature_spds_map_)
+      for (size_t j = 0; j < spds_list.size(); ++j)
+        quadrature_fluds_commondata_map_[quadrature].push_back(std::move(flat_fluds[idx++]));
   }
   else if (sweep_type_ == "CBC" and use_gpus_)
   {
@@ -1548,14 +1749,41 @@ DiscreteOrdinatesProblem::InitializeSweepDataStructures()
   }
   else if (sweep_type_ == "CBC")
   {
-    for (const auto& [quadrature, spds_list] : quadrature_spds_map_)
+    // Same parallel pattern for CBC FLUDS.
+    struct FLUDSWork
     {
+      std::shared_ptr<AngularQuadrature> quadrature;
+      SPDS* spds;
+    };
+    std::vector<FLUDSWork> fluds_work;
+    for (const auto& [quadrature, spds_list] : quadrature_spds_map_)
       for (const auto& spds : spds_list)
-      {
-        quadrature_fluds_commondata_map_[quadrature].push_back(
-          std::make_unique<CBC_FLUDSCommonData>(*spds, grid_nodal_mappings_));
-      }
+        fluds_work.push_back({quadrature, spds.get()});
+
+    const size_t num_fluds = fluds_work.size();
+    std::vector<std::unique_ptr<FLUDSCommonData>> flat_fluds(num_fluds);
+    {
+      const size_t nthreads = std::min<size_t>(std::max(1U, opensn_num_threads), num_fluds);
+      std::vector<std::thread> workers;
+      workers.reserve(nthreads - 1);
+      for (size_t tid = 1; tid < nthreads; ++tid)
+        workers.emplace_back(
+          [&, tid]()
+          {
+            for (size_t i = tid; i < num_fluds; i += nthreads)
+              flat_fluds[i] =
+                std::make_unique<CBC_FLUDSCommonData>(*fluds_work[i].spds, grid_nodal_mappings_);
+          });
+      for (size_t i = 0; i < num_fluds; i += nthreads)
+        flat_fluds[i] =
+          std::make_unique<CBC_FLUDSCommonData>(*fluds_work[i].spds, grid_nodal_mappings_);
+      for (auto& w : workers)
+        w.join();
     }
+    size_t idx = 0;
+    for (const auto& [quadrature, spds_list] : quadrature_spds_map_)
+      for (size_t j = 0; j < spds_list.size(); ++j)
+        quadrature_fluds_commondata_map_[quadrature].push_back(std::move(flat_fluds[idx++]));
   }
 
   log.Log() << program_timer.GetTimeString() << " Done initializing sweep datastructures.\n";

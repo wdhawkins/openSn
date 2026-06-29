@@ -15,6 +15,7 @@ namespace opensn
 AAH_SPDS::AAH_SPDS(int id,
                    const Vector3& omega,
                    const std::shared_ptr<MeshContinuum> grid,
+                   const SPDSFaceNeighborInfoVec& face_neighbor_info,
                    bool allow_cycles,
                    bool use_gpus)
   : SPDS(omega, grid), id_(id), allow_cycles_(allow_cycles)
@@ -22,19 +23,15 @@ AAH_SPDS::AAH_SPDS(int id,
 
   // Populate Cell Relationships
   size_t num_loc_cells = grid->local_cells.size();
-  std::vector<std::set<std::pair<std::uint32_t, double>>> cell_successors(num_loc_cells);
-  std::set<int> location_successors;
-  std::set<int> location_dependencies;
+  std::vector<std::vector<std::pair<std::uint32_t, double>>> cell_successors(num_loc_cells);
+  std::vector<int> location_successors;
+  std::vector<int> location_dependencies;
 
-  PopulateCellRelationships(omega, location_dependencies, location_successors, cell_successors);
+  PopulateCellRelationships(
+    omega, face_neighbor_info, location_dependencies, location_successors, cell_successors);
 
-  location_successors_.reserve(location_successors.size());
-  for (auto v : location_successors)
-    location_successors_.push_back(v);
-
-  location_dependencies_.reserve(location_dependencies.size());
-  for (auto v : location_dependencies)
-    location_dependencies_.push_back(v);
+  location_successors_ = std::move(location_successors);
+  location_dependencies_ = std::move(location_dependencies);
 
   // Create local cell graph
   Graph local_cell_graph(num_loc_cells);
@@ -82,10 +79,6 @@ AAH_SPDS::AAH_SPDS(int id,
   for (auto& level : levelized_spls_)
     for (auto& cell : level)
       spls_.push_back(cell);
-
-  // Generate location-to-location dependencies
-  global_dependencies_.resize(opensn::mpi_comm.size());
-  CommunicateLocationDependencies(location_dependencies_, global_dependencies_);
 
   // Copy levelized spls data to GPU
   if (use_gpus)

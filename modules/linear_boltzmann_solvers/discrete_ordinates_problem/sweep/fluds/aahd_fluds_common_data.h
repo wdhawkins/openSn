@@ -10,6 +10,7 @@
 #include <ostream>
 #include <limits>
 #include <map>
+#include <unordered_map>
 #include <stdexcept>
 
 namespace opensn
@@ -18,6 +19,14 @@ namespace opensn
 class AAHD_AngleSet;
 class SpatialDiscretization;
 class SweepBoundary;
+
+struct FaceNodeHash
+{
+  std::size_t operator()(const FaceNode& fn) const noexcept
+  {
+    return std::hash<std::uint64_t>{}(fn.GetValue());
+  }
+};
 
 /**
  * Random-access stack based FLUDS.
@@ -35,7 +44,7 @@ public:
                        const SpatialDiscretization& sdm);
 
   /// Get constant reference to the face node tracker map.
-  const std::map<FaceNode, AAHD_NodeIndex>& GetNodeTracker() const { return node_tracker_; }
+  const std::unordered_map<FaceNode, AAHD_NodeIndex, FaceNodeHash>& GetNodeTracker() const { return node_tracker_; }
 
   /// \name Size getters
   /// \{
@@ -91,7 +100,7 @@ public:
 
 protected:
   /// Map face node to its associated index in the corresponding bank.
-  std::map<FaceNode, AAHD_NodeIndex> node_tracker_;
+  std::unordered_map<FaceNode, AAHD_NodeIndex, FaceNodeHash> node_tracker_;
   /// List of anglesets associated to this sweep ordering.
   mutable std::vector<AAHD_AngleSet*> associated_anglesets_;
 
