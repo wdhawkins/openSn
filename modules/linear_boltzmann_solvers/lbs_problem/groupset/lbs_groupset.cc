@@ -125,7 +125,7 @@ LBSGroupset::Init(int aid)
   residual_tolerance = 1.0e-6;
   max_iterations = 200;
   gmres_restart_intvl = 30;
-  allow_cycles = false;
+  allow_cycles = true;
   apply_wgdsa = false;
   apply_tgdsa = false;
   wgdsa_max_iters = 30;

@@ -7,6 +7,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <map>
+#include <memory>
+#include <stdexcept>
 #include <vector>
 
 namespace opensn
@@ -16,8 +19,13 @@ namespace opensn
 class CBC_FLUDSCommonData : public FLUDSCommonData
 {
 public:
-  CBC_FLUDSCommonData(const SPDS& spds,
-                      const std::vector<CellFaceNodalMapping>& grid_nodal_mappings);
+  /// Construct alpha phase only (local work, no MPI). Call FinalizeBeta() afterwards.
+  /// MakeAlpha() prevents us from holding an unfinalized object.
+  static std::unique_ptr<CBC_FLUDSCommonData>
+  MakeAlpha(const SPDS& spds, const std::vector<CellFaceNodalMapping>& grid_nodal_mappings);
+
+  /// Exchange nonlocal face slots after parallel local construction.
+  void FinalizeBeta();
 
   std::size_t NumIncomingFaces() const { return num_incoming_faces_; }
 
@@ -63,7 +71,18 @@ public:
   static constexpr std::size_t INVALID_PEER_INDEX = std::numeric_limits<std::size_t>::max();
 
 private:
+  CBC_FLUDSCommonData(const SPDS& spds,
+                      const std::vector<CellFaceNodalMapping>& grid_nodal_mappings);
+
+  void CheckFinalized() const
+  {
+    if (not finalized_)
+      throw std::logic_error("CBC FLUDS common data must be finalized before use");
+  }
+
   std::size_t num_incoming_faces_;
+  std::size_t num_outgoing_faces_;
+  bool finalized_ = false;
   /// Prefix offsets into local-face-indexed slot arrays.
   std::vector<std::size_t> face_offsets_;
   /// Local-face-indexed incoming slots.
@@ -74,6 +93,8 @@ private:
   std::vector<std::size_t> outgoing_face_slots_;
   /// Local-face-indexed SPDS-successor peer indices.
   std::vector<std::size_t> outgoing_peer_indices_;
+  /// Incoming face-slot records grouped by upstream location.
+  std::map<int, std::vector<std::uint64_t>> incoming_slot_records_by_upstream_location_;
 };
 
 } // namespace opensn

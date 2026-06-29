@@ -39,4 +39,65 @@ CommunicateLocationDependencies(const std::vector<int>& location_dependencies,
   }
 }
 
+std::vector<std::vector<std::vector<int>>>
+BatchCommunicateLocationDependencies(const std::vector<std::vector<int>>& local_deps)
+{
+  const int num_ranks = opensn::mpi_comm.size();
+  const int num_spds = static_cast<int>(local_deps.size());
+  const auto num_spds_size = static_cast<size_t>(num_spds);
+
+  std::vector<std::vector<std::vector<int>>> result(num_spds,
+                                                    std::vector<std::vector<int>>(num_ranks));
+
+  if (num_spds == 0)
+    return result;
+
+  // All-gather dependency counts for every SPDS
+  std::vector<int> local_counts(num_spds);
+  for (int s = 0; s < num_spds; ++s)
+    local_counts[s] = static_cast<int>(local_deps[s].size());
+
+  std::vector<int> all_counts(static_cast<size_t>(num_ranks) * num_spds_size);
+  mpi_comm.all_gather(local_counts.data(), num_spds, all_counts.data(), num_spds);
+
+  // Concatenate all local dependency vectors in a single flat send buffer
+  std::vector<int> flat_deps;
+  int total = 0;
+  for (int s = 0; s < num_spds; ++s)
+    total += local_counts[s];
+  flat_deps.reserve(total);
+  for (int s = 0; s < num_spds; ++s)
+    flat_deps.insert(flat_deps.end(), local_deps[s].begin(), local_deps[s].end());
+
+  // Compute per-rank receive counts and displacements for all_gatherv
+  std::vector<int> recv_counts(num_ranks), recv_displs(num_ranks, 0);
+  for (int r = 0; r < num_ranks; ++r)
+  {
+    int sz = 0;
+    for (int s = 0; s < num_spds; ++s)
+      sz += all_counts[static_cast<size_t>(r) * num_spds_size + static_cast<size_t>(s)];
+    recv_counts[r] = sz;
+  }
+  for (int r = 1; r < num_ranks; ++r)
+    recv_displs[r] = recv_displs[r - 1] + recv_counts[r - 1];
+
+  const int total_recv = recv_displs[num_ranks - 1] + recv_counts[num_ranks - 1];
+  std::vector<int> all_flat_deps(total_recv);
+  mpi_comm.all_gather(flat_deps, all_flat_deps, recv_counts, recv_displs);
+
+  // Unpack result[s][r] into dependencies for SPDS s on rank r
+  for (int r = 0; r < num_ranks; ++r)
+  {
+    int offset = recv_displs[r];
+    for (int s = 0; s < num_spds; ++s)
+    {
+      const int cnt = all_counts[static_cast<size_t>(r) * num_spds_size + static_cast<size_t>(s)];
+      result[s][r].assign(all_flat_deps.begin() + offset, all_flat_deps.begin() + offset + cnt);
+      offset += cnt;
+    }
+  }
+
+  return result;
+}
+
 } // namespace opensn
