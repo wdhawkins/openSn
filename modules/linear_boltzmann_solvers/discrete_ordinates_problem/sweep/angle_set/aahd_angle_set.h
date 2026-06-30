@@ -48,6 +48,12 @@ public:
 
   AngleSetStatus AngleSetAdvance(SweepChunk& sweep_chunk, AngleSetStatus permission) override;
 
+  void SweepKernelAndSync(SweepChunk& sweep_chunk);
+
+  void SendAfterFirstPass();
+
+  void FinalizeAfterSweep(SweepChunk& sweep_chunk);
+
   AngleSetStatus FlushSendBuffers() override { return AngleSetStatus::MESSAGES_SENT; }
 
   void ResetSweepBuffers() override { executed_ = false; }
