@@ -1941,17 +1941,144 @@ DiscreteOrdinatesProblem::AssociateSOsAndDirections(const std::shared_ptr<MeshCo
     case AngleAggregationType::S4_COALESCED:
     {
       const std::size_t num_dirs = quadrature.GetNumAngles();
-      const int requested_num_groups =
+      const int requested_num_clusters =
         angle_aggregation_target_angles_per_set > 0
           ? static_cast<int>((num_dirs + angle_aggregation_target_angles_per_set - 1) /
                              angle_aggregation_target_angles_per_set)
           : angle_aggregation_num_sets;
-      const int target_group_count = std::min(requested_num_groups, static_cast<int>(num_dirs));
-      const auto features =
-        BuildCoalescingFeatures(grid, angle_aggregation_split_partition_faces);
-      auto groups = ClusterByOrientationSignature(quadrature, features, target_group_count);
-      for (auto& group : groups)
-        unq_so_grps.push_back(std::move(group));
+      const int num_clusters = std::min(requested_num_clusters, static_cast<int>(num_dirs));
+      std::vector<int> assignment(num_dirs, -1);
+
+      std::vector<Vector3> centroids;
+      centroids.reserve(num_clusters);
+      centroids.push_back(quadrature.GetOmega(0));
+      for (int k = 1; k < num_clusters; ++k)
+      {
+        double min_nearest = 2.0;
+        std::size_t farthest = 0;
+        for (std::size_t n = 0; n < num_dirs; ++n)
+        {
+          const Vector3& omega = quadrature.GetOmega(n);
+          double nearest_dot = -2.0;
+          for (const Vector3& c : centroids)
+            nearest_dot = std::max(nearest_dot, omega.Dot(c));
+          if (nearest_dot < min_nearest)
+          {
+            min_nearest = nearest_dot;
+            farthest = n;
+          }
+        }
+        centroids.push_back(quadrature.GetOmega(farthest));
+      }
+
+      for (int iter = 0; iter < 200; ++iter)
+      {
+        bool changed = false;
+        for (std::size_t n = 0; n < num_dirs; ++n)
+        {
+          const Vector3& omega = quadrature.GetOmega(n);
+          int best = 0;
+          double best_dot = -2.0;
+          for (int i = 0; i < num_clusters; ++i)
+          {
+            const double d = omega.Dot(centroids[i]);
+            if (d > best_dot)
+            {
+              best_dot = d;
+              best = i;
+            }
+          }
+          if (best != assignment[n])
+          {
+            changed = true;
+            assignment[n] = best;
+          }
+        }
+        if (not changed)
+          break;
+
+        std::fill(centroids.begin(), centroids.end(), Vector3(0.0, 0.0, 0.0));
+        std::vector<int> counts(num_clusters, 0);
+        for (std::size_t n = 0; n < num_dirs; ++n)
+        {
+          centroids[assignment[n]] += quadrature.GetOmega(n);
+          ++counts[assignment[n]];
+        }
+        for (int i = 0; i < num_clusters; ++i)
+          if (counts[i] > 0)
+            centroids[i] = centroids[i].Normalized();
+      }
+
+      std::vector<DirIDs> groups(num_clusters);
+      for (std::size_t n = 0; n < num_dirs; ++n)
+        groups[assignment[n]].push_back(n);
+
+      std::vector<double> global_partition_face_normals;
+      if (angle_aggregation_split_partition_faces)
+      {
+        std::vector<double> local_face_normals;
+        for (const auto& cell : grid->local_cells)
+          for (const auto& face : cell.faces)
+          {
+            if (not face.has_neighbor or face.IsNeighborLocal(grid.get()))
+              continue;
+            local_face_normals.push_back(face.normal.x);
+            local_face_normals.push_back(face.normal.y);
+            local_face_normals.push_back(face.normal.z);
+          }
+
+        std::vector<int> normal_counts(opensn::mpi_comm.size(), 0);
+        opensn::mpi_comm.all_gather(static_cast<int>(local_face_normals.size()), normal_counts);
+        std::vector<int> normal_displs(opensn::mpi_comm.size(), 0);
+        int total_normal_values = 0;
+        for (std::size_t r = 0; r < normal_counts.size(); ++r)
+        {
+          normal_displs[r] = total_normal_values;
+          total_normal_values += normal_counts[r];
+        }
+        global_partition_face_normals.resize(total_normal_values, 0.0);
+        opensn::mpi_comm.all_gather(
+          local_face_normals, global_partition_face_normals, normal_counts, normal_displs);
+      }
+
+      for (int i = 0; i < num_clusters; ++i)
+      {
+        if (groups[i].empty())
+          continue;
+
+        std::sort(groups[i].begin(),
+                  groups[i].end(),
+                  [&](const std::size_t a, const std::size_t b)
+                  {
+                    return quadrature.GetOmega(a).Dot(centroids[i]) >
+                           quadrature.GetOmega(b).Dot(centroids[i]);
+                  });
+
+        if (not angle_aggregation_split_partition_faces)
+        {
+          unq_so_grps.push_back(std::move(groups[i]));
+          continue;
+        }
+
+        std::map<std::vector<unsigned char>, DirIDs> refined_groups;
+        for (const auto dir_id : groups[i])
+        {
+          std::vector<unsigned char> signature;
+          signature.reserve(global_partition_face_normals.size() / 3);
+          const auto& omega = quadrature.GetOmega(dir_id);
+          for (std::size_t n = 0; n < global_partition_face_normals.size(); n += 3)
+          {
+            const Vector3 normal(global_partition_face_normals[n],
+                                 global_partition_face_normals[n + 1],
+                                 global_partition_face_normals[n + 2]);
+            signature.push_back(omega.Dot(normal) < 0.0 ? 1U : 0U);
+          }
+          refined_groups[std::move(signature)].push_back(dir_id);
+        }
+
+        for (auto& [signature, refined_group] : refined_groups)
+          unq_so_grps.push_back(std::move(refined_group));
+      }
       break;
     }
     default:
@@ -2113,32 +2240,6 @@ DiscreteOrdinatesProblem::InitFluxDataStructures(LBSGroupset& groupset)
     }
     out << "]";
     log.Log0() << no_wrap << out.str();
-  }
-
-  {
-    const auto delayed_local = groupset.angle_agg->GetLocalDelayedAngularDOFBreakdown();
-    AngleAggregation::DelayedAngularDOFBreakdown delayed_global;
-    mpi_comm.all_reduce(delayed_local.boundary, delayed_global.boundary, mpi::op::sum<size_t>());
-    mpi_comm.all_reduce(delayed_local.local, delayed_global.local, mpi::op::sum<size_t>());
-    mpi_comm.all_reduce(delayed_local.nonlocal, delayed_global.nonlocal, mpi::op::sum<size_t>());
-    mpi_comm.all_reduce(delayed_local.ab, delayed_global.ab, mpi::op::sum<size_t>());
-    mpi_comm.all_reduce(delayed_local.promoted, delayed_global.promoted, mpi::op::sum<size_t>());
-
-    std::ostringstream out;
-    out << program_timer.GetTimeString() << " Groupset " << groupset.id
-        << " delayed angular dofs local: total=" << delayed_local.Total()
-        << ", boundary=" << delayed_local.boundary << ", local=" << delayed_local.local
-        << ", nonlocal=" << delayed_local.nonlocal << ", ab=" << delayed_local.ab
-        << ", promoted=" << delayed_local.promoted;
-    log.Log0() << no_wrap << out.str();
-
-    std::ostringstream gout;
-    gout << program_timer.GetTimeString() << " Groupset " << groupset.id
-         << " delayed angular dofs global: total=" << delayed_global.Total()
-         << ", boundary=" << delayed_global.boundary << ", local=" << delayed_global.local
-         << ", nonlocal=" << delayed_global.nonlocal << ", ab=" << delayed_global.ab
-         << ", promoted=" << delayed_global.promoted;
-    log.Log0() << no_wrap << gout.str();
   }
 
   opensn::mpi_comm.barrier();

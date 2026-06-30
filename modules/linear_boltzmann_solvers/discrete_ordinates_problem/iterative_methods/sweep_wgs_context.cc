@@ -58,6 +58,25 @@ SweepWGSContext::SweepWGSContext(DiscreteOrdinatesProblem& do_problem,
                     *groupset.angle_agg,
                     *sweep_chunk)
 {
+  const auto delayed_local = groupset.angle_agg->GetLocalDelayedAngularDOFBreakdown();
+  AngleAggregation::DelayedAngularDOFBreakdown delayed_global;
+  mpi_comm.all_reduce(delayed_local.boundary, delayed_global.boundary, mpi::op::sum<size_t>());
+  mpi_comm.all_reduce(delayed_local.local, delayed_global.local, mpi::op::sum<size_t>());
+  mpi_comm.all_reduce(delayed_local.nonlocal, delayed_global.nonlocal, mpi::op::sum<size_t>());
+  mpi_comm.all_reduce(delayed_local.ab, delayed_global.ab, mpi::op::sum<size_t>());
+  mpi_comm.all_reduce(delayed_local.promoted, delayed_global.promoted, mpi::op::sum<size_t>());
+
+  log.Log0() << no_wrap << program_timer.GetTimeString() << " Groupset " << groupset.id
+             << " delayed angular dofs local: total=" << delayed_local.Total()
+             << ", boundary=" << delayed_local.boundary << ", local=" << delayed_local.local
+             << ", nonlocal=" << delayed_local.nonlocal << ", ab=" << delayed_local.ab
+             << ", promoted=" << delayed_local.promoted;
+
+  log.Log0() << no_wrap << program_timer.GetTimeString() << " Groupset " << groupset.id
+             << " delayed angular dofs global: total=" << delayed_global.Total()
+             << ", boundary=" << delayed_global.boundary << ", local=" << delayed_global.local
+             << ", nonlocal=" << delayed_global.nonlocal << ", ab=" << delayed_global.ab
+             << ", promoted=" << delayed_global.promoted;
 }
 
 void
