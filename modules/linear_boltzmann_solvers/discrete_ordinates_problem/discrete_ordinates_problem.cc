@@ -264,12 +264,34 @@ ComputeNormalizedDisagreementForGroup(const AngularQuadrature& quadrature,
 std::vector<OrientationFeature>
 BuildLocalABFeatures(const std::shared_ptr<MeshContinuum>& grid)
 {
-  std::vector<OrientationFeature> features;
-  features.reserve(grid->local_cells.size());
+  constexpr int kQuantizationBins = 32;
+  constexpr std::size_t kMaxFeatures = 128;
+  std::map<std::tuple<int, int, int>, OrientationFeature> aggregated_features;
   for (const auto& cell : grid->local_cells)
     for (const auto& face : cell.faces)
       if (face.has_neighbor and face.IsNeighborLocal(grid.get()))
-        features.push_back({face.normal.Normalized(), std::max(1.0, face.area)});
+      {
+        const auto normal = face.normal.Normalized();
+        const auto qx = static_cast<int>(std::lround(normal.x * kQuantizationBins));
+        const auto qy = static_cast<int>(std::lround(normal.y * kQuantizationBins));
+        const auto qz = static_cast<int>(std::lround(normal.z * kQuantizationBins));
+        auto& feature = aggregated_features[{qx, qy, qz}];
+        if (feature.weight == 0.0)
+          feature.normal = normal;
+        feature.weight += std::max(1.0, face.area);
+      }
+
+  std::vector<OrientationFeature> features;
+  features.reserve(aggregated_features.size());
+  for (auto& [key, feature] : aggregated_features)
+    features.push_back(feature);
+
+  std::sort(features.begin(),
+            features.end(),
+            [](const OrientationFeature& lhs, const OrientationFeature& rhs)
+            { return lhs.weight > rhs.weight; });
+  if (features.size() > kMaxFeatures)
+    features.resize(kMaxFeatures);
 
   if (features.empty())
     features.push_back({Vector3(1.0, 0.0, 0.0), 1.0});
@@ -285,34 +307,14 @@ ComputeGroupCentroidOmega(const AngularQuadrature& quadrature, const DirIDs& gro
   return centroid.NormSquare() > 0.0 ? centroid.Normalized() : quadrature.GetOmega(group.front());
 }
 
-double
-EstimateNormalizedLocalABForGroup(const AngularQuadrature& quadrature,
-                                  const DirIDs& group,
-                                  const std::vector<OrientationFeature>& local_features)
+std::vector<std::vector<unsigned char>>
+BuildCachedLocalABSignatures(const AngularQuadrature& quadrature,
+                             const std::vector<OrientationFeature>& local_features)
 {
-  if (group.size() <= 1)
-    return 0.0;
-
-  const Vector3 representative = ComputeGroupCentroidOmega(quadrature, group);
-  const double total_weight =
-    std::accumulate(local_features.begin(), local_features.end(), 0.0, [](double sum, const auto& f) {
-      return sum + f.weight;
-    });
-  if (total_weight <= 0.0)
-    return 0.0;
-
-  double disagreement = 0.0;
-  for (const auto& feature : local_features)
-  {
-    const bool ref_incoming = representative.Dot(feature.normal) < 0.0;
-    std::size_t mismatches = 0;
-    for (const auto dir_id : group)
-      mismatches += (quadrature.GetOmega(dir_id).Dot(feature.normal) < 0.0) != ref_incoming;
-
-    disagreement += feature.weight * static_cast<double>(mismatches);
-  }
-
-  return disagreement / (total_weight * static_cast<double>(group.size()));
+  std::vector<std::vector<unsigned char>> signatures(quadrature.GetNumAngles());
+  for (std::size_t dir_id = 0; dir_id < quadrature.GetNumAngles(); ++dir_id)
+    signatures[dir_id] = BuildOrientationSignature(quadrature, dir_id, local_features);
+  return signatures;
 }
 
 std::pair<DirIDs, DirIDs>
@@ -361,6 +363,7 @@ SplitGroupByFarthestPair(const AngularQuadrature& quadrature, const DirIDs& grou
 void
 RefineGroupByLocalABBudget(const AngularQuadrature& quadrature,
                            const std::vector<OrientationFeature>& local_features,
+                           const std::vector<std::vector<unsigned char>>& cached_signatures,
                            DirIDs group,
                            const double max_normalized_ab,
                            std::vector<DirIDs>& out_groups)
@@ -374,8 +377,25 @@ RefineGroupByLocalABBudget(const AngularQuadrature& quadrature,
             [&](const std::size_t a, const std::size_t b)
             { return quadrature.GetOmega(a).Dot(centroid) > quadrature.GetOmega(b).Dot(centroid); });
 
-  if (group.size() <= 1 or
-      EstimateNormalizedLocalABForGroup(quadrature, group, local_features) <= max_normalized_ab)
+  const double total_weight =
+    std::accumulate(local_features.begin(), local_features.end(), 0.0, [](double sum, const auto& f) {
+      return sum + f.weight;
+    });
+  double disagreement = 0.0;
+  if (group.size() > 1 and total_weight > 0.0)
+  {
+    const auto& representative_signature = cached_signatures[group.front()];
+    for (std::size_t fi = 0; fi < local_features.size(); ++fi)
+    {
+      std::size_t mismatches = 0;
+      for (const auto dir_id : group)
+        mismatches += cached_signatures[dir_id][fi] != representative_signature[fi];
+      disagreement += local_features[fi].weight * static_cast<double>(mismatches);
+    }
+    disagreement /= (total_weight * static_cast<double>(group.size()));
+  }
+
+  if (group.size() <= 1 or disagreement <= max_normalized_ab)
   {
     out_groups.push_back(std::move(group));
     return;
@@ -388,8 +408,10 @@ RefineGroupByLocalABBudget(const AngularQuadrature& quadrature,
     return;
   }
 
-  RefineGroupByLocalABBudget(quadrature, local_features, std::move(lhs), max_normalized_ab, out_groups);
-  RefineGroupByLocalABBudget(quadrature, local_features, std::move(rhs), max_normalized_ab, out_groups);
+  RefineGroupByLocalABBudget(
+    quadrature, local_features, cached_signatures, std::move(lhs), max_normalized_ab, out_groups);
+  RefineGroupByLocalABBudget(
+    quadrature, local_features, cached_signatures, std::move(rhs), max_normalized_ab, out_groups);
 }
 
 void
@@ -2194,6 +2216,8 @@ DiscreteOrdinatesProblem::AssociateSOsAndDirections(const std::shared_ptr<MeshCo
         spherical_groups[assignment[n]].push_back(n);
 
       const auto local_ab_features = BuildLocalABFeatures(grid);
+      const auto cached_local_ab_signatures =
+        BuildCachedLocalABSignatures(quadrature, local_ab_features);
       constexpr double kMaxNormalizedLocalAB = 0.01;
 
       for (int i = 0; i < num_clusters; ++i)
@@ -2202,7 +2226,12 @@ DiscreteOrdinatesProblem::AssociateSOsAndDirections(const std::shared_ptr<MeshCo
         if (group.empty())
           continue;
         RefineGroupByLocalABBudget(
-          quadrature, local_ab_features, std::move(group), kMaxNormalizedLocalAB, unq_so_grps);
+          quadrature,
+          local_ab_features,
+          cached_local_ab_signatures,
+          std::move(group),
+          kMaxNormalizedLocalAB,
+          unq_so_grps);
       }
       break;
     }
