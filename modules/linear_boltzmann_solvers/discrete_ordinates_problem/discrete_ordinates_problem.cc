@@ -232,6 +232,35 @@ ClusterByOrientationSignature(const AngularQuadrature& quadrature,
   return groups;
 }
 
+double
+ComputeNormalizedDisagreementForGroup(const AngularQuadrature& quadrature,
+                                      const DirIDs& group,
+                                      const std::vector<OrientationFeature>& features)
+{
+  if (group.size() <= 1 or features.empty())
+    return 0.0;
+
+  const double total_feature_weight =
+    std::accumulate(features.begin(), features.end(), 0.0, [](const double sum, const auto& feature) {
+      return sum + feature.weight;
+    });
+  if (total_feature_weight <= 0.0)
+    return 0.0;
+
+  std::vector<std::vector<unsigned char>> signatures;
+  signatures.reserve(group.size());
+  for (const auto dir_id : group)
+    signatures.push_back(BuildOrientationSignature(quadrature, dir_id, features));
+
+  double worst = 0.0;
+  for (std::size_t i = 0; i + 1 < signatures.size(); ++i)
+    for (std::size_t j = i + 1; j < signatures.size(); ++j)
+      worst = std::max(
+        worst, WeightedSignatureDisagreement(signatures[i], signatures[j], features) / total_feature_weight);
+
+  return worst;
+}
+
 void
 RecursiveAngleSort(AngleSet* angleset,
                    AngleAggregation& angle_agg,
@@ -1967,28 +1996,104 @@ DiscreteOrdinatesProblem::AssociateSOsAndDirections(const std::shared_ptr<MeshCo
                              angle_aggregation_target_angles_per_set)
           : angle_aggregation_num_sets;
       const int num_clusters = std::min(requested_num_clusters, static_cast<int>(num_dirs));
-      constexpr double kMaxNormalizedDisagreement = 0.02;
+      std::vector<int> assignment(num_dirs, -1);
+
+      std::vector<Vector3> centroids;
+      centroids.reserve(num_clusters);
+      centroids.push_back(quadrature.GetOmega(0));
+      for (int k = 1; k < num_clusters; ++k)
+      {
+        double min_nearest = 2.0;
+        std::size_t farthest = 0;
+        for (std::size_t n = 0; n < num_dirs; ++n)
+        {
+          const Vector3& omega = quadrature.GetOmega(n);
+          double nearest_dot = -2.0;
+          for (const Vector3& c : centroids)
+            nearest_dot = std::max(nearest_dot, omega.Dot(c));
+          if (nearest_dot < min_nearest)
+          {
+            min_nearest = nearest_dot;
+            farthest = n;
+          }
+        }
+        centroids.push_back(quadrature.GetOmega(farthest));
+      }
+
+      for (int iter = 0; iter < 200; ++iter)
+      {
+        bool changed = false;
+        for (std::size_t n = 0; n < num_dirs; ++n)
+        {
+          const Vector3& omega = quadrature.GetOmega(n);
+          int best = 0;
+          double best_dot = -2.0;
+          for (int i = 0; i < num_clusters; ++i)
+          {
+            const double d = omega.Dot(centroids[i]);
+            if (d > best_dot)
+            {
+              best_dot = d;
+              best = i;
+            }
+          }
+          if (best != assignment[n])
+          {
+            changed = true;
+            assignment[n] = best;
+          }
+        }
+        if (not changed)
+          break;
+
+        std::fill(centroids.begin(), centroids.end(), Vector3(0.0, 0.0, 0.0));
+        std::vector<int> counts(num_clusters, 0);
+        for (std::size_t n = 0; n < num_dirs; ++n)
+        {
+          centroids[assignment[n]] += quadrature.GetOmega(n);
+          ++counts[assignment[n]];
+        }
+        for (int i = 0; i < num_clusters; ++i)
+          if (counts[i] > 0)
+            centroids[i] = centroids[i].Normalized();
+      }
+
+      std::vector<DirIDs> spherical_groups(num_clusters);
+      for (std::size_t n = 0; n < num_dirs; ++n)
+        spherical_groups[assignment[n]].push_back(n);
+
       const auto features =
         BuildCoalescingFeatures(grid, angle_aggregation_split_partition_faces);
-      auto groups = ClusterByOrientationSignature(
-        quadrature, features, num_clusters, kMaxNormalizedDisagreement);
+      constexpr double kMaxNormalizedDisagreement = 0.02;
 
-      // Keep deterministic angular ordering within each merged angle set.
-      for (auto& group : groups)
+      for (int i = 0; i < num_clusters; ++i)
       {
+        auto& group = spherical_groups[i];
+        if (group.empty())
+          continue;
+
         std::sort(group.begin(),
                   group.end(),
                   [&](const std::size_t a, const std::size_t b)
                   {
-                    const auto& oa = quadrature.GetOmega(a);
-                    const auto& ob = quadrature.GetOmega(b);
-                    if (oa.z != ob.z)
-                      return oa.z > ob.z;
-                    if (oa.y != ob.y)
-                      return oa.y > ob.y;
-                    return oa.x > ob.x;
+                    return quadrature.GetOmega(a).Dot(centroids[i]) >
+                           quadrature.GetOmega(b).Dot(centroids[i]);
                   });
-        unq_so_grps.push_back(std::move(group));
+
+        const double disagreement =
+          ComputeNormalizedDisagreementForGroup(quadrature, group, features);
+        if (group.size() <= 1 or disagreement <= kMaxNormalizedDisagreement)
+        {
+          unq_so_grps.push_back(std::move(group));
+          continue;
+        }
+
+        std::map<std::vector<unsigned char>, DirIDs> refined_groups;
+        for (const auto dir_id : group)
+          refined_groups[BuildOrientationSignature(quadrature, dir_id, features)].push_back(dir_id);
+
+        for (auto& [signature, refined_group] : refined_groups)
+          unq_so_grps.push_back(std::move(refined_group));
       }
       break;
     }
