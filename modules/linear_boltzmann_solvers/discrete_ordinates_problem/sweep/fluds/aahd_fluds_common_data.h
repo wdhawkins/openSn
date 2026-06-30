@@ -152,7 +152,7 @@ protected:
   std::vector<Vector3> all_omegas_;
   std::map<std::pair<std::size_t, FaceNode>, std::uint64_t> promoted_delayed_incoming_indices_;
   std::map<std::pair<std::size_t, FaceNode>, std::uint64_t> promoted_delayed_outgoing_indices_;
-  std::unordered_map<FaceNode, std::pair<bool, bool>, FaceNodeHash> boundary_node_flags_;
+  std::map<FaceNode, std::pair<bool, bool>> boundary_node_flags_;
   /// \}
 
   /// \name Device storage for node indexes
