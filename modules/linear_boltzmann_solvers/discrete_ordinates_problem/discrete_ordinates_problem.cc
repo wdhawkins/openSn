@@ -261,6 +261,137 @@ ComputeNormalizedDisagreementForGroup(const AngularQuadrature& quadrature,
   return worst;
 }
 
+std::vector<OrientationFeature>
+BuildLocalABFeatures(const std::shared_ptr<MeshContinuum>& grid)
+{
+  std::vector<OrientationFeature> features;
+  features.reserve(grid->local_cells.size());
+  for (const auto& cell : grid->local_cells)
+    for (const auto& face : cell.faces)
+      if (face.has_neighbor and face.IsNeighborLocal(grid.get()))
+        features.push_back({face.normal.Normalized(), std::max(1.0, face.area)});
+
+  if (features.empty())
+    features.push_back({Vector3(1.0, 0.0, 0.0), 1.0});
+  return features;
+}
+
+Vector3
+ComputeGroupCentroidOmega(const AngularQuadrature& quadrature, const DirIDs& group)
+{
+  Vector3 centroid(0.0, 0.0, 0.0);
+  for (const auto dir_id : group)
+    centroid += quadrature.GetOmega(dir_id);
+  return centroid.NormSquare() > 0.0 ? centroid.Normalized() : quadrature.GetOmega(group.front());
+}
+
+double
+EstimateNormalizedLocalABForGroup(const AngularQuadrature& quadrature,
+                                  const DirIDs& group,
+                                  const std::vector<OrientationFeature>& local_features)
+{
+  if (group.size() <= 1)
+    return 0.0;
+
+  const Vector3 representative = ComputeGroupCentroidOmega(quadrature, group);
+  const double total_weight =
+    std::accumulate(local_features.begin(), local_features.end(), 0.0, [](double sum, const auto& f) {
+      return sum + f.weight;
+    });
+  if (total_weight <= 0.0)
+    return 0.0;
+
+  double disagreement = 0.0;
+  for (const auto& feature : local_features)
+  {
+    const bool ref_incoming = representative.Dot(feature.normal) < 0.0;
+    std::size_t mismatches = 0;
+    for (const auto dir_id : group)
+      mismatches += (quadrature.GetOmega(dir_id).Dot(feature.normal) < 0.0) != ref_incoming;
+
+    disagreement += feature.weight * static_cast<double>(mismatches);
+  }
+
+  return disagreement / (total_weight * static_cast<double>(group.size()));
+}
+
+std::pair<DirIDs, DirIDs>
+SplitGroupByFarthestPair(const AngularQuadrature& quadrature, const DirIDs& group)
+{
+  std::size_t seed_a = group.front();
+  std::size_t seed_b = group.back();
+  double worst_dot = 1.0;
+  for (std::size_t i = 0; i + 1 < group.size(); ++i)
+    for (std::size_t j = i + 1; j < group.size(); ++j)
+    {
+      const double dot = quadrature.GetOmega(group[i]).Dot(quadrature.GetOmega(group[j]));
+      if (dot < worst_dot)
+      {
+        worst_dot = dot;
+        seed_a = group[i];
+        seed_b = group[j];
+      }
+    }
+
+  DirIDs lhs;
+  DirIDs rhs;
+  lhs.reserve(group.size());
+  rhs.reserve(group.size());
+  for (const auto dir_id : group)
+  {
+    const auto& omega = quadrature.GetOmega(dir_id);
+    if (omega.Dot(quadrature.GetOmega(seed_a)) >= omega.Dot(quadrature.GetOmega(seed_b)))
+      lhs.push_back(dir_id);
+    else
+      rhs.push_back(dir_id);
+  }
+
+  if (lhs.empty() or rhs.empty())
+  {
+    lhs.clear();
+    rhs.clear();
+    const auto mid = group.size() / 2;
+    lhs.insert(lhs.end(), group.begin(), group.begin() + static_cast<std::ptrdiff_t>(mid));
+    rhs.insert(rhs.end(), group.begin() + static_cast<std::ptrdiff_t>(mid), group.end());
+  }
+
+  return {std::move(lhs), std::move(rhs)};
+}
+
+void
+RefineGroupByLocalABBudget(const AngularQuadrature& quadrature,
+                           const std::vector<OrientationFeature>& local_features,
+                           DirIDs group,
+                           const double max_normalized_ab,
+                           std::vector<DirIDs>& out_groups)
+{
+  if (group.empty())
+    return;
+
+  const Vector3 centroid = ComputeGroupCentroidOmega(quadrature, group);
+  std::sort(group.begin(),
+            group.end(),
+            [&](const std::size_t a, const std::size_t b)
+            { return quadrature.GetOmega(a).Dot(centroid) > quadrature.GetOmega(b).Dot(centroid); });
+
+  if (group.size() <= 1 or
+      EstimateNormalizedLocalABForGroup(quadrature, group, local_features) <= max_normalized_ab)
+  {
+    out_groups.push_back(std::move(group));
+    return;
+  }
+
+  auto [lhs, rhs] = SplitGroupByFarthestPair(quadrature, group);
+  if (lhs.empty() or rhs.empty())
+  {
+    out_groups.push_back(std::move(group));
+    return;
+  }
+
+  RefineGroupByLocalABBudget(quadrature, local_features, std::move(lhs), max_normalized_ab, out_groups);
+  RefineGroupByLocalABBudget(quadrature, local_features, std::move(rhs), max_normalized_ab, out_groups);
+}
+
 void
 RecursiveAngleSort(AngleSet* angleset,
                    AngleAggregation& angle_agg,
@@ -2062,38 +2193,16 @@ DiscreteOrdinatesProblem::AssociateSOsAndDirections(const std::shared_ptr<MeshCo
       for (std::size_t n = 0; n < num_dirs; ++n)
         spherical_groups[assignment[n]].push_back(n);
 
-      const auto features =
-        BuildCoalescingFeatures(grid, angle_aggregation_split_partition_faces);
-      constexpr double kMaxNormalizedDisagreement = 0.02;
+      const auto local_ab_features = BuildLocalABFeatures(grid);
+      constexpr double kMaxNormalizedLocalAB = 0.01;
 
       for (int i = 0; i < num_clusters; ++i)
       {
         auto& group = spherical_groups[i];
         if (group.empty())
           continue;
-
-        std::sort(group.begin(),
-                  group.end(),
-                  [&](const std::size_t a, const std::size_t b)
-                  {
-                    return quadrature.GetOmega(a).Dot(centroids[i]) >
-                           quadrature.GetOmega(b).Dot(centroids[i]);
-                  });
-
-        const double disagreement =
-          ComputeNormalizedDisagreementForGroup(quadrature, group, features);
-        if (group.size() <= 1 or disagreement <= kMaxNormalizedDisagreement)
-        {
-          unq_so_grps.push_back(std::move(group));
-          continue;
-        }
-
-        std::map<std::vector<unsigned char>, DirIDs> refined_groups;
-        for (const auto dir_id : group)
-          refined_groups[BuildOrientationSignature(quadrature, dir_id, features)].push_back(dir_id);
-
-        for (auto& [signature, refined_group] : refined_groups)
-          unq_so_grps.push_back(std::move(refined_group));
+        RefineGroupByLocalABBudget(
+          quadrature, local_ab_features, std::move(group), kMaxNormalizedLocalAB, unq_so_grps);
       }
       break;
     }
