@@ -57,6 +57,11 @@ public:
   virtual void SetDelayedOutgoingPsiOldToNew() {}
   virtual void SetDelayedOutgoingPsiNewToOld() {}
 
+  virtual std::span<double> ABDelayedPsi() { return {}; }
+  virtual std::span<double> ABDelayedPsiOld() { return {}; }
+  virtual std::span<double> PromotedDelayedPsi() { return {}; }
+  virtual std::span<double> PromotedDelayedPsiOld() { return {}; }
+
   virtual ~FLUDS() = default;
 
 protected:

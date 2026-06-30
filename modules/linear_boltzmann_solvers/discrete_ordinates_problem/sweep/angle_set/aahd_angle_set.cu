@@ -39,18 +39,20 @@ AAHD_AngleSet::InitializeDelayedUpstreamData()
 }
 
 void
-AAHD_AngleSet::PrepostReceives()
+AAHD_AngleSet::PrepostReceives(bool use_device_buffers, bool delayed_psi_on_device)
 {
-  async_comm_.PrepostReceiveUpstreamPsi(static_cast<int>(this->GetID()));
-  async_comm_.PrepostReceiveDelayedData(static_cast<int>(this->GetID()));
+  async_comm_.PrepostReceiveUpstreamPsi(static_cast<int>(this->GetID()), use_device_buffers);
+  async_comm_.PrepostReceiveDelayedData(static_cast<int>(this->GetID()), use_device_buffers);
   auto* aahd_fluds = static_cast<AAHD_FLUDS*>(fluds_.get());
-  aahd_fluds->CopyDelayedPsiToDevice();
+  if (not delayed_psi_on_device)
+    aahd_fluds->CopyDelayedPsiToDevice();
 }
 
 void
 AAHD_AngleSet::WaitForDownstreamAndDelayed()
 {
   async_comm_.WaitForDownstreamPsi();
+  async_comm_.WaitForPromotedDelayedPsi();
   async_comm_.WaitForDelayedIncomingPsi();
 }
 
@@ -74,6 +76,7 @@ AAHD_AngleSet::AngleSetAdvance(SweepChunk& sweep_chunk, AngleSetStatus permissio
                                       aahd_sweep_chunk.GetGroupset());
   aahd_sweep_chunk.Sweep(*this);
   aahd_fluds->CopyPsiFromDevice();
+  aahd_fluds->CopyPromotedDelayedOutgoingPsiFromDevice();
   aahd_fluds->CopySaveAngularFluxFromDevice();
   stream_.synchronize();
 
@@ -84,6 +87,7 @@ AAHD_AngleSet::AngleSetAdvance(SweepChunk& sweep_chunk, AngleSetStatus permissio
       following_as->DecrementCounter();
   }
   async_comm_.SendDownstreamPsi(static_cast<int>(this->GetID()));
+  async_comm_.SendPromotedDelayedPsi(static_cast<int>(this->GetID()));
 
   aahd_fluds->CopySaveAngularFluxToDestinationPsi(
     aahd_sweep_chunk.GetProblem(), aahd_sweep_chunk.GetGroupset(), *this);

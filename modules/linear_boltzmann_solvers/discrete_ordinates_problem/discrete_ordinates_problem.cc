@@ -46,6 +46,7 @@
 #include <cassert>
 #include <cmath>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 
@@ -76,6 +77,115 @@ GetGlobalUniqueBoundaryIDs(const std::shared_ptr<MeshContinuum>& grid, mpi::Comm
   global_unique_bids_set.insert(recvbuf.begin(), recvbuf.end());
 
   return global_unique_bids_set;
+}
+
+struct OrientationFeature
+{
+  Vector3 normal;
+  double weight = 1.0;
+};
+
+std::vector<OrientationFeature>
+BuildCoalescingFeatures(const std::shared_ptr<MeshContinuum>& grid,
+                        const bool include_partition_face_signatures)
+{
+  std::vector<OrientationFeature> features;
+  features.reserve(grid->local_cells.size());
+
+  for (const auto& cell : grid->local_cells)
+    for (const auto& face : cell.faces)
+    {
+      if (face.has_neighbor and not face.IsNeighborLocal(grid.get()))
+      {
+        if (include_partition_face_signatures)
+          features.push_back({face.normal, std::max(1.0, 1000.0 * face.area)});
+      }
+      else if (face.has_neighbor and face.IsNeighborLocal(grid.get()))
+        features.push_back({face.normal, std::max(1.0, face.area)});
+    }
+
+  if (features.empty())
+    features.push_back({Vector3(1.0, 0.0, 0.0), 1.0});
+
+  return features;
+}
+
+std::vector<unsigned char>
+BuildOrientationSignature(const AngularQuadrature& quadrature,
+                          const std::size_t dir_id,
+                          const std::vector<OrientationFeature>& features)
+{
+  std::vector<unsigned char> signature;
+  signature.reserve(features.size());
+  const auto& omega = quadrature.GetOmega(dir_id);
+  for (const auto& feature : features)
+    signature.push_back(omega.Dot(feature.normal) < 0.0 ? 1U : 0U);
+  return signature;
+}
+
+double
+WeightedSignatureDisagreement(const std::vector<unsigned char>& a,
+                              const std::vector<unsigned char>& b,
+                              const std::vector<OrientationFeature>& features)
+{
+  double cost = 0.0;
+  for (std::size_t i = 0; i < features.size(); ++i)
+    if (a[i] != b[i])
+      cost += features[i].weight;
+  return cost;
+}
+
+std::vector<DirIDs>
+ClusterByOrientationSignature(const AngularQuadrature& quadrature,
+                              const std::vector<OrientationFeature>& features,
+                              const int target_group_count)
+{
+  const std::size_t num_dirs = quadrature.GetNumAngles();
+  std::vector<std::vector<unsigned char>> signatures(num_dirs);
+  std::map<std::vector<unsigned char>, DirIDs> exact_groups;
+  for (std::size_t dir_id = 0; dir_id < num_dirs; ++dir_id)
+  {
+    signatures[dir_id] = BuildOrientationSignature(quadrature, dir_id, features);
+    exact_groups[signatures[dir_id]].push_back(dir_id);
+  }
+
+  std::vector<DirIDs> groups;
+  groups.reserve(exact_groups.size());
+  for (auto& [signature, dirs] : exact_groups)
+    groups.push_back(std::move(dirs));
+
+  const auto group_cost = [&](const DirIDs& lhs, const DirIDs& rhs)
+  {
+    const auto& lhs_sig = signatures[lhs.front()];
+    const auto& rhs_sig = signatures[rhs.front()];
+    return WeightedSignatureDisagreement(lhs_sig, rhs_sig, features) *
+           static_cast<double>(lhs.size() * rhs.size());
+  };
+
+  while (groups.size() > static_cast<std::size_t>(target_group_count))
+  {
+    std::size_t best_i = 0;
+    std::size_t best_j = 1;
+    double best_cost = std::numeric_limits<double>::max();
+    for (std::size_t i = 0; i + 1 < groups.size(); ++i)
+      for (std::size_t j = i + 1; j < groups.size(); ++j)
+      {
+        const double cost = group_cost(groups[i], groups[j]);
+        if (cost < best_cost)
+        {
+          best_cost = cost;
+          best_i = i;
+          best_j = j;
+        }
+      }
+
+    auto& merged = groups[best_i];
+    auto& victim = groups[best_j];
+    merged.insert(merged.end(), victim.begin(), victim.end());
+    groups.erase(groups.begin() + static_cast<std::ptrdiff_t>(best_j));
+  }
+
+  return groups;
 }
 
 void
@@ -813,74 +923,26 @@ DiscreteOrdinatesProblem::ResetMode(SweepChunkMode target_mode)
 
     // Reconstruct psi from the converged steady-state phi before enabling transient RHS time terms.
     ReinitializeSolverSchemes();
-    // A single call to RebuildAngularFluxFromConvergedPhi is insufficient with
-    // lagged angular fluxes. Instead, we perform a fixed-point iteration on the
-    // lagged fluxes with phi/q held at the converged steady-state value. This is
-    // a sweep-only reconstruction of psi.
-    constexpr int max_reconstruction_passes = 50;
-    constexpr double lagged_psi_rel_tol = 1.0e-3;
     const auto q_moments_ref = GetQMomentsLocal();
-    bool lagged_psi_converged = false;
-    for (int pass = 0; pass < max_reconstruction_passes; ++pass)
+
+    for (size_t gsid = 0; gsid < GetNumWGSSolvers(); ++gsid)
     {
-      double dpsi_local_sum_sq = 0.0;
-      double psi_local_sum_sq = 0.0;
+      auto wgs_solver = GetWGSSolver(gsid);
+      OpenSnLogicalErrorIf(not wgs_solver,
+                           GetName() +
+                             ": Null WGS solver while reconstructing angular flux solution.");
+      auto wgs_context = std::dynamic_pointer_cast<SweepWGSContext>(wgs_solver->GetContext());
+      OpenSnLogicalErrorIf(
+        not wgs_context,
+        GetName() + ": Cast to SweepWGSContext failed while reconstructing angular flux solution.");
 
-      for (size_t gsid = 0; gsid < GetNumWGSSolvers(); ++gsid)
-      {
-        auto wgs_solver = GetWGSSolver(gsid);
-        OpenSnLogicalErrorIf(not wgs_solver,
-                             GetName() +
-                               ": Null WGS solver while reconstructing angular flux solution.");
-        auto wgs_context = std::dynamic_pointer_cast<SweepWGSContext>(wgs_solver->GetContext());
-        OpenSnLogicalErrorIf(
-          not wgs_context,
-          GetName() +
-            ": Cast to SweepWGSContext failed while reconstructing angular flux solution.");
-
-        const auto delayed_psi_old =
-          wgs_context->groupset.angle_agg->GetOldDelayedAngularDOFsAsSTLVector();
-
-        // Keep source moments and scalar flux fixed at converged steady-state values.
-        GetQMomentsLocal() = q_moments_ref;
-        GetPhiOldLocal() = phi_new_ref;
-        wgs_context->RebuildAngularFluxFromConvergedPhi(false, pass == 0);
-
-        const auto delayed_psi_new =
-          wgs_context->groupset.angle_agg->GetNewDelayedAngularDOFsAsSTLVector();
-        OpenSnLogicalErrorIf(delayed_psi_new.size() != delayed_psi_old.size(),
-                             GetName() +
-                               ": Lagged angular DOF size mismatch during reconstruction.");
-
-        for (size_t i = 0; i < delayed_psi_new.size(); ++i)
-        {
-          const double dpsi = delayed_psi_new[i] - delayed_psi_old[i];
-          dpsi_local_sum_sq += dpsi * dpsi;
-          psi_local_sum_sq += delayed_psi_new[i] * delayed_psi_new[i];
-        }
-
-        // psi_old <- psi_new
-        wgs_context->groupset.angle_agg->SetOldDelayedAngularDOFsFromSTLVector(delayed_psi_new);
-      }
-
-      double dpsi_sum_sq = 0.0;
-      double psi_sum_sq = 0.0;
-      mpi_comm.all_reduce(dpsi_local_sum_sq, dpsi_sum_sq, mpi::op::sum<double>());
-      mpi_comm.all_reduce(psi_local_sum_sq, psi_sum_sq, mpi::op::sum<double>());
-      const double dpsi_norm = std::sqrt(dpsi_sum_sq);
-      const double psi_norm = std::sqrt(psi_sum_sq);
-      const double rel_change = (psi_norm > 0.0) ? dpsi_norm / psi_norm : dpsi_norm;
-      if (rel_change < lagged_psi_rel_tol)
-      {
-        lagged_psi_converged = true;
-        break;
-      }
+      // Keep source moments and scalar flux fixed at converged steady-state values.
+      GetQMomentsLocal() = q_moments_ref;
+      GetPhiOldLocal() = phi_new_ref;
+      wgs_context->RebuildAngularFluxFromConvergedPhi(false, true);
+      wgs_context->groupset.angle_agg->SetOldDelayedAngularDOFsFromSTLVector(
+        wgs_context->groupset.angle_agg->GetNewDelayedAngularDOFsAsSTLVector());
     }
-    if (not lagged_psi_converged)
-      log.Log0Warning() << GetName()
-                        << ": Lagged angular-flux reconstruction reached iteration limit ("
-                        << max_reconstruction_passes << ") without converging "
-                        << lagged_psi_rel_tol << ".";
     GetQMomentsLocal() = q_moments_ref;
 
     // Scale psi to match the norm of the cached steady-state phi, then restore cached phi.
@@ -1336,7 +1398,13 @@ DiscreteOrdinatesProblem::InitializeSweepDataStructures()
     if (quadrature_unq_so_grouping_map_.count(groupset.quadrature) == 0)
     {
       quadrature_unq_so_grouping_map_[groupset.quadrature] = AssociateSOsAndDirections(
-        grid_, *groupset.quadrature, groupset.angleagg_method, geometry_type_);
+        grid_,
+        *groupset.quadrature,
+        groupset.angleagg_method,
+        geometry_type_,
+        groupset.angle_aggregation_num_sets,
+        groupset.angle_aggregation_target_angles_per_set,
+        groupset.angle_aggregation_split_partition_faces);
     }
 
     if (quadrature_allow_cycles_map_.count(groupset.quadrature) == 0)
@@ -1686,7 +1754,10 @@ std::pair<UniqueSOGroupings, DirIDToSOMap>
 DiscreteOrdinatesProblem::AssociateSOsAndDirections(const std::shared_ptr<MeshContinuum> grid,
                                                     const AngularQuadrature& quadrature,
                                                     const AngleAggregationType agg_type,
-                                                    const GeometryType lbs_geo_type)
+                                                    const GeometryType lbs_geo_type,
+                                                    const int angle_aggregation_num_sets,
+                                                    const int angle_aggregation_target_angles_per_set,
+                                                    const bool angle_aggregation_split_partition_faces)
 {
 
   // Checks
@@ -1843,6 +1914,22 @@ DiscreteOrdinatesProblem::AssociateSOsAndDirections(const std::shared_ptr<MeshCo
 
       break;
     }
+    case AngleAggregationType::S4_COALESCED:
+    {
+      const std::size_t num_dirs = quadrature.GetNumAngles();
+      const int requested_num_groups =
+        angle_aggregation_target_angles_per_set > 0
+          ? static_cast<int>((num_dirs + angle_aggregation_target_angles_per_set - 1) /
+                             angle_aggregation_target_angles_per_set)
+          : angle_aggregation_num_sets;
+      const int target_group_count = std::min(requested_num_groups, static_cast<int>(num_dirs));
+      const auto features =
+        BuildCoalescingFeatures(grid, angle_aggregation_split_partition_faces);
+      auto groups = ClusterByOrientationSignature(quadrature, features, target_group_count);
+      for (auto& group : groups)
+        unq_so_grps.push_back(std::move(group));
+      break;
+    }
     default:
       throw std::invalid_argument(GetName() + ": Called with UNDEFINED angle aggregation type");
   } // switch angle aggregation type
@@ -1982,6 +2069,27 @@ DiscreteOrdinatesProblem::InitFluxDataStructures(LBSGroupset& groupset)
   } // for so_grouping
 
   groupset.angle_agg->BuildDirnumToAnglesetMap();
+
+  {
+    const auto& angle_sets = groupset.angle_agg->GetAngleSetGroups();
+    std::ostringstream out;
+    out << program_timer.GetTimeString() << " Groupset " << groupset.id << " angle sets: "
+        << angle_sets.size();
+    if (groupset.angleagg_method == AngleAggregationType::S4_COALESCED)
+      out << " (requested " << groupset.angle_aggregation_num_sets
+          << ", target_angles_per_set=" << groupset.angle_aggregation_target_angles_per_set
+          << ", split_partition_faces="
+          << (groupset.angle_aggregation_split_partition_faces ? "true" : "false") << ")";
+    out << "; angles per set: [";
+    for (std::size_t i = 0; i < angle_sets.size(); ++i)
+    {
+      if (i > 0)
+        out << ", ";
+      out << angle_sets[i]->GetNumAngles();
+    }
+    out << "]";
+    log.Log0() << no_wrap << out.str();
+  }
 
   opensn::mpi_comm.barrier();
 }

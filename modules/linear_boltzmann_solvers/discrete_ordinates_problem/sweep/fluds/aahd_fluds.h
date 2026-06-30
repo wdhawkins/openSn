@@ -40,6 +40,8 @@ struct AAHD_Bank
   void DownloadToHost();
   /// Download data from device to host asynchronously.
   void DownloadToHost(crb::Stream& stream);
+  void CopyDeviceFrom(const AAHD_Bank& other, crb::Stream& stream);
+  void ZeroDevice();
 
   /// Check if the bank is not initialized.
   bool IsNotInitialized() { return device_storage.get() == nullptr; }
@@ -96,9 +98,15 @@ struct AAHD_NonLocalDelayedBank : public AAHD_NonLocalBank
   void SetNewToOld();
   /// Set old delayed views to current delayed views.
   void SetOldToNew();
+  void UploadCurrentToDevice(crb::Stream& stream);
+  void DownloadCurrentToHost(crb::Stream& stream);
+  void CopyCurrentDeviceToOldDevice(crb::Stream& stream);
+  void ZeroCurrentDevice();
+  double* CurrentDevicePointer() { return device_current_storage.get(); }
 
   /// Host storage for current delayed bank.
   crb::HostVector<double> host_current_storage;
+  crb::DeviceMemory<double> device_current_storage;
 };
 
 /// AAH FLUDS for device.
@@ -149,10 +157,18 @@ public:
   {
     return common_data_.GetNumNonLocalDelayedIncomingNodes()[loc] * num_groups_and_angles_;
   }
+  inline std::size_t GetPromotedDelayedIncomingNumUnknowns(std::size_t loc) const
+  {
+    return common_data_.GetPromotedDelayedIncomingNodeSizes()[loc] * num_groups_;
+  }
   /// Get size of non-local outgoing bank
   inline std::size_t GetNonLocalOutgoingNumUnknowns(std::size_t loc) const
   {
     return common_data_.GetNumNonLocalOutgoingNodes()[loc] * num_groups_and_angles_;
+  }
+  inline std::size_t GetPromotedDelayedOutgoingNumUnknowns(std::size_t loc) const
+  {
+    return common_data_.GetPromotedDelayedOutgoingNodeSizes()[loc] * num_groups_;
   }
   /// Get number of groups by number of angles
   inline std::size_t GetStrideSize() const { return num_groups_and_angles_; }
@@ -168,12 +184,28 @@ public:
   void SetDelayedLocalPsiOldToNew() override;
   /// Set delayed local new psi to old psi.
   void SetDelayedLocalPsiNewToOld() override;
+  std::span<double> ABDelayedPsi() override { return std::span<double>(ab_delayed_psi_bank_.host_storage); }
+  std::span<double> ABDelayedPsiOld() override
+  {
+    return std::span<double>(ab_delayed_psi_old_bank_.host_storage);
+  }
+  std::span<double> PromotedDelayedPsi() override
+  {
+    return std::span<double>(promoted_delayed_incoming_psi_bank_.host_current_storage);
+  }
+  std::span<double> PromotedDelayedPsiOld() override
+  {
+    return std::span<double>(promoted_delayed_incoming_psi_bank_.host_storage);
+  }
   /// \}
 
   /// \name Sweep preparation and clean up
   /// \{
   /// Copy delayed local and delayed non-local incoming psi to device.
   void CopyDelayedPsiToDevice();
+  void CopyNonLocalOutgoingPsiFromDevice();
+  void CopyLocalDelayedPsiFromDevice();
+  void CopyPromotedDelayedOutgoingPsiFromDevice();
   /// Copy non-local incoming psi to device.
   void CopyNonLocalIncomingPsiToDevice();
   /// Get device pointers for each bank in FLUDS.
@@ -187,6 +219,44 @@ public:
                                            const LBSGroupset& groupset,
                                            AngleSet& angle_set);
   /// \}
+
+  bool HasNonLocalIncomingPsi() const
+  {
+    return common_data_.GetNonLocalIncomingNodeOffsets().back() > 0;
+  }
+  bool HasNonLocalDelayedIncomingPsi() const
+  {
+    return common_data_.GetNonLocalDelayedIncomingNodeOffsets().back() > 0;
+  }
+  bool HasNonLocalOutgoingPsi() const
+  {
+    return common_data_.GetNonLocalOutgoingNodeOffsets().back() > 0;
+  }
+  bool HasPromotedDelayedIncomingPsi() const
+  {
+    return common_data_.GetPromotedDelayedIncomingNodeOffsets().back() > 0;
+  }
+  bool HasPromotedDelayedOutgoingPsi() const
+  {
+    return common_data_.GetPromotedDelayedOutgoingNodeOffsets().back() > 0;
+  }
+  bool HasAnyLocalDelayedPsi() const
+  {
+    return common_data_.GetTotalDelayedLocalNodes() > 0;
+  }
+  double* DevicePrelocIOutgoingPsi(std::size_t loc, std::size_t block_pos = 0);
+  double* DeviceDelayedPrelocIOutgoingPsi(std::size_t loc, std::size_t block_pos = 0);
+  double* DeviceDeplocIOutgoingPsi(std::size_t loc, std::size_t block_pos = 0);
+  double* DevicePromotedDelayedIncomingPsi(std::size_t loc, std::size_t block_pos = 0);
+  double* DevicePromotedDelayedOutgoingPsi(std::size_t loc, std::size_t block_pos = 0);
+  std::vector<std::span<double>>& PromotedDelayedIncomingPsiByLoc()
+  {
+    return delayed_promoted_incoming_psi_view_;
+  }
+  std::vector<std::span<double>>& PromotedDelayedOutgoingPsiByLoc()
+  {
+    return promoted_delayed_outgoing_psi_view_;
+  }
 
   /// Get reference to the common data
   const AAHD_FLUDSCommonData& GetCommonData() { return common_data_; }
@@ -208,6 +278,8 @@ protected:
   AAHD_DelayedLocalBank delayed_local_psi_bank_;
   /// Delayed local bank for old angular fluxes.
   AAHD_DelayedLocalBank delayed_local_psi_old_bank_;
+  AAHD_Bank ab_delayed_psi_bank_;
+  AAHD_Bank ab_delayed_psi_old_bank_;
 
   /// Non-local bank for incoming angular fluxes.
   AAHD_NonLocalBank nonlocal_incoming_psi_bank_;
@@ -215,6 +287,11 @@ protected:
   AAHD_NonLocalDelayedBank nonlocal_delayed_incoming_psi_bank_;
   /// Non-local bank for outgoing angular fluxes.
   AAHD_NonLocalBank nonlocal_outgoing_psi_bank_;
+  AAHD_NonLocalDelayedBank promoted_delayed_incoming_psi_bank_;
+  AAHD_NonLocalBank promoted_delayed_outgoing_psi_bank_;
+  std::vector<std::span<double>> delayed_promoted_incoming_psi_view_;
+  std::vector<std::span<double>> delayed_promoted_incoming_psi_old_view_;
+  std::vector<std::span<double>> promoted_delayed_outgoing_psi_view_;
 
   /// Storage for saved angular fluxes.
   AAHD_Bank save_angular_flux_;

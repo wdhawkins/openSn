@@ -40,7 +40,7 @@ public:
 
   void SetMaxBufferMessages(int count) override { async_comm_.SetMaxNumMessages(count); }
 
-  void PrepostReceives();
+  void PrepostReceives(bool use_device_buffers = false, bool delayed_psi_on_device = false);
 
   bool IsReady();
 

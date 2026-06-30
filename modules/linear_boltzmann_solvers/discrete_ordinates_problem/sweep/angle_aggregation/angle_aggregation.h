@@ -28,6 +28,7 @@ enum class AngleAggregationType
   SINGLE = 1,
   POLAR = 2,
   AZIMUTHAL = 3,
+  S4_COALESCED = 4,
 };
 
 /**

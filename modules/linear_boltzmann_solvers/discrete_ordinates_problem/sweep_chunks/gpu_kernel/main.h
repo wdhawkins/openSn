@@ -72,7 +72,14 @@ SweepKernel(Arguments<t> args,
   MeshView(args.mesh_data).GetCellView(cell, cell_local_idx);
   if (cell.num_nodes == 0)
     return;
-  auto [cell_edge_data, _] = GetCellDataIndex(args.flud_index, cell_local_idx);
+  const auto* flud_index = [&]() -> const std::uint64_t*
+  {
+    if constexpr (t == SweepType::AAH)
+      return args.flud_indices[angle_idx];
+    else
+      return args.flud_index;
+  }();
+  auto [cell_edge_data, _] = GetCellDataIndex(flud_index, cell_local_idx);
   std::uint32_t num_moments;
   std::uint32_t direction_num = args.directions[angle_idx];
   DirectionView direction;

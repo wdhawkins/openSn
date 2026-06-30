@@ -60,6 +60,20 @@ AAHD_Bank::Clear()
   device_storage.reset();
 }
 
+void
+AAHD_Bank::CopyDeviceFrom(const AAHD_Bank& other, crb::Stream& stream)
+{
+  if (device_storage.size() > 0)
+    crb::copy(device_storage, other.device_storage, device_storage.size(), 0, 0, stream);
+}
+
+void
+AAHD_Bank::ZeroDevice()
+{
+  if (device_storage.size() > 0)
+    device_storage.zero_fill();
+}
+
 AAHD_NonLocalBank::AAHD_NonLocalBank(const std::vector<std::size_t>& loc_sizes,
                                      const std::vector<std::size_t>& loc_offsets,
                                      std::size_t stride)
@@ -86,6 +100,7 @@ AAHD_NonLocalDelayedBank::AAHD_NonLocalDelayedBank(const std::vector<std::size_t
   : AAHD_NonLocalBank(loc_sizes, loc_offsets, stride)
 {
   host_current_storage = crb::HostVector<double>(loc_offsets.back() * stride_size, 0.0);
+  device_current_storage = crb::DeviceMemory<double>(loc_offsets.back() * stride_size);
 }
 
 void
@@ -119,6 +134,34 @@ AAHD_NonLocalDelayedBank::SetNewToOld()
     host_storage.data(), host_current_storage.data(), host_storage.size() * sizeof(double));
 }
 
+void
+AAHD_NonLocalDelayedBank::UploadCurrentToDevice(crb::Stream& stream)
+{
+  if (host_current_storage.size() > 0)
+    crb::copy(device_current_storage, host_current_storage, host_current_storage.size(), 0, 0, stream);
+}
+
+void
+AAHD_NonLocalDelayedBank::DownloadCurrentToHost(crb::Stream& stream)
+{
+  if (host_current_storage.size() > 0)
+    crb::copy(host_current_storage, device_current_storage, host_current_storage.size(), 0, 0, stream);
+}
+
+void
+AAHD_NonLocalDelayedBank::CopyCurrentDeviceToOldDevice(crb::Stream& stream)
+{
+  if (device_storage.size() > 0)
+    crb::copy(device_storage, device_current_storage, device_storage.size(), 0, 0, stream);
+}
+
+void
+AAHD_NonLocalDelayedBank::ZeroCurrentDevice()
+{
+  if (device_current_storage.size() > 0)
+    device_current_storage.zero_fill();
+}
+
 AAHD_FLUDS::AAHD_FLUDS(unsigned int num_groups,
                        std::size_t num_angles,
                        const AAHD_FLUDSCommonData& common_data)
@@ -139,12 +182,32 @@ AAHD_FLUDS::AAHD_FLUDS(unsigned int num_groups,
 void
 AAHD_FLUDS::AllocateDelayedLocalPsi()
 {
-  delayed_local_psi_bank_ =
-    AAHD_DelayedLocalBank(common_data_.GetNumDelayedLocalNodes(), num_groups_and_angles_);
+  const std::size_t fas_count = common_data_.GetNumDelayedLocalNodes();
+  delayed_local_psi_bank_ = AAHD_DelayedLocalBank(fas_count, num_groups_and_angles_);
   delayed_local_psi_view_ = std::span<double>(delayed_local_psi_bank_.host_storage);
-  delayed_local_psi_old_bank_ =
-    AAHD_DelayedLocalBank(common_data_.GetNumDelayedLocalNodes(), num_groups_and_angles_);
+  delayed_local_psi_bank_.UploadToDevice();
+  delayed_local_psi_old_bank_ = AAHD_DelayedLocalBank(fas_count, num_groups_and_angles_);
   delayed_local_psi_old_view_ = std::span<double>(delayed_local_psi_old_bank_.host_storage);
+
+  const std::size_t ab_count = common_data_.GetTotalDelayedLocalNodes() - fas_count;
+  if (ab_count > 0)
+  {
+    ab_delayed_psi_bank_ = AAHD_Bank(ab_count * num_groups_);
+    ab_delayed_psi_old_bank_ = AAHD_Bank(ab_count * num_groups_);
+  }
+
+  promoted_delayed_incoming_psi_bank_ =
+    AAHD_NonLocalDelayedBank(common_data_.GetPromotedDelayedIncomingNodeSizes(),
+                             common_data_.GetPromotedDelayedIncomingNodeOffsets(),
+                             num_groups_);
+  promoted_delayed_incoming_psi_bank_.UpdateViews(delayed_promoted_incoming_psi_view_,
+                                                  delayed_promoted_incoming_psi_old_view_);
+
+  promoted_delayed_outgoing_psi_bank_ =
+    AAHD_NonLocalBank(common_data_.GetPromotedDelayedOutgoingNodeSizes(),
+                      common_data_.GetPromotedDelayedOutgoingNodeOffsets(),
+                      num_groups_);
+  promoted_delayed_outgoing_psi_bank_.UpdateViews(promoted_delayed_outgoing_psi_view_);
 }
 
 void
@@ -172,39 +235,50 @@ void
 AAHD_FLUDS::SetDelayedOutgoingPsiOldToNew()
 {
   nonlocal_delayed_incoming_psi_bank_.SetOldToNew();
+  promoted_delayed_incoming_psi_bank_.SetOldToNew();
 }
 
 void
 AAHD_FLUDS::SetDelayedOutgoingPsiNewToOld()
 {
   nonlocal_delayed_incoming_psi_bank_.SetNewToOld();
+  promoted_delayed_incoming_psi_bank_.SetNewToOld();
 }
 
 void
 AAHD_FLUDS::SetDelayedLocalPsiOldToNew()
 {
-  delayed_local_psi_bank_ = delayed_local_psi_old_bank_;
+  delayed_local_psi_bank_.host_storage = delayed_local_psi_old_bank_.host_storage;
   delayed_local_psi_view_ = std::span<double>(delayed_local_psi_bank_.host_storage);
+  ab_delayed_psi_bank_.host_storage = ab_delayed_psi_old_bank_.host_storage;
 }
 
 void
 AAHD_FLUDS::SetDelayedLocalPsiNewToOld()
 {
-  delayed_local_psi_old_bank_ = delayed_local_psi_bank_;
+  delayed_local_psi_old_bank_.host_storage = delayed_local_psi_bank_.host_storage;
   delayed_local_psi_old_view_ = std::span<double>(delayed_local_psi_old_bank_.host_storage);
+  ab_delayed_psi_old_bank_.host_storage = ab_delayed_psi_bank_.host_storage;
 }
 
 void
 AAHD_FLUDS::CopyDelayedPsiToDevice()
 {
-  delayed_local_psi_old_bank_.UploadToDevice(stream_);
-  nonlocal_delayed_incoming_psi_bank_.UploadToDevice(stream_);
+  if (common_data_.GetNumDelayedLocalNodes() > 0)
+    delayed_local_psi_old_bank_.UploadToDevice(stream_);
+  if (not ab_delayed_psi_old_bank_.IsNotInitialized())
+    ab_delayed_psi_old_bank_.UploadToDevice(stream_);
+  if (HasNonLocalDelayedIncomingPsi())
+    nonlocal_delayed_incoming_psi_bank_.UploadToDevice(stream_);
+  if (HasPromotedDelayedIncomingPsi())
+    promoted_delayed_incoming_psi_bank_.UploadToDevice(stream_);
 }
 
 void
 AAHD_FLUDS::CopyNonLocalIncomingPsiToDevice()
 {
-  nonlocal_incoming_psi_bank_.UploadToDevice(stream_);
+  if (HasNonLocalIncomingPsi())
+    nonlocal_incoming_psi_bank_.UploadToDevice(stream_);
 }
 
 AAHD_FLUDSPointerSet
@@ -215,14 +289,17 @@ AAHD_FLUDS::GetDevicePointerSet()
   pointer_set.local_psi = local_psi_.get();
   if (common_data_.GetLocalNodeStackSize() > 0)
     assert(pointer_set.local_psi != nullptr);
-  // delayed local psi
+  pointer_set.fas_count = common_data_.GetNumDelayedLocalNodes();
   pointer_set.delayed_local_psi = delayed_local_psi_bank_.device_storage.get();
   pointer_set.delayed_local_psi_old = delayed_local_psi_old_bank_.device_storage.get();
-  if (common_data_.GetNumDelayedLocalNodes() > 0)
+  if (pointer_set.fas_count > 0)
   {
     assert(pointer_set.delayed_local_psi != nullptr);
     assert(pointer_set.delayed_local_psi_old != nullptr);
   }
+  pointer_set.groupset_size = num_groups_;
+  pointer_set.ab_delayed_psi = ab_delayed_psi_bank_.device_storage.get();
+  pointer_set.ab_delayed_psi_old = ab_delayed_psi_old_bank_.device_storage.get();
   // non-local psi
   pointer_set.nonlocal_incoming_psi = nonlocal_incoming_psi_bank_.device_storage.get();
   if (common_data_.GetNonLocalIncomingNodeOffsets().back() > 0)
@@ -231,10 +308,18 @@ AAHD_FLUDS::GetDevicePointerSet()
   }
   pointer_set.nonlocal_delayed_incoming_psi_old =
     nonlocal_delayed_incoming_psi_bank_.device_storage.get();
+  pointer_set.nonlocal_delayed_incoming_count =
+    common_data_.GetNonLocalDelayedIncomingNodeOffsets().back();
   if (common_data_.GetNonLocalDelayedIncomingNodeOffsets().back() > 0)
   {
     assert(pointer_set.nonlocal_delayed_incoming_psi_old != nullptr);
   }
+  pointer_set.promoted_delayed_incoming_psi =
+    promoted_delayed_incoming_psi_bank_.CurrentDevicePointer();
+  pointer_set.promoted_delayed_incoming_psi_old =
+    promoted_delayed_incoming_psi_bank_.device_storage.get();
+  pointer_set.promoted_delayed_outgoing_psi =
+    promoted_delayed_outgoing_psi_bank_.device_storage.get();
   pointer_set.nonlocal_outgoing_psi = nonlocal_outgoing_psi_bank_.device_storage.get();
   if (common_data_.GetNonLocalOutgoingNodeOffsets().back() > 0)
   {
@@ -248,8 +333,71 @@ AAHD_FLUDS::GetDevicePointerSet()
 void
 AAHD_FLUDS::CopyPsiFromDevice()
 {
-  nonlocal_outgoing_psi_bank_.DownloadToHost(stream_);
-  delayed_local_psi_bank_.DownloadToHost(stream_);
+  if (HasNonLocalOutgoingPsi())
+    nonlocal_outgoing_psi_bank_.DownloadToHost(stream_);
+  if (common_data_.GetNumDelayedLocalNodes() > 0)
+    delayed_local_psi_bank_.DownloadToHost(stream_);
+  if (not ab_delayed_psi_bank_.IsNotInitialized())
+    ab_delayed_psi_bank_.DownloadToHost(stream_);
+}
+
+void
+AAHD_FLUDS::CopyNonLocalOutgoingPsiFromDevice()
+{
+  if (HasNonLocalOutgoingPsi())
+    nonlocal_outgoing_psi_bank_.DownloadToHost(stream_);
+}
+
+void
+AAHD_FLUDS::CopyLocalDelayedPsiFromDevice()
+{
+  if (common_data_.GetNumDelayedLocalNodes() > 0)
+    delayed_local_psi_bank_.DownloadToHost(stream_);
+  if (not ab_delayed_psi_bank_.IsNotInitialized())
+    ab_delayed_psi_bank_.DownloadToHost(stream_);
+}
+
+void
+AAHD_FLUDS::CopyPromotedDelayedOutgoingPsiFromDevice()
+{
+  if (HasPromotedDelayedOutgoingPsi())
+    promoted_delayed_outgoing_psi_bank_.DownloadToHost(stream_);
+}
+
+double*
+AAHD_FLUDS::DevicePrelocIOutgoingPsi(std::size_t loc, std::size_t block_pos)
+{
+  const auto offset = common_data_.GetNonLocalIncomingNodeOffsets()[loc] * num_groups_and_angles_;
+  return nonlocal_incoming_psi_bank_.device_storage.get() + offset + block_pos;
+}
+
+double*
+AAHD_FLUDS::DeviceDelayedPrelocIOutgoingPsi(std::size_t loc, std::size_t block_pos)
+{
+  const auto offset =
+    common_data_.GetNonLocalDelayedIncomingNodeOffsets()[loc] * num_groups_and_angles_;
+  return nonlocal_delayed_incoming_psi_bank_.CurrentDevicePointer() + offset + block_pos;
+}
+
+double*
+AAHD_FLUDS::DeviceDeplocIOutgoingPsi(std::size_t loc, std::size_t block_pos)
+{
+  const auto offset = common_data_.GetNonLocalOutgoingNodeOffsets()[loc] * num_groups_and_angles_;
+  return nonlocal_outgoing_psi_bank_.device_storage.get() + offset + block_pos;
+}
+
+double*
+AAHD_FLUDS::DevicePromotedDelayedIncomingPsi(std::size_t loc, std::size_t block_pos)
+{
+  const auto offset = common_data_.GetPromotedDelayedIncomingNodeOffsets()[loc] * num_groups_;
+  return promoted_delayed_incoming_psi_bank_.CurrentDevicePointer() + offset + block_pos;
+}
+
+double*
+AAHD_FLUDS::DevicePromotedDelayedOutgoingPsi(std::size_t loc, std::size_t block_pos)
+{
+  const auto offset = common_data_.GetPromotedDelayedOutgoingNodeOffsets()[loc] * num_groups_;
+  return promoted_delayed_outgoing_psi_bank_.device_storage.get() + offset + block_pos;
 }
 
 void

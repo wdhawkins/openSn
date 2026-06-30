@@ -66,6 +66,9 @@ public:
   std::shared_ptr<AngleAggregation> angle_agg;
   UniqueSOGroupings unique_so_groupings;
   DirIDToSOMap dir_id_to_so_map;
+  int angle_aggregation_num_sets;
+  int angle_aggregation_target_angles_per_set;
+  bool angle_aggregation_split_partition_faces;
 
   LinearSystemSolver::IterativeMethod iterative_method;
   AngleAggregationType angleagg_method;

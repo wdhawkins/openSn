@@ -368,7 +368,10 @@ private:
   AssociateSOsAndDirections(std::shared_ptr<MeshContinuum> grid,
                             const AngularQuadrature& quadrature,
                             AngleAggregationType agg_type,
-                            GeometryType lbs_geo_type);
+                            GeometryType lbs_geo_type,
+                            int angle_aggregation_num_sets,
+                            int angle_aggregation_target_angles_per_set,
+                            bool angle_aggregation_split_partition_faces);
 
   void UpdateAngularFluxStorage();
   void UpdateAngularFluxFieldFunction(FieldFunctionGridBased& ff,

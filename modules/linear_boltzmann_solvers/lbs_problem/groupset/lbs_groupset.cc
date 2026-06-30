@@ -30,6 +30,23 @@ LBSGroupset::GetInputParameters()
     "angular_quadrature", nullptr, "A handle to an angular quadrature");
   params.AddOptionalParameter(
     "angle_aggregation_type", "polar", "The angle aggregation method to use during sweeping");
+  params.AddOptionalParameter("angle_aggregation_num_sets",
+                              96,
+                              "Target number of angle sets for s4_coalesced angle aggregation. "
+                              "The final count can be larger only when conservative splitting "
+                              "options are enabled.");
+  params.AddOptionalParameter(
+    "angle_aggregation_target_angles_per_set",
+    0,
+    "For s4_coalesced angle aggregation, target this many angles per angle set. "
+    "A value of 0 disables this option. When positive, this takes precedence over "
+    "angle_aggregation_num_sets and derives the set count as ceil(num_angles / target).");
+  params.AddOptionalParameter("angle_aggregation_split_partition_faces",
+                              false,
+                              "For s4_coalesced angle aggregation, split angle sets when angles "
+                              "disagree on inter-rank partition face orientation. This is a "
+                              "conservative fallback; by default, disagreement is handled with "
+                              "promoted cross-rank delayed angular unknowns.");
 
   // Iterative method
   params.AddOptionalParameter("inner_linear_method",
@@ -87,8 +104,12 @@ LBSGroupset::GetInputParameters()
   params.AddOptionalParameter("tgdsa_petsc_options", "", "PETSc options to pass to TGDSA solver");
 
   // Constraints
-  params.ConstrainParameterRange("angle_aggregation_type",
-                                 AllowableRangeList::New({"polar", "single", "azimuthal"}));
+  params.ConstrainParameterRange(
+    "angle_aggregation_type",
+    AllowableRangeList::New({"polar", "single", "azimuthal", "s4_coalesced"}));
+  params.ConstrainParameterRange("angle_aggregation_num_sets", AllowableRangeLowLimit::New(1));
+  params.ConstrainParameterRange("angle_aggregation_target_angles_per_set",
+                                 AllowableRangeLowLimit::New(0));
   params.ConstrainParameterRange(
     "inner_linear_method",
     AllowableRangeList::New(
@@ -120,6 +141,9 @@ LBSGroupset::Init(int aid)
   size = 0;
   quadrature = nullptr;
   angle_agg = nullptr;
+  angle_aggregation_num_sets = 96;
+  angle_aggregation_target_angles_per_set = 0;
+  angle_aggregation_split_partition_faces = false;
   iterative_method = LinearSystemSolver::IterativeMethod::PETSC_RICHARDSON;
   angleagg_method = AngleAggregationType::POLAR;
   residual_tolerance = 1.0e-6;
@@ -181,6 +205,14 @@ LBSGroupset::LBSGroupset( // NOLINT(cppcoreguidelines-pro-type-member-init)
     angleagg_method = AngleAggregationType::SINGLE;
   else if (angle_agg_typestr == "azimuthal")
     angleagg_method = AngleAggregationType::AZIMUTHAL;
+  else if (angle_agg_typestr == "s4_coalesced")
+    angleagg_method = AngleAggregationType::S4_COALESCED;
+
+  angle_aggregation_num_sets = params.GetParamValue<int>("angle_aggregation_num_sets");
+  angle_aggregation_target_angles_per_set =
+    params.GetParamValue<int>("angle_aggregation_target_angles_per_set");
+  angle_aggregation_split_partition_faces =
+    params.GetParamValue<bool>("angle_aggregation_split_partition_faces");
 
   // Inner solver
   const auto inner_linear_method = params.GetParamValue<std::string>("inner_linear_method");
