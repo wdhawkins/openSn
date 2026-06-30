@@ -17,6 +17,7 @@ struct SweepWGSContext : public WGSContext
   {
     double total_sweep_time = 0.0;
     size_t num_sweeps = 0;
+    size_t num_sweep_passes = 0;
   };
 
   SweepWGSContext(DiscreteOrdinatesProblem& do_problem,

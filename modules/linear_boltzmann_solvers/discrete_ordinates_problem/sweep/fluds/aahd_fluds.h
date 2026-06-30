@@ -203,6 +203,14 @@ public:
   /// \{
   /// Copy delayed local and delayed non-local incoming psi to device.
   void CopyDelayedPsiToDevice();
+  /// Copy delayed angular output/current device banks to old device banks.
+  void CopyDelayedPsiNewToOldOnDevice();
+  /// Compute device-side sums for ||psi_new - psi_old||_2^2 and ||psi_new||_2^2.
+  std::pair<double, double> ComputeDelayedPsiChangeSumsOnDevice();
+  /// Download all delayed angular output/current banks needed for convergence diagnostics.
+  void CopyDelayedPsiNewToHost();
+  /// Zero delayed angular output/current device banks before a repeated sweep pass.
+  void ZeroDelayedPsiNewOnDevice();
   void CopyNonLocalOutgoingPsiFromDevice();
   void CopyLocalDelayedPsiFromDevice();
   void CopyPromotedDelayedOutgoingPsiFromDevice();

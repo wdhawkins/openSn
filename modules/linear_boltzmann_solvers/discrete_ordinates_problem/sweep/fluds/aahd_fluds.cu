@@ -5,11 +5,106 @@
 #include "modules/linear_boltzmann_solvers/lbs_problem/device/carrier/mesh_carrier.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/discrete_ordinates_problem.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/angle_set/aahd_angle_set.h"
+#include "framework/utils/error.h"
 #include <cstring>
 #include <numeric>
 
 namespace opensn
 {
+namespace
+{
+
+constexpr unsigned int kReductionBlockSize = 256;
+
+__CRB_GLOBAL_FUNC__ void
+AccumulatePsiChangeSumsKernel(const double* psi_old,
+                              const double* psi_new,
+                              std::size_t size,
+                              double* sums)
+{
+#if defined(__NVCC__) || defined(__HIPCC__)
+  __shared__ double block_delta_sum[kReductionBlockSize];
+  __shared__ double block_new_sum[kReductionBlockSize];
+  const unsigned int tid = threadIdx.x;
+  const std::size_t stride = blockDim.x * gridDim.x;
+  std::size_t i = threadIdx.x + blockDim.x * blockIdx.x;
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+  auto work_index = ::sycl::ext::oneapi::this_work_item::get_nd_item<3>();
+  const std::size_t stride = work_index.get_local_range(2) * work_index.get_group_range(2);
+  std::size_t i = work_index.get_global_id(2);
+#endif
+
+  double delta_sum = 0.0;
+  double new_sum = 0.0;
+  while (i < size)
+  {
+    const double old_value = psi_old[i];
+    const double new_value = psi_new[i];
+    const double delta = new_value - old_value;
+    delta_sum += delta * delta;
+    new_sum += new_value * new_value;
+    i += stride;
+  }
+
+#if defined(__NVCC__) || defined(__HIPCC__)
+  block_delta_sum[tid] = delta_sum;
+  block_new_sum[tid] = new_sum;
+  __syncthreads();
+  for (unsigned int offset = kReductionBlockSize / 2; offset > 0; offset /= 2)
+  {
+    if (tid < offset)
+    {
+      block_delta_sum[tid] += block_delta_sum[tid + offset];
+      block_new_sum[tid] += block_new_sum[tid + offset];
+    }
+    __syncthreads();
+  }
+
+  if (tid == 0)
+  {
+    crb::atomic_add(&sums[0], block_delta_sum[0]);
+    crb::atomic_add(&sums[1], block_new_sum[0]);
+  }
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+  crb::atomic_add(&sums[0], delta_sum);
+  crb::atomic_add(&sums[1], new_sum);
+#endif
+}
+
+void
+AccumulatePsiChangeSums(const crb::DeviceMemory<double>& old_storage,
+                        const crb::DeviceMemory<double>& new_storage,
+                        crb::DeviceMemory<double>& sums,
+                        crb::Stream& stream)
+{
+  const std::size_t size = old_storage.size();
+  if (size == 0)
+    return;
+
+  OpenSnLogicalErrorIf(size != new_storage.size(),
+                       "Delayed angular flux convergence check has mismatched bank sizes.");
+
+  const unsigned int num_blocks =
+    static_cast<unsigned int>(std::min<std::size_t>((size + kReductionBlockSize - 1) /
+                                                      kReductionBlockSize,
+                                                    65535));
+#if defined(__NVCC__) || defined(__HIPCC__)
+  AccumulatePsiChangeSumsKernel<<<num_blocks, kReductionBlockSize, 0, stream>>>(
+    old_storage.get(), new_storage.get(), size, sums.get());
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+  const crb::Dim3 block_size(kReductionBlockSize);
+  const crb::Dim3 grid_size(num_blocks);
+  stream.parallel_for(sycl::nd_range<3>(grid_size * block_size, block_size),
+                      [=](sycl::nd_item<3>)
+                      {
+                        AccumulatePsiChangeSumsKernel(
+                          old_storage.get(), new_storage.get(), size, sums.get());
+                      });
+#endif
+}
+
+} // namespace
+
 AAHD_Bank::AAHD_Bank(const AAHD_Bank& other)
   : host_storage(other.host_storage), device_storage(other.device_storage.size())
 {
@@ -272,6 +367,76 @@ AAHD_FLUDS::CopyDelayedPsiToDevice()
     nonlocal_delayed_incoming_psi_bank_.UploadToDevice(stream_);
   if (HasPromotedDelayedIncomingPsi())
     promoted_delayed_incoming_psi_bank_.UploadToDevice(stream_);
+}
+
+void
+AAHD_FLUDS::CopyDelayedPsiNewToOldOnDevice()
+{
+  if (common_data_.GetNumDelayedLocalNodes() > 0)
+    delayed_local_psi_old_bank_.CopyDeviceFrom(delayed_local_psi_bank_, stream_);
+  if (not ab_delayed_psi_old_bank_.IsNotInitialized())
+    ab_delayed_psi_old_bank_.CopyDeviceFrom(ab_delayed_psi_bank_, stream_);
+  if (HasNonLocalDelayedIncomingPsi())
+    nonlocal_delayed_incoming_psi_bank_.CopyCurrentDeviceToOldDevice(stream_);
+  if (HasPromotedDelayedIncomingPsi())
+    promoted_delayed_incoming_psi_bank_.CopyCurrentDeviceToOldDevice(stream_);
+}
+
+std::pair<double, double>
+AAHD_FLUDS::ComputeDelayedPsiChangeSumsOnDevice()
+{
+  crb::DeviceMemory<double> device_sums(2);
+  device_sums.zero_fill();
+
+  if (common_data_.GetNumDelayedLocalNodes() > 0)
+    AccumulatePsiChangeSums(
+      delayed_local_psi_old_bank_.device_storage, delayed_local_psi_bank_.device_storage, device_sums, stream_);
+  if (not ab_delayed_psi_old_bank_.IsNotInitialized())
+    AccumulatePsiChangeSums(
+      ab_delayed_psi_old_bank_.device_storage, ab_delayed_psi_bank_.device_storage, device_sums, stream_);
+  if (HasNonLocalDelayedIncomingPsi())
+    AccumulatePsiChangeSums(nonlocal_delayed_incoming_psi_bank_.device_storage,
+                            nonlocal_delayed_incoming_psi_bank_.device_current_storage,
+                            device_sums,
+                            stream_);
+  if (HasPromotedDelayedIncomingPsi())
+    AccumulatePsiChangeSums(promoted_delayed_incoming_psi_bank_.device_storage,
+                            promoted_delayed_incoming_psi_bank_.device_current_storage,
+                            device_sums,
+                            stream_);
+
+  crb::HostVector<double> host_sums(2, 0.0);
+  crb::copy(host_sums, device_sums, host_sums.size(), 0, 0, stream_);
+  stream_.synchronize();
+  return {host_sums[0], host_sums[1]};
+}
+
+void
+AAHD_FLUDS::CopyDelayedPsiNewToHost()
+{
+  if (common_data_.GetNumDelayedLocalNodes() > 0)
+    delayed_local_psi_bank_.DownloadToHost(stream_);
+  if (not ab_delayed_psi_bank_.IsNotInitialized())
+    ab_delayed_psi_bank_.DownloadToHost(stream_);
+  if (HasNonLocalDelayedIncomingPsi())
+    nonlocal_delayed_incoming_psi_bank_.DownloadCurrentToHost(stream_);
+  if (HasPromotedDelayedIncomingPsi())
+    promoted_delayed_incoming_psi_bank_.DownloadCurrentToHost(stream_);
+}
+
+void
+AAHD_FLUDS::ZeroDelayedPsiNewOnDevice()
+{
+  if (common_data_.GetNumDelayedLocalNodes() > 0)
+    delayed_local_psi_bank_.ZeroDevice();
+  if (not ab_delayed_psi_bank_.IsNotInitialized())
+    ab_delayed_psi_bank_.ZeroDevice();
+  if (HasNonLocalDelayedIncomingPsi())
+    nonlocal_delayed_incoming_psi_bank_.ZeroCurrentDevice();
+  if (HasPromotedDelayedIncomingPsi())
+    promoted_delayed_incoming_psi_bank_.ZeroCurrentDevice();
+  if (HasPromotedDelayedOutgoingPsi())
+    promoted_delayed_outgoing_psi_bank_.ZeroDevice();
 }
 
 void

@@ -79,341 +79,6 @@ GetGlobalUniqueBoundaryIDs(const std::shared_ptr<MeshContinuum>& grid, mpi::Comm
   return global_unique_bids_set;
 }
 
-struct OrientationFeature
-{
-  Vector3 normal;
-  double weight = 1.0;
-};
-
-std::vector<OrientationFeature>
-BuildCoalescingFeatures(const std::shared_ptr<MeshContinuum>& grid,
-                        const bool include_partition_face_signatures)
-{
-  constexpr int kQuantizationBins = 24;
-  constexpr std::size_t kMaxFeatures = 96;
-  std::map<std::tuple<int, int, int>, OrientationFeature> aggregated_features;
-
-  for (const auto& cell : grid->local_cells)
-    for (const auto& face : cell.faces)
-    {
-      const bool is_partition_face = face.has_neighbor and not face.IsNeighborLocal(grid.get());
-      const bool is_local_face = face.has_neighbor and face.IsNeighborLocal(grid.get());
-      if (not is_partition_face and not is_local_face)
-        continue;
-      if (is_partition_face and not include_partition_face_signatures)
-        continue;
-
-      const auto normal = face.normal.Normalized();
-      const auto qx = static_cast<int>(std::lround(normal.x * kQuantizationBins));
-      const auto qy = static_cast<int>(std::lround(normal.y * kQuantizationBins));
-      const auto qz = static_cast<int>(std::lround(normal.z * kQuantizationBins));
-      auto& feature = aggregated_features[{qx, qy, qz}];
-      if (feature.weight == 0.0)
-        feature.normal = normal;
-
-      const double face_weight =
-        is_partition_face ? std::max(1.0, 1000.0 * face.area) : std::max(1.0, face.area);
-      feature.weight += face_weight;
-    }
-
-  std::vector<OrientationFeature> features;
-  features.reserve(aggregated_features.size());
-  for (auto& [key, feature] : aggregated_features)
-    features.push_back(feature);
-
-  std::sort(features.begin(),
-            features.end(),
-            [](const OrientationFeature& lhs, const OrientationFeature& rhs)
-            { return lhs.weight > rhs.weight; });
-  if (features.size() > kMaxFeatures)
-    features.resize(kMaxFeatures);
-
-  if (features.empty())
-    features.push_back({Vector3(1.0, 0.0, 0.0), 1.0});
-
-  return features;
-}
-
-std::vector<unsigned char>
-BuildOrientationSignature(const AngularQuadrature& quadrature,
-                          const std::size_t dir_id,
-                          const std::vector<OrientationFeature>& features)
-{
-  std::vector<unsigned char> signature;
-  signature.reserve(features.size());
-  const auto& omega = quadrature.GetOmega(dir_id);
-  for (const auto& feature : features)
-    signature.push_back(omega.Dot(feature.normal) < 0.0 ? 1U : 0U);
-  return signature;
-}
-
-double
-WeightedSignatureDisagreement(const std::vector<unsigned char>& a,
-                              const std::vector<unsigned char>& b,
-                              const std::vector<OrientationFeature>& features)
-{
-  double cost = 0.0;
-  for (std::size_t i = 0; i < features.size(); ++i)
-    if (a[i] != b[i])
-      cost += features[i].weight;
-  return cost;
-}
-
-std::vector<DirIDs>
-ClusterByOrientationSignature(const AngularQuadrature& quadrature,
-                              const std::vector<OrientationFeature>& features,
-                              const int target_group_count,
-                              const double max_normalized_disagreement)
-{
-  const std::size_t num_dirs = quadrature.GetNumAngles();
-  std::vector<std::vector<unsigned char>> signatures(num_dirs);
-  std::map<std::vector<unsigned char>, DirIDs> exact_groups;
-  for (std::size_t dir_id = 0; dir_id < num_dirs; ++dir_id)
-  {
-    signatures[dir_id] = BuildOrientationSignature(quadrature, dir_id, features);
-    exact_groups[signatures[dir_id]].push_back(dir_id);
-  }
-
-  std::vector<DirIDs> groups;
-  groups.reserve(exact_groups.size());
-  for (auto& [signature, dirs] : exact_groups)
-    groups.push_back(std::move(dirs));
-
-  const double total_feature_weight =
-    std::accumulate(features.begin(), features.end(), 0.0, [](const double sum, const auto& feature) {
-      return sum + feature.weight;
-    });
-
-  const auto group_cost = [&](const DirIDs& lhs, const DirIDs& rhs)
-  {
-    const auto& lhs_sig = signatures[lhs.front()];
-    const auto& rhs_sig = signatures[rhs.front()];
-    return WeightedSignatureDisagreement(lhs_sig, rhs_sig, features) *
-           static_cast<double>(lhs.size() * rhs.size());
-  };
-
-  const auto normalized_group_disagreement = [&](const DirIDs& lhs, const DirIDs& rhs)
-  {
-    const auto& lhs_sig = signatures[lhs.front()];
-    const auto& rhs_sig = signatures[rhs.front()];
-    if (total_feature_weight <= 0.0)
-      return 0.0;
-    return WeightedSignatureDisagreement(lhs_sig, rhs_sig, features) / total_feature_weight;
-  };
-
-  while (groups.size() > static_cast<std::size_t>(target_group_count))
-  {
-    std::size_t best_i = 0;
-    std::size_t best_j = 1;
-    double best_cost = std::numeric_limits<double>::max();
-    double best_normalized_disagreement = std::numeric_limits<double>::max();
-    for (std::size_t i = 0; i + 1 < groups.size(); ++i)
-      for (std::size_t j = i + 1; j < groups.size(); ++j)
-      {
-        const double cost = group_cost(groups[i], groups[j]);
-        if (cost < best_cost)
-        {
-          best_cost = cost;
-          best_normalized_disagreement = normalized_group_disagreement(groups[i], groups[j]);
-          best_i = i;
-          best_j = j;
-        }
-      }
-
-    if (best_normalized_disagreement > max_normalized_disagreement)
-      break;
-
-    auto& merged = groups[best_i];
-    auto& victim = groups[best_j];
-    merged.insert(merged.end(), victim.begin(), victim.end());
-    groups.erase(groups.begin() + static_cast<std::ptrdiff_t>(best_j));
-  }
-
-  return groups;
-}
-
-double
-ComputeNormalizedDisagreementForGroup(const AngularQuadrature& quadrature,
-                                      const DirIDs& group,
-                                      const std::vector<OrientationFeature>& features)
-{
-  if (group.size() <= 1 or features.empty())
-    return 0.0;
-
-  const double total_feature_weight =
-    std::accumulate(features.begin(), features.end(), 0.0, [](const double sum, const auto& feature) {
-      return sum + feature.weight;
-    });
-  if (total_feature_weight <= 0.0)
-    return 0.0;
-
-  std::vector<std::vector<unsigned char>> signatures;
-  signatures.reserve(group.size());
-  for (const auto dir_id : group)
-    signatures.push_back(BuildOrientationSignature(quadrature, dir_id, features));
-
-  double worst = 0.0;
-  for (std::size_t i = 0; i + 1 < signatures.size(); ++i)
-    for (std::size_t j = i + 1; j < signatures.size(); ++j)
-      worst = std::max(
-        worst, WeightedSignatureDisagreement(signatures[i], signatures[j], features) / total_feature_weight);
-
-  return worst;
-}
-
-std::vector<OrientationFeature>
-BuildLocalABFeatures(const std::shared_ptr<MeshContinuum>& grid)
-{
-  constexpr int kQuantizationBins = 32;
-  constexpr std::size_t kMaxFeatures = 128;
-  std::map<std::tuple<int, int, int>, OrientationFeature> aggregated_features;
-  for (const auto& cell : grid->local_cells)
-    for (const auto& face : cell.faces)
-      if (face.has_neighbor and face.IsNeighborLocal(grid.get()))
-      {
-        const auto normal = face.normal.Normalized();
-        const auto qx = static_cast<int>(std::lround(normal.x * kQuantizationBins));
-        const auto qy = static_cast<int>(std::lround(normal.y * kQuantizationBins));
-        const auto qz = static_cast<int>(std::lround(normal.z * kQuantizationBins));
-        auto& feature = aggregated_features[{qx, qy, qz}];
-        if (feature.weight == 0.0)
-          feature.normal = normal;
-        feature.weight += std::max(1.0, face.area);
-      }
-
-  std::vector<OrientationFeature> features;
-  features.reserve(aggregated_features.size());
-  for (auto& [key, feature] : aggregated_features)
-    features.push_back(feature);
-
-  std::sort(features.begin(),
-            features.end(),
-            [](const OrientationFeature& lhs, const OrientationFeature& rhs)
-            { return lhs.weight > rhs.weight; });
-  if (features.size() > kMaxFeatures)
-    features.resize(kMaxFeatures);
-
-  if (features.empty())
-    features.push_back({Vector3(1.0, 0.0, 0.0), 1.0});
-  return features;
-}
-
-Vector3
-ComputeGroupCentroidOmega(const AngularQuadrature& quadrature, const DirIDs& group)
-{
-  Vector3 centroid(0.0, 0.0, 0.0);
-  for (const auto dir_id : group)
-    centroid += quadrature.GetOmega(dir_id);
-  return centroid.NormSquare() > 0.0 ? centroid.Normalized() : quadrature.GetOmega(group.front());
-}
-
-std::vector<std::vector<unsigned char>>
-BuildCachedLocalABSignatures(const AngularQuadrature& quadrature,
-                             const std::vector<OrientationFeature>& local_features)
-{
-  std::vector<std::vector<unsigned char>> signatures(quadrature.GetNumAngles());
-  for (std::size_t dir_id = 0; dir_id < quadrature.GetNumAngles(); ++dir_id)
-    signatures[dir_id] = BuildOrientationSignature(quadrature, dir_id, local_features);
-  return signatures;
-}
-
-std::pair<DirIDs, DirIDs>
-SplitGroupByFarthestPair(const AngularQuadrature& quadrature, const DirIDs& group)
-{
-  std::size_t seed_a = group.front();
-  std::size_t seed_b = group.back();
-  double worst_dot = 1.0;
-  for (std::size_t i = 0; i + 1 < group.size(); ++i)
-    for (std::size_t j = i + 1; j < group.size(); ++j)
-    {
-      const double dot = quadrature.GetOmega(group[i]).Dot(quadrature.GetOmega(group[j]));
-      if (dot < worst_dot)
-      {
-        worst_dot = dot;
-        seed_a = group[i];
-        seed_b = group[j];
-      }
-    }
-
-  DirIDs lhs;
-  DirIDs rhs;
-  lhs.reserve(group.size());
-  rhs.reserve(group.size());
-  for (const auto dir_id : group)
-  {
-    const auto& omega = quadrature.GetOmega(dir_id);
-    if (omega.Dot(quadrature.GetOmega(seed_a)) >= omega.Dot(quadrature.GetOmega(seed_b)))
-      lhs.push_back(dir_id);
-    else
-      rhs.push_back(dir_id);
-  }
-
-  if (lhs.empty() or rhs.empty())
-  {
-    lhs.clear();
-    rhs.clear();
-    const auto mid = group.size() / 2;
-    lhs.insert(lhs.end(), group.begin(), group.begin() + static_cast<std::ptrdiff_t>(mid));
-    rhs.insert(rhs.end(), group.begin() + static_cast<std::ptrdiff_t>(mid), group.end());
-  }
-
-  return {std::move(lhs), std::move(rhs)};
-}
-
-void
-RefineGroupByLocalABBudget(const AngularQuadrature& quadrature,
-                           const std::vector<OrientationFeature>& local_features,
-                           const std::vector<std::vector<unsigned char>>& cached_signatures,
-                           DirIDs group,
-                           const double max_normalized_ab,
-                           std::vector<DirIDs>& out_groups)
-{
-  if (group.empty())
-    return;
-
-  const Vector3 centroid = ComputeGroupCentroidOmega(quadrature, group);
-  std::sort(group.begin(),
-            group.end(),
-            [&](const std::size_t a, const std::size_t b)
-            { return quadrature.GetOmega(a).Dot(centroid) > quadrature.GetOmega(b).Dot(centroid); });
-
-  const double total_weight =
-    std::accumulate(local_features.begin(), local_features.end(), 0.0, [](double sum, const auto& f) {
-      return sum + f.weight;
-    });
-  double disagreement = 0.0;
-  if (group.size() > 1 and total_weight > 0.0)
-  {
-    const auto& representative_signature = cached_signatures[group.front()];
-    for (std::size_t fi = 0; fi < local_features.size(); ++fi)
-    {
-      std::size_t mismatches = 0;
-      for (const auto dir_id : group)
-        mismatches += cached_signatures[dir_id][fi] != representative_signature[fi];
-      disagreement += local_features[fi].weight * static_cast<double>(mismatches);
-    }
-    disagreement /= (total_weight * static_cast<double>(group.size()));
-  }
-
-  if (group.size() <= 1 or disagreement <= max_normalized_ab)
-  {
-    out_groups.push_back(std::move(group));
-    return;
-  }
-
-  auto [lhs, rhs] = SplitGroupByFarthestPair(quadrature, group);
-  if (lhs.empty() or rhs.empty())
-  {
-    out_groups.push_back(std::move(group));
-    return;
-  }
-
-  RefineGroupByLocalABBudget(
-    quadrature, local_features, cached_signatures, std::move(lhs), max_normalized_ab, out_groups);
-  RefineGroupByLocalABBudget(
-    quadrature, local_features, cached_signatures, std::move(rhs), max_normalized_ab, out_groups);
-}
-
 void
 RecursiveAngleSort(AngleSet* angleset,
                    AngleAggregation& angle_agg,
@@ -670,6 +335,8 @@ DiscreteOrdinatesProblem::GetNumPhiIterativeUnknowns()
   std::uint64_t num_global_psi_dofs = 0;
   for (auto& groupset : groupsets_)
   {
+    if (groupset.fixed_point_sweep)
+      continue;
     const auto num_delayed_psi_info = groupset.angle_agg->GetNumDelayedAngularDOFs();
     num_local_psi_dofs += num_delayed_psi_info.first;
     num_global_psi_dofs += num_delayed_psi_info.second;
@@ -2211,27 +1878,73 @@ DiscreteOrdinatesProblem::AssociateSOsAndDirections(const std::shared_ptr<MeshCo
             centroids[i] = centroids[i].Normalized();
       }
 
-      std::vector<DirIDs> spherical_groups(num_clusters);
+      std::vector<DirIDs> groups(num_clusters);
       for (std::size_t n = 0; n < num_dirs; ++n)
-        spherical_groups[assignment[n]].push_back(n);
+        groups[assignment[n]].push_back(n);
 
-      const auto local_ab_features = BuildLocalABFeatures(grid);
-      const auto cached_local_ab_signatures =
-        BuildCachedLocalABSignatures(quadrature, local_ab_features);
-      constexpr double kMaxNormalizedLocalAB = 0.01;
+      std::vector<double> global_partition_face_normals;
+      if (angle_aggregation_split_partition_faces)
+      {
+        std::vector<double> local_face_normals;
+        for (const auto& cell : grid->local_cells)
+          for (const auto& face : cell.faces)
+          {
+            if (not face.has_neighbor or face.IsNeighborLocal(grid.get()))
+              continue;
+            local_face_normals.push_back(face.normal.x);
+            local_face_normals.push_back(face.normal.y);
+            local_face_normals.push_back(face.normal.z);
+          }
+
+        std::vector<int> normal_counts(opensn::mpi_comm.size(), 0);
+        opensn::mpi_comm.all_gather(static_cast<int>(local_face_normals.size()), normal_counts);
+        std::vector<int> normal_displs(opensn::mpi_comm.size(), 0);
+        int total_normal_values = 0;
+        for (std::size_t r = 0; r < normal_counts.size(); ++r)
+        {
+          normal_displs[r] = total_normal_values;
+          total_normal_values += normal_counts[r];
+        }
+        global_partition_face_normals.resize(total_normal_values, 0.0);
+        opensn::mpi_comm.all_gather(
+          local_face_normals, global_partition_face_normals, normal_counts, normal_displs);
+      }
 
       for (int i = 0; i < num_clusters; ++i)
       {
-        auto& group = spherical_groups[i];
-        if (group.empty())
+        if (groups[i].empty())
           continue;
-        RefineGroupByLocalABBudget(
-          quadrature,
-          local_ab_features,
-          cached_local_ab_signatures,
-          std::move(group),
-          kMaxNormalizedLocalAB,
-          unq_so_grps);
+
+        std::sort(groups[i].begin(),
+                  groups[i].end(),
+                  [&](std::size_t a, std::size_t b)
+                  { return quadrature.GetOmega(a).Dot(centroids[i]) >
+                           quadrature.GetOmega(b).Dot(centroids[i]); });
+
+        if (not angle_aggregation_split_partition_faces)
+        {
+          unq_so_grps.push_back(std::move(groups[i]));
+          continue;
+        }
+
+        std::map<std::vector<unsigned char>, DirIDs> refined_groups;
+        for (const auto dir_id : groups[i])
+        {
+          std::vector<unsigned char> signature;
+          signature.reserve(global_partition_face_normals.size() / 3);
+          const auto& omega = quadrature.GetOmega(dir_id);
+          for (std::size_t n = 0; n < global_partition_face_normals.size(); n += 3)
+          {
+            const Vector3 normal(global_partition_face_normals[n],
+                                 global_partition_face_normals[n + 1],
+                                 global_partition_face_normals[n + 2]);
+            signature.push_back(omega.Dot(normal) < 0.0 ? 1 : 0);
+          }
+          refined_groups[std::move(signature)].push_back(dir_id);
+        }
+
+        for (auto& [signature, refined_group] : refined_groups)
+          unq_so_grps.push_back(std::move(refined_group));
       }
       break;
     }

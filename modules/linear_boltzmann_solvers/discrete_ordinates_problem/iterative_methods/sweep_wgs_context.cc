@@ -58,25 +58,28 @@ SweepWGSContext::SweepWGSContext(DiscreteOrdinatesProblem& do_problem,
                     *groupset.angle_agg,
                     *sweep_chunk)
 {
-  const auto delayed_local = groupset.angle_agg->GetLocalDelayedAngularDOFBreakdown();
-  AngleAggregation::DelayedAngularDOFBreakdown delayed_global;
-  mpi_comm.all_reduce(delayed_local.boundary, delayed_global.boundary, mpi::op::sum<size_t>());
-  mpi_comm.all_reduce(delayed_local.local, delayed_global.local, mpi::op::sum<size_t>());
-  mpi_comm.all_reduce(delayed_local.nonlocal, delayed_global.nonlocal, mpi::op::sum<size_t>());
-  mpi_comm.all_reduce(delayed_local.ab, delayed_global.ab, mpi::op::sum<size_t>());
-  mpi_comm.all_reduce(delayed_local.promoted, delayed_global.promoted, mpi::op::sum<size_t>());
+  if (not groupset.fixed_point_sweep)
+  {
+    const auto delayed_local = groupset.angle_agg->GetLocalDelayedAngularDOFBreakdown();
+    AngleAggregation::DelayedAngularDOFBreakdown delayed_global;
+    mpi_comm.all_reduce(delayed_local.boundary, delayed_global.boundary, mpi::op::sum<size_t>());
+    mpi_comm.all_reduce(delayed_local.local, delayed_global.local, mpi::op::sum<size_t>());
+    mpi_comm.all_reduce(delayed_local.nonlocal, delayed_global.nonlocal, mpi::op::sum<size_t>());
+    mpi_comm.all_reduce(delayed_local.ab, delayed_global.ab, mpi::op::sum<size_t>());
+    mpi_comm.all_reduce(delayed_local.promoted, delayed_global.promoted, mpi::op::sum<size_t>());
 
-  log.Log0() << no_wrap << program_timer.GetTimeString() << " Groupset " << groupset.id
-             << " delayed angular dofs local: total=" << delayed_local.Total()
-             << ", boundary=" << delayed_local.boundary << ", local=" << delayed_local.local
-             << ", nonlocal=" << delayed_local.nonlocal << ", ab=" << delayed_local.ab
-             << ", promoted=" << delayed_local.promoted;
+    log.Log0() << no_wrap << program_timer.GetTimeString() << " Groupset " << groupset.id
+               << " delayed angular dofs local: total=" << delayed_local.Total()
+               << ", boundary=" << delayed_local.boundary << ", local=" << delayed_local.local
+               << ", nonlocal=" << delayed_local.nonlocal << ", ab=" << delayed_local.ab
+               << ", promoted=" << delayed_local.promoted;
 
-  log.Log0() << no_wrap << program_timer.GetTimeString() << " Groupset " << groupset.id
-             << " delayed angular dofs global: total=" << delayed_global.Total()
-             << ", boundary=" << delayed_global.boundary << ", local=" << delayed_global.local
-             << ", nonlocal=" << delayed_global.nonlocal << ", ab=" << delayed_global.ab
-             << ", promoted=" << delayed_global.promoted;
+    log.Log0() << no_wrap << program_timer.GetTimeString() << " Groupset " << groupset.id
+               << " delayed angular dofs global: total=" << delayed_global.Total()
+               << ", boundary=" << delayed_global.boundary << ", local=" << delayed_global.local
+               << ", nonlocal=" << delayed_global.nonlocal << ", ab=" << delayed_global.ab
+               << ", promoted=" << delayed_global.promoted;
+  }
 }
 
 void
@@ -95,6 +98,8 @@ SweepWGSContext::RebuildAngularFluxFromConvergedPhi(bool include_rhs_time_term,
   }
 
   sweep_chunk->IncludeRHSTimeTerm(include_rhs_time_term);
+  if (groupset.fixed_point_sweep and groupset.fixed_point_sweep_defer_angular_flux_pullback)
+    sweep_scheduler.ForceFinalAngularFluxPullback();
   ApplyInverseTransportOperator(scope);
   LBSVecOps::GSScopedCopyPrimarySTLvectors(
     do_problem, groupset, PhiSTLOption::PHI_NEW, PhiSTLOption::PHI_OLD);
@@ -129,7 +134,9 @@ SweepWGSContext::GetSystemSize()
   const auto num_moments = do_problem.GetNumMoments();
 
   const auto groupset_numgrps = groupset.GetNumGroups();
-  const auto num_delayed_psi_info = groupset.angle_agg->GetNumDelayedAngularDOFs();
+  const auto num_delayed_psi_info =
+    groupset.fixed_point_sweep ? std::pair<size_t, size_t>{0, 0}
+                               : groupset.angle_agg->GetNumDelayedAngularDOFs();
   const size_t local_size =
     local_node_count * num_moments * groupset_numgrps + num_delayed_psi_info.first;
   const auto global_size =
@@ -165,6 +172,7 @@ SweepWGSContext::ApplyInverseTransportOperator(SourceFlags scope)
     static_cast<double>(duration_cast<nanoseconds>(sweep_end - sweep_start).count()) / 1.0e+9;
   sweep_stats_.total_sweep_time += sweep_time;
   ++sweep_stats_.num_sweeps;
+  sweep_stats_.num_sweep_passes += sweep_scheduler.GetLastSweepPassCount();
 }
 
 void
@@ -174,7 +182,11 @@ SweepWGSContext::PostSolveCallback()
   // Perform final sweep with converged phi and delayed psi dofs. This step is necessary for
   // Krylov methods to recover the actual solution (this includes all of the PETSc methods
   // currently used in OpenSn).
-  if (groupset.iterative_method == LinearSystemSolver::IterativeMethod::PETSC_GMRES or
+  const bool needs_deferred_angular_flux_reconstruction =
+    groupset.fixed_point_sweep and groupset.fixed_point_sweep_defer_angular_flux_pullback and
+    do_problem.SaveAngularFluxEnabled();
+  if (needs_deferred_angular_flux_reconstruction or
+      groupset.iterative_method == LinearSystemSolver::IterativeMethod::PETSC_GMRES or
       groupset.iterative_method == LinearSystemSolver::IterativeMethod::PETSC_BICGSTAB or
       (groupset.iterative_method == LinearSystemSolver::IterativeMethod::PETSC_RICHARDSON and
        groupset.max_iterations > 1))

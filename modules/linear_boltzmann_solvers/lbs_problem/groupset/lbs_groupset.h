@@ -69,6 +69,10 @@ public:
   int angle_aggregation_num_sets;
   int angle_aggregation_target_angles_per_set;
   bool angle_aggregation_split_partition_faces;
+  bool fixed_point_sweep;
+  unsigned int fixed_point_sweep_max_iterations;
+  double fixed_point_sweep_tolerance;
+  bool fixed_point_sweep_defer_angular_flux_pullback;
 
   LinearSystemSolver::IterativeMethod iterative_method;
   AngleAggregationType angleagg_method;

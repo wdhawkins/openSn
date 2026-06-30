@@ -47,6 +47,22 @@ LBSGroupset::GetInputParameters()
                               "disagree on inter-rank partition face orientation. This is a "
                               "conservative fallback; by default, disagreement is handled with "
                               "promoted cross-rank delayed angular unknowns.");
+  params.AddOptionalParameter(
+    "fixed_point_sweep",
+    false,
+    "For device-richardson with coalesced angle sets, converge lagged angular fluxes by fixed-point "
+    "sweep passes instead of adding them to the iterative unknown vector.");
+  params.AddOptionalParameter("fixed_point_sweep_max_iterations",
+                              20,
+                              "Maximum number of fixed-point sweep passes for a fixed source.");
+  params.AddOptionalParameter("fixed_point_sweep_tolerance",
+                              1.0e-6,
+                              "Relative lagged angular-flux tolerance for fixed-point sweeps.");
+  params.AddOptionalParameter(
+    "fixed_point_sweep_defer_angular_flux_pullback",
+    false,
+    "For fixed-point GPU sweeps with saved angular fluxes, defer saved angular-flux pullback "
+    "until the final reconstruction sweep.");
 
   // Iterative method
   params.AddOptionalParameter("inner_linear_method",
@@ -110,6 +126,10 @@ LBSGroupset::GetInputParameters()
   params.ConstrainParameterRange("angle_aggregation_num_sets", AllowableRangeLowLimit::New(1));
   params.ConstrainParameterRange("angle_aggregation_target_angles_per_set",
                                  AllowableRangeLowLimit::New(0));
+  params.ConstrainParameterRange("fixed_point_sweep_max_iterations",
+                                 AllowableRangeLowLimit::New(1));
+  params.ConstrainParameterRange("fixed_point_sweep_tolerance",
+                                 AllowableRangeLowLimit::New(0.0));
   params.ConstrainParameterRange(
     "inner_linear_method",
     AllowableRangeList::New(
@@ -144,6 +164,10 @@ LBSGroupset::Init(int aid)
   angle_aggregation_num_sets = 96;
   angle_aggregation_target_angles_per_set = 0;
   angle_aggregation_split_partition_faces = false;
+  fixed_point_sweep = false;
+  fixed_point_sweep_max_iterations = 20;
+  fixed_point_sweep_tolerance = 1.0e-6;
+  fixed_point_sweep_defer_angular_flux_pullback = false;
   iterative_method = LinearSystemSolver::IterativeMethod::PETSC_RICHARDSON;
   angleagg_method = AngleAggregationType::POLAR;
   residual_tolerance = 1.0e-6;
@@ -213,6 +237,12 @@ LBSGroupset::LBSGroupset( // NOLINT(cppcoreguidelines-pro-type-member-init)
     params.GetParamValue<int>("angle_aggregation_target_angles_per_set");
   angle_aggregation_split_partition_faces =
     params.GetParamValue<bool>("angle_aggregation_split_partition_faces");
+  fixed_point_sweep = params.GetParamValue<bool>("fixed_point_sweep");
+  fixed_point_sweep_max_iterations =
+    params.GetParamValue<unsigned int>("fixed_point_sweep_max_iterations");
+  fixed_point_sweep_tolerance = params.GetParamValue<double>("fixed_point_sweep_tolerance");
+  fixed_point_sweep_defer_angular_flux_pullback =
+    params.GetParamValue<bool>("fixed_point_sweep_defer_angular_flux_pullback");
 
   // Inner solver
   const auto inner_linear_method = params.GetParamValue<std::string>("inner_linear_method");

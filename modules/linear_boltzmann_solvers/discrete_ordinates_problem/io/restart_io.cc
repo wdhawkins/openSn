@@ -59,7 +59,7 @@ DiscreteOrdinatesProblemIO::ReadRestartData(DiscreteOrdinatesProblem& do_problem
     do_problem.IsTimeDependent() and not steady_to_transient_initial_condition;
   for (const auto& gs : do_problem.GetGroupsets())
   {
-    if (gs.angle_agg)
+    if (gs.angle_agg and not gs.fixed_point_sweep)
     {
       const auto delayed_name = "delayed_psi_old_gs" + std::to_string(gs_id);
       const size_t expected_delayed_size = gs.angle_agg->GetNumDelayedAngularDOFs().first;
@@ -146,7 +146,7 @@ DiscreteOrdinatesProblemIO::WriteRestartData(const DiscreteOrdinatesProblem& do_
     int gs_id = 0;
     for (const auto& gs : do_problem.GetGroupsets())
     {
-      if (gs.angle_agg)
+      if (gs.angle_agg and not gs.fixed_point_sweep)
       {
         const auto psi = gs.angle_agg->GetOldDelayedAngularDOFsAsSTLVector();
         if (not psi.empty())

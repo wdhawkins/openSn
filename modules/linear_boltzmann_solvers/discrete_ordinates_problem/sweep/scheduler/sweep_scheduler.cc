@@ -270,6 +270,7 @@ SweepScheduler::ScheduleAlgoAsyncFIFO(SweepChunk& sweep_chunk)
 void
 SweepScheduler::Sweep()
 {
+  last_sweep_pass_count_ = 0;
   if (scheduler_type_ == SchedulingAlgorithm::ASYNC_FIFO)
     ScheduleAlgoAsyncFIFO(sweep_chunk_);
   else if (scheduler_type_ == SchedulingAlgorithm::FIRST_IN_FIRST_OUT)

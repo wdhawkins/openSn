@@ -55,6 +55,10 @@ public:
 
   void PrepareForSweep(bool use_boundary_source, bool zero_incoming_delayed_psi);
 
+  void ForceFinalAngularFluxPullback() { force_final_angular_flux_pullback_ = true; }
+
+  size_t GetLastSweepPassCount() const { return last_sweep_pass_count_; }
+
 private:
   /// Applies a first-in-first-out sweep scheduling.
   void ScheduleAlgoFIFO(SweepChunk& sweep_chunk);
@@ -71,6 +75,8 @@ private:
   /// Performs the all-at-once scheduling algorithm.
   void ScheduleAlgoAAO(SweepChunk& sweep_chunk);
 
+  void RecordSweepPass() { ++last_sweep_pass_count_; }
+
 private:
   SchedulingAlgorithm scheduler_type_;
   AngleAggregation& angle_agg_;
@@ -83,6 +89,8 @@ private:
 
   SPMD_ThreadPool pool_;
   std::vector<std::size_t> execution_order_;
+  bool force_final_angular_flux_pullback_ = false;
+  size_t last_sweep_pass_count_ = 0;
 };
 
 } // namespace opensn
