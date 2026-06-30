@@ -48,6 +48,17 @@ enum class AngleAggregationType
 class AngleAggregation
 {
 public:
+  struct DelayedAngularDOFBreakdown
+  {
+    size_t boundary = 0;
+    size_t local = 0;
+    size_t nonlocal = 0;
+    size_t ab = 0;
+    size_t promoted = 0;
+
+    size_t Total() const { return boundary + local + nonlocal + ab + promoted; }
+  };
+
   AngleAggregation(const LBSGroupset& groupset,
                    std::map<uint64_t, std::shared_ptr<SweepBoundary>>& boundaries,
                    std::shared_ptr<AngularQuadrature>& quadrature,
@@ -112,6 +123,8 @@ public:
    * globally, respectively.
    */
   std::pair<size_t, size_t> GetNumDelayedAngularDOFs();
+
+  DelayedAngularDOFBreakdown GetLocalDelayedAngularDOFBreakdown();
 
   /// Assembles angular unknowns into the reference vector.
   void AppendNewDelayedAngularDOFsToArray(int64_t& index, double* x_ref);

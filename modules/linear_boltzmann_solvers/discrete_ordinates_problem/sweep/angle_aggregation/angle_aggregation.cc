@@ -188,23 +188,7 @@ AngleAggregation::GetNumDelayedAngularDOFs()
   if (num_ang_unknowns_avail_)
     return number_angular_unknowns_;
 
-  size_t local_ang_unknowns = 0;
-
-  for (const auto& [bid, bndry] : boundaries_)
-    local_ang_unknowns += bndry->CountDelayedAngularDOFsNew(groupset_id_);
-
-  for (auto& angle_set : angle_set_groups_)
-    local_ang_unknowns += angle_set->GetFLUDS().DelayedLocalPsi().size();
-
-  for (auto& angle_set : angle_set_groups_)
-    for (auto& loc_vector : angle_set->GetFLUDS().DelayedPrelocIOutgoingPsi())
-      local_ang_unknowns += loc_vector.size();
-
-  for (auto& angle_set : angle_set_groups_)
-    local_ang_unknowns += angle_set->GetFLUDS().ABDelayedPsi().size();
-
-  for (auto& angle_set : angle_set_groups_)
-    local_ang_unknowns += angle_set->GetFLUDS().PromotedDelayedPsi().size();
+  const size_t local_ang_unknowns = GetLocalDelayedAngularDOFBreakdown().Total();
 
   size_t global_ang_unknowns = 0;
   mpi_comm.all_reduce(local_ang_unknowns, global_ang_unknowns, mpi::op::sum<size_t>());
@@ -213,6 +197,30 @@ AngleAggregation::GetNumDelayedAngularDOFs()
 
   num_ang_unknowns_avail_ = true;
   return number_angular_unknowns_;
+}
+
+AngleAggregation::DelayedAngularDOFBreakdown
+AngleAggregation::GetLocalDelayedAngularDOFBreakdown()
+{
+  DelayedAngularDOFBreakdown counts;
+
+  for (const auto& [bid, bndry] : boundaries_)
+    counts.boundary += bndry->CountDelayedAngularDOFsNew(groupset_id_);
+
+  for (const auto& angle_set : angle_set_groups_)
+    counts.local += angle_set->GetFLUDS().DelayedLocalPsi().size();
+
+  for (const auto& angle_set : angle_set_groups_)
+    for (const auto& loc_vector : angle_set->GetFLUDS().DelayedPrelocIOutgoingPsi())
+      counts.nonlocal += loc_vector.size();
+
+  for (const auto& angle_set : angle_set_groups_)
+    counts.ab += angle_set->GetFLUDS().ABDelayedPsi().size();
+
+  for (const auto& angle_set : angle_set_groups_)
+    counts.promoted += angle_set->GetFLUDS().PromotedDelayedPsi().size();
+
+  return counts;
 }
 
 void
