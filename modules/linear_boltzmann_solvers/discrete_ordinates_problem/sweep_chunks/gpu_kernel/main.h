@@ -31,7 +31,7 @@ ForDOFs1ToMax(F&& f)
               std::forward<F>(f));
 }
 
-template <SweepType t, class... Args>
+template <SweepKind t, class... Args>
 __CRB_DEVICE_FUNC__ void
 SweepDispatch(std::uint32_t n, Args&&... args)
 {
@@ -48,7 +48,7 @@ SweepDispatch(std::uint32_t n, Args&&... args)
     });
 }
 
-template <SweepType t>
+template <SweepKind t>
 __CRB_GLOBAL_FUNC__ void
 SweepKernel(Arguments<t> args,
             const std::uint32_t* cells_to_sweep,

@@ -26,23 +26,17 @@ namespace crb = caribou;
 namespace opensn::gpu_kernel
 {
 
-enum class SweepType
-{
-  AAH = 0,
-  CBC = 1
-};
-
 consteval bool
-to_bool(SweepType t)
+to_bool(SweepKind t)
 {
-  return t == SweepType::AAH;
+  return t == SweepKind::AAH;
 }
 
-template <SweepType t>
+template <SweepKind t>
 using NodeIndexType = std::conditional_t<to_bool(t), AAHD_NodeIndex, CBCD_NodeIndex>;
 
 /// Arguments for AAHD and CBCD kernels
-template <SweepType t>
+template <SweepKind t>
 struct Arguments
 {
   using AngleSetType = std::conditional_t<to_bool(t), AAHD_AngleSet, CBCD_AngleSet>;
@@ -75,7 +69,7 @@ struct Arguments
     // Copy angleset data to GPU
     directions = angle_set.GetDeviceAngleIndices();
     angleset_size = angle_set.GetNumAngles();
-    if constexpr (t == SweepType::AAH)
+    if constexpr (t == SweepKind::AAH)
       boundary_offset = angle_set.GetDeviceBoudnaryOffset();
     // Copy FLUDS data to GPU and retrieve the pointer set
     flud_data = fluds.GetDevicePointerSet();

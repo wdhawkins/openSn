@@ -15,7 +15,7 @@ namespace opensn::gpu_kernel
 {
 
 /// Compute the sweep matrix from gradient, mass, and the source term
-template <std::size_t ndofs, SweepType t>
+template <std::size_t ndofs, SweepKind t>
 __CRB_DEVICE_FUNC__ void
 ComputeGMS(double* sweep_matrix,
            double* psi,
@@ -60,7 +60,7 @@ ComputeGMS(double* sweep_matrix,
 }
 
 /// Compute the sweep matrix from surface integral
-template <std::size_t ndofs, SweepType t>
+template <std::size_t ndofs, SweepKind t>
 __CRB_DEVICE_FUNC__ void
 ComputeSurfaceIntegral(double* sweep_matrix,
                        double* psi,
@@ -95,7 +95,7 @@ ComputeSurfaceIntegral(double* sweep_matrix,
           double mu_Nij = -mu * face.M_surf_data[fi * face.num_face_nodes + fj];
           Ai[j] += mu_Nij;
           double* upwind_psi;
-          if constexpr (t == SweepType::AAH)
+          if constexpr (t == SweepKind::AAH)
             upwind_psi =
               args.flud_data.GetIncomingFluxPointer(cell_edge_data[face_node_counter + fj],
                                                     angle_group_idx,
@@ -160,7 +160,7 @@ GaussianElimination(double* sweep_matrix, double* psi)
 }
 
 /// Record angular flux to downwind and compute outflow for boundary faces.
-template <SweepType t>
+template <SweepKind t>
 __CRB_DEVICE_FUNC__ void
 WritePsiToFludsAndOutflow(double* psi,
                           CellView& cell,
@@ -195,7 +195,7 @@ WritePsiToFludsAndOutflow(double* psi,
       }
       // skip for non reflecting boundary
       bool write_downwind_psi = true;
-      if constexpr (t == SweepType::AAH)
+      if constexpr (t == SweepKind::AAH)
       {
         if (idx.IsBoundary() && !idx.IsReflecting())
         {
@@ -211,7 +211,7 @@ WritePsiToFludsAndOutflow(double* psi,
           NodeIndexType<t> node_index(cell_edge_data[face_node_counter + fi]);
           // put copy psi to FLUDS
           double* downwind_psi;
-          if constexpr (t == SweepType::AAH)
+          if constexpr (t == SweepKind::AAH)
             downwind_psi = args.flud_data.GetOutgoingFluxPointer(
               node_index, angle_group_idx, args.boundary, args.boundary_offset);
           else
@@ -225,7 +225,7 @@ WritePsiToFludsAndOutflow(double* psi,
 }
 
 /// Compute the scalar flux.
-template <std::size_t ndofs, SweepType t>
+template <std::size_t ndofs, SweepKind t>
 __CRB_DEVICE_FUNC__ void
 ComputePhi(double* psi,
            CellView& cell,
@@ -263,7 +263,7 @@ SaveAngularFlux(const double* psi,
 }
 
 /// Template device function performing the sweep
-template <std::size_t ndofs, SweepType t>
+template <std::size_t ndofs, SweepKind t>
 __CRB_DEVICE_FUNC__ void
 Sweep(const Arguments<t>& args,
       CellView& cell,
