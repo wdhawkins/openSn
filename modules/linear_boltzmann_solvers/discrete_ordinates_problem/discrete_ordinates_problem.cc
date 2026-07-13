@@ -1317,16 +1317,12 @@ DiscreteOrdinatesProblem::InitializeSweepDataStructures()
 {
   CALI_CXX_MARK_SCOPE("SweepDataStructures");
 
-  log.Log() << program_timer.GetTimeString() << " Initializing sweep datastructures.\n";
-
   auto sweep_runtime = BuildSweepRuntime(
     GetName(), groupsets_, grid_, sweep_type_, use_gpus_, *discretization_, grid_nodal_mappings_);
 
   quadrature_unq_so_grouping_map_ = std::move(sweep_runtime.quadrature_unq_so_grouping_map);
   quadrature_spds_map_ = std::move(sweep_runtime.quadrature_spds_map);
   quadrature_fluds_commondata_map_ = std::move(sweep_runtime.quadrature_fluds_commondata_map);
-
-  log.Log() << program_timer.GetTimeString() << " Done initializing sweep datastructures.\n";
 }
 
 #ifndef __OPENSN_WITH_GPU__

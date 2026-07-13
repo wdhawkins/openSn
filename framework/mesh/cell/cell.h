@@ -94,6 +94,9 @@ public:
     return value_ != std::numeric_limits<std::uint64_t>::max();
   }
 
+  /// Return the packed 64-bit value (cell|face|node) for hashing.
+  constexpr std::uint64_t GetValue() const { return value_; }
+
 private:
   /// Core value.
   std::uint64_t value_ = std::numeric_limits<std::uint64_t>::max();

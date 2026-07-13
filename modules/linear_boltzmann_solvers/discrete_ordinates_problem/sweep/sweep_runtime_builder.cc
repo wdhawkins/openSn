@@ -12,6 +12,7 @@
 #include "framework/mesh/mesh_continuum/grid_face_histogram.h"
 #include "framework/mesh/mesh_continuum/mesh_continuum.h"
 #include "framework/runtime.h"
+#include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/sweep_parallel_for.h"
 #include "framework/utils/error.h"
 #include "framework/utils/timer.h"
 #include <cmath>
@@ -245,51 +246,90 @@ template <typename CreateSPDS>
 void
 BuildSPDSForSweepOrderings(SweepRuntime& runtime, CreateSPDS create_spds)
 {
+  struct WorkItem
+  {
+    std::shared_ptr<AngularQuadrature> quadrature;
+    size_t sweep_ordering_id = 0;
+    Vector3 omega;
+  };
+  std::vector<WorkItem> work;
   for (const auto& [quadrature, info] : runtime.quadrature_unq_so_grouping_map)
   {
-    auto& spds_list = runtime.quadrature_spds_map[quadrature];
     const auto& unique_so_groupings = info.first;
+    size_t sweep_ordering_id = 0;
     for (const auto& so_grouping : unique_so_groupings)
-    {
-      const size_t master_dir_id = so_grouping.front();
-      const auto& omega = quadrature->GetOmega(master_dir_id);
-      spds_list.push_back(create_spds(quadrature, spds_list.size(), omega));
-    }
+      work.push_back({quadrature, sweep_ordering_id++, quadrature->GetOmega(so_grouping.front())});
   }
+
+  for (auto& [quadrature, spds_list] : runtime.quadrature_spds_map)
+    spds_list.clear();
+  if (work.empty())
+    return;
+  std::vector<std::shared_ptr<SPDS>> result(work.size());
+  const size_t nthreads = std::min<size_t>(std::max(1U, opensn_num_threads), work.size());
+  log.Log() << program_timer.GetTimeString() << " SPDS construction: " << work.size() << " angles ("
+            << nthreads << " threads(s)).";
+  ParallelFor(
+    work.size(),
+    nthreads,
+    [&](size_t i)
+    { result[i] = create_spds(work[i].quadrature, work[i].sweep_ordering_id, work[i].omega); });
+  for (size_t i = 0; i < work.size(); ++i)
+    runtime.quadrature_spds_map[work[i].quadrature].push_back(std::move(result[i]));
+  log.Log() << program_timer.GetTimeString() << " SPDS construction done.";
 }
+
+std::vector<std::shared_ptr<AAH_SPDS>> GetAAHSPDSList(const SweepRuntime& runtime);
 
 void
 BuildAAHSPDS(SweepRuntime& runtime,
              const std::shared_ptr<MeshContinuum>& grid,
+             const SPDSFaceNeighborInfoVec& face_neighbor_info,
              const std::map<std::shared_ptr<AngularQuadrature>, bool>& allow_cycles_map,
              bool use_gpus)
 {
-  log.Log0Verbose1() << program_timer.GetTimeString() << " Initializing AAH SPDS.";
-  BuildSPDSForSweepOrderings(
-    runtime,
-    [&grid, &allow_cycles_map, use_gpus](const std::shared_ptr<AngularQuadrature>& quadrature,
-                                         size_t sweep_ordering_id,
-                                         const Vector3& omega) -> std::shared_ptr<SPDS>
-    {
-      return std::make_shared<AAH_SPDS>(static_cast<int>(sweep_ordering_id),
-                                        omega,
-                                        grid,
-                                        allow_cycles_map.at(quadrature),
-                                        use_gpus);
-    });
+  BuildSPDSForSweepOrderings(runtime,
+                             [&grid, &face_neighbor_info, &allow_cycles_map](
+                               const std::shared_ptr<AngularQuadrature>& quadrature,
+                               size_t sweep_ordering_id,
+                               const Vector3& omega) -> std::shared_ptr<SPDS>
+                             {
+                               return std::make_shared<AAH_SPDS>(
+                                 static_cast<int>(sweep_ordering_id),
+                                 omega,
+                                 grid,
+                                 face_neighbor_info,
+                                 allow_cycles_map.at(quadrature),
+                                 false);
+                             });
+
+  const auto spds_list = GetAAHSPDSList(runtime);
+  if (use_gpus)
+    for (const auto& spds : spds_list)
+      spds->CopySPLSDataOnDevice();
+  std::vector<std::vector<int>> local_dependencies(spds_list.size());
+  for (size_t i = 0; i < spds_list.size(); ++i)
+    local_dependencies[i] = spds_list[i]->GetLocationDependencies();
+  auto global_dependencies = BatchCommunicateLocationDependencies(local_dependencies);
+  for (size_t i = 0; i < spds_list.size(); ++i)
+    spds_list[i]->SetGlobalDependencies(std::move(global_dependencies[i]));
 }
 
 void
 BuildCBCSPDS(SweepRuntime& runtime,
              const std::shared_ptr<MeshContinuum>& grid,
+             const SPDSFaceNeighborInfoVec& face_neighbor_info,
              const std::map<std::shared_ptr<AngularQuadrature>, bool>& allow_cycles_map)
 {
-  BuildSPDSForSweepOrderings(
-    runtime,
-    [&grid, &allow_cycles_map](const std::shared_ptr<AngularQuadrature>& quadrature,
+  BuildSPDSForSweepOrderings(runtime,
+                             [&grid, &face_neighbor_info, &allow_cycles_map](
+                               const std::shared_ptr<AngularQuadrature>& quadrature,
                                size_t,
                                const Vector3& omega) -> std::shared_ptr<SPDS>
-    { return std::make_shared<CBC_SPDS>(omega, grid, allow_cycles_map.at(quadrature)); });
+                             {
+                               return std::make_shared<CBC_SPDS>(
+                                 omega, grid, face_neighbor_info, allow_cycles_map.at(quadrature));
+                             });
 }
 
 std::vector<std::shared_ptr<AAH_SPDS>>
@@ -410,9 +450,13 @@ ApplyAAHSweepFAS(const std::vector<std::shared_ptr<AAH_SPDS>>& spds_list,
 void
 BuildAAHSweepTDGs(const std::vector<std::shared_ptr<AAH_SPDS>>& spds_list)
 {
-  log.Log0Verbose1() << program_timer.GetTimeString() << " Build global sweep TDGs.";
-  for (const auto& spds : spds_list)
-    spds->BuildGlobalSweepTDG();
+  if (spds_list.empty())
+    return;
+  const size_t nthreads = std::min<size_t>(std::max(1U, opensn_num_threads), spds_list.size());
+  log.Log() << program_timer.GetTimeString() << " TDG build: " << spds_list.size() << " angles ("
+            << nthreads << " threads(s)).";
+  ParallelFor(spds_list.size(), nthreads, [&](size_t i) { spds_list[i]->BuildGlobalSweepTDG(); });
+  log.Log() << program_timer.GetTimeString() << " TDG build done.";
 }
 
 void
@@ -443,21 +487,68 @@ BuildAAHCPUFludsCommonData(SweepRuntime& runtime,
                            const std::shared_ptr<MeshContinuum>& grid,
                            const std::vector<CellFaceNodalMapping>& grid_nodal_mappings)
 {
-  const auto grid_face_histogram = grid->MakeGridFaceHistogram();
+  struct WorkItem
+  {
+    std::shared_ptr<AngularQuadrature> quadrature;
+    std::shared_ptr<SPDS> spds;
+  };
+  std::vector<WorkItem> work;
   for (const auto& [quadrature, spds_list] : runtime.quadrature_spds_map)
     for (const auto& spds : spds_list)
-      runtime.quadrature_fluds_commondata_map[quadrature].push_back(
-        std::make_unique<AAH_FLUDSCommonData>(grid_nodal_mappings, *spds, *grid_face_histogram));
+      work.push_back({quadrature, spds});
+  if (work.empty())
+    return;
+
+  const auto grid_face_histogram = grid->MakeGridFaceHistogram();
+  const size_t nthreads = std::min<size_t>(std::max(1U, opensn_num_threads), work.size());
+  log.Log() << program_timer.GetTimeString() << " FLUDS construction: " << work.size()
+            << " angles (" << nthreads << " threads(s)).";
+  std::vector<std::unique_ptr<AAH_FLUDSCommonData>> result(work.size());
+  ParallelFor(work.size(),
+              nthreads,
+              [&](size_t i)
+              {
+                result[i] = AAH_FLUDSCommonData::MakeAlpha(
+                  grid_nodal_mappings, *work[i].spds, *grid_face_histogram);
+              });
+
+  // Inter-rank face exchange must retain identical ordering on every rank.
+  for (size_t i = 0; i < work.size(); ++i)
+    result[i]->FinalizeBeta(*work[i].spds);
+  for (size_t i = 0; i < work.size(); ++i)
+    runtime.quadrature_fluds_commondata_map[work[i].quadrature].push_back(std::move(result[i]));
+  log.Log() << program_timer.GetTimeString() << " FLUDS construction done.";
 }
 
 void
 BuildCBCCPUFludsCommonData(SweepRuntime& runtime,
                            const std::vector<CellFaceNodalMapping>& grid_nodal_mappings)
 {
+  struct WorkItem
+  {
+    std::shared_ptr<AngularQuadrature> quadrature;
+    std::shared_ptr<SPDS> spds;
+  };
+  std::vector<WorkItem> work;
   for (const auto& [quadrature, spds_list] : runtime.quadrature_spds_map)
     for (const auto& spds : spds_list)
-      runtime.quadrature_fluds_commondata_map[quadrature].push_back(
-        std::make_unique<CBC_FLUDSCommonData>(*spds, grid_nodal_mappings));
+      work.push_back({quadrature, spds});
+  if (work.empty())
+    return;
+
+  const size_t nthreads = std::min<size_t>(std::max(1U, opensn_num_threads), work.size());
+  log.Log() << program_timer.GetTimeString() << " FLUDS construction: " << work.size()
+            << " angles (" << nthreads << " threads(s)).";
+  std::vector<std::unique_ptr<CBC_FLUDSCommonData>> result(work.size());
+  ParallelFor(work.size(),
+              nthreads,
+              [&](size_t i)
+              { result[i] = CBC_FLUDSCommonData::MakeAlpha(*work[i].spds, grid_nodal_mappings); });
+  for (auto& fluds : result)
+    fluds->FinalizeBeta();
+  for (size_t i = 0; i < work.size(); ++i)
+    runtime.quadrature_fluds_commondata_map[work[i].quadrature].push_back(std::move(result[i]));
+  log.Log() << program_timer.GetTimeString() << " FLUDS construction done.";
 }
 
 } // namespace
@@ -477,14 +568,15 @@ BuildSweepRuntime(const std::string& problem_name,
   const auto geometry_type = grid->GetGeometryType();
   BuildSweepOrderingGroups(
     runtime, problem_name, groupsets, grid, geometry_type, quadrature_allow_cycles_map);
+  const auto face_neighbor_info = BuildSPDSFaceNeighborInfo(*grid);
 
   if (sweep_type == "AAH")
   {
-    BuildAAHSPDS(runtime, grid, quadrature_allow_cycles_map, use_gpus);
+    BuildAAHSPDS(runtime, grid, face_neighbor_info, quadrature_allow_cycles_map, use_gpus);
     BuildAAHGlobalSweepGraph(runtime);
   }
   else if (sweep_type == "CBC")
-    BuildCBCSPDS(runtime, grid, quadrature_allow_cycles_map);
+    BuildCBCSPDS(runtime, grid, face_neighbor_info, quadrature_allow_cycles_map);
   else
     OpenSnInvalidArgument("Unsupported sweep type \"" + sweep_type + "\"");
 

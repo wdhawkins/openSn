@@ -30,9 +30,13 @@ AAH_FLUDS::AAH_FLUDS(unsigned int num_groups,
                      const AAH_FLUDSCommonData& common_data)
   : FLUDS(num_groups, num_angles, common_data.GetSPDS()),
     common_data_(common_data),
-    delayed_local_psi_Gn_block_strideG_(common_data_.delayed_local_psi_Gn_block_stride_ *
-                                        num_groups_)
+    delayed_local_psi_Gn_block_strideG_(0)
 {
+  if (not common_data_.IsFinalized())
+    throw std::logic_error("AAH FLUDS common data must be finalized before use");
+
+  delayed_local_psi_Gn_block_strideG_ =
+    common_data_.delayed_local_psi_Gn_block_stride_ * num_groups_;
 
   // Adjusting for different group aggregate
   for (const auto& val : common_data_.local_psi_n_block_stride_)

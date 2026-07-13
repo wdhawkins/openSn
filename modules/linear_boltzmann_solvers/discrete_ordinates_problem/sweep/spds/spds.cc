@@ -16,25 +16,10 @@
 namespace opensn
 {
 
-namespace
+SPDSFaceNeighborInfoVec
+BuildSPDSFaceNeighborInfo(const MeshContinuum& grid)
 {
-
-struct FaceNeighborInfo
-{
-  bool has_neighbor = false;
-  bool neighbor_local = false;
-  bool owns_face = true;
-  std::uint32_t neighbor_local_id = 0;
-  int neighbor_partition_id = -1;
-  unsigned int neighbor_adj_face = 0;
-};
-
-using FaceNeighborInfoVec = std::vector<std::vector<FaceNeighborInfo>>;
-
-FaceNeighborInfoVec
-GetFaceNeighborInfo(const MeshContinuum& grid)
-{
-  FaceNeighborInfoVec info;
+  SPDSFaceNeighborInfoVec info;
   info.resize(grid.local_cells.size());
   for (const auto& cell : grid.local_cells)
   {
@@ -67,8 +52,6 @@ GetFaceNeighborInfo(const MeshContinuum& grid)
 
   return info;
 }
-
-} // namespace
 
 std::vector<std::pair<Vertex, Vertex>>
 SPDS::FindApproxMinimumFAS(Graph& g, std::vector<Vertex>& scc_vertices)
@@ -373,9 +356,10 @@ SPDS::MapLocJToDeplocI(int locJ) const
 void
 SPDS::PopulateCellRelationships(
   const Vector3& omega,
-  std::set<int>& location_dependencies,
-  std::set<int>& location_successors,
-  std::vector<std::set<std::pair<std::uint32_t, double>>>& cell_successors)
+  const SPDSFaceNeighborInfoVec& face_info,
+  std::vector<int>& location_dependencies,
+  std::vector<int>& location_successors,
+  std::vector<std::vector<std::pair<std::uint32_t, double>>>& cell_successors)
 {
 
   constexpr double tolerance = FACE_ORIENTATION_TOLERANCE;
@@ -387,8 +371,6 @@ SPDS::PopulateCellRelationships(
   cell_face_orientations_.assign(grid_->local_cells.size(), {});
   for (auto& cell : grid_->local_cells)
     cell_face_orientations_[cell.local_id].assign(cell.faces.size(), FOPARALLEL);
-
-  const auto& face_info = GetFaceNeighborInfo(*grid_);
 
   for (auto& cell : grid_->local_cells)
   {
@@ -481,11 +463,10 @@ SPDS::PopulateCellRelationships(
           if (face_info[cell.local_id][f].neighbor_local)
           {
             const auto weight = mu * face.area;
-            cell_successors[c].insert(
-              std::make_pair(face_info[cell.local_id][f].neighbor_local_id, weight));
+            cell_successors[c].emplace_back(face_info[cell.local_id][f].neighbor_local_id, weight);
           }
           else
-            location_successors.insert(face_info[cell.local_id][f].neighbor_partition_id);
+            location_successors.push_back(face_info[cell.local_id][f].neighbor_partition_id);
         }
       }
       // If not outgoing determine what it is dependent on
@@ -494,11 +475,22 @@ SPDS::PopulateCellRelationships(
         // if it is a cell and not bndry
         if (face_info[cell.local_id][f].has_neighbor and
             not face_info[cell.local_id][f].neighbor_local)
-          location_dependencies.insert(face_info[cell.local_id][f].neighbor_partition_id);
+          location_dependencies.push_back(face_info[cell.local_id][f].neighbor_partition_id);
       }
       ++f;
     } // for face
   } // for cell
+
+  auto SortUnique = [](auto& values)
+  {
+    std::sort(values.begin(), values.end());
+    values.erase(std::unique(values.begin(), values.end()), values.end());
+  };
+
+  SortUnique(location_dependencies);
+  SortUnique(location_successors);
+  for (auto& successors : cell_successors)
+    SortUnique(successors);
 }
 
 void

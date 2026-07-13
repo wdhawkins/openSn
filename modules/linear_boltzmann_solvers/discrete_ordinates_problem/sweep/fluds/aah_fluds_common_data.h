@@ -5,8 +5,10 @@
 
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/fluds/fluds_common_data.h"
 #include <set>
+#include <unordered_map>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 
 namespace opensn
@@ -27,6 +29,13 @@ class SPDS;
 class AAH_FLUDSCommonData : public FLUDSCommonData
 {
 public:
+  /// Construct alpha phase only (local work, no MPI). Call FinalizeBeta() afterwards.
+  /// MakeAlpha() prevents us from holding an unfinalized object.
+  static std::unique_ptr<AAH_FLUDSCommonData>
+  MakeAlpha(const std::vector<CellFaceNodalMapping>& grid_nodal_mappings,
+            const SPDS& spds,
+            const GridFaceHistogram& grid_face_histogram);
+
   struct INCOMING_FACE_INFO
   {
     int slot_address = 0;
@@ -41,10 +50,17 @@ public:
 
     ~INCOMING_FACE_INFO() = default;
   }; // TODO: Make common
-public:
+private:
   explicit AAH_FLUDSCommonData(const std::vector<CellFaceNodalMapping>& grid_nodal_mappings,
                                const SPDS& spds,
                                const GridFaceHistogram& grid_face_histogram);
+
+public:
+  /// Complete SPDS construction. Exchange inter-rank face data via MPI. This routine must be
+  /// called sequentially across all SPDS in the same order on all ranks after the constructor.
+  void FinalizeBeta(const SPDS& spds);
+
+  bool IsFinalized() const { return finalized_; }
 
 protected:
   friend class AAH_FLUDS;
@@ -87,6 +103,8 @@ protected:
    * Cleared after beta-pass.
    */
   std::vector<std::vector<CompactCellView>> deplocI_cell_views_;
+  std::vector<std::unordered_map<uint64_t, size_t>> deploc_i_cell_idx_;
+  bool finalized_ = false;
 
   /**
    * This is a vector [cell_sweep_order_index][outgoing_face_count] which holds the slot address in
@@ -135,7 +153,11 @@ private:
 
   void InitializeBetaElements(const SPDS& spds, int tag_index = 0);
 
-  void NonLocalIncidentMapping(const Cell& cell, const SPDS& spds);
+  void
+  NonLocalIncidentMapping(const Cell& cell,
+                          const SPDS& spds,
+                          const std::vector<std::unordered_map<uint64_t, size_t>>& preloc_i_idx,
+                          const std::vector<std::unordered_map<uint64_t, size_t>>& dpreloc_i_idx);
 
   std::vector<std::vector<INCOMING_FACE_INFO>> so_cell_inco_face_dof_indices_;
 

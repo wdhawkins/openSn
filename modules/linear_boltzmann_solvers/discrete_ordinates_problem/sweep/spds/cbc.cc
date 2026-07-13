@@ -14,6 +14,7 @@ namespace opensn
 
 CBC_SPDS::CBC_SPDS(const Vector3& omega,
                    const std::shared_ptr<MeshContinuum>& grid,
+                   const SPDSFaceNeighborInfoVec& face_neighbor_info,
                    bool allow_cycles)
   : SPDS(omega, grid)
 {
@@ -21,20 +22,15 @@ CBC_SPDS::CBC_SPDS(const Vector3& omega,
   const auto num_loc_cells = grid->local_cells.size();
 
   // Populate cell relationships
-  std::vector<std::set<std::pair<std::uint32_t, double>>> cell_successors(num_loc_cells);
-  std::set<int> location_successors;
-  std::set<int> location_dependencies;
+  std::vector<std::vector<std::pair<std::uint32_t, double>>> cell_successors(num_loc_cells);
+  std::vector<int> location_successors;
+  std::vector<int> location_dependencies;
 
-  PopulateCellRelationships(omega, location_dependencies, location_successors, cell_successors);
+  PopulateCellRelationships(
+    omega, face_neighbor_info, location_dependencies, location_successors, cell_successors);
 
-  location_successors_.reserve(location_successors.size());
-  location_dependencies_.reserve(location_dependencies.size());
-
-  for (const auto location : location_successors)
-    location_successors_.push_back(location);
-
-  for (const auto location : location_dependencies)
-    location_dependencies_.push_back(location);
+  location_successors_ = std::move(location_successors);
+  location_dependencies_ = std::move(location_dependencies);
 
   // Build local cell graph
   Graph local_DG(num_loc_cells);
@@ -62,9 +58,6 @@ CBC_SPDS::CBC_SPDS(const Vector3& omega,
   }
 
   // Create task list
-  std::vector<std::vector<int>> global_dependencies(opensn::mpi_comm.size());
-  CommunicateLocationDependencies(location_dependencies_, global_dependencies);
-
   constexpr auto INCOMING = FaceOrientation::INCOMING;
   constexpr auto OUTGOING = FaceOrientation::OUTGOING;
 
