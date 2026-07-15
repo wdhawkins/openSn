@@ -1208,7 +1208,7 @@ WrapLBS(py::module& slv)
           continue;
         // construct numpy array and copy contents
         const auto& grp_wise_leakage = it->second;
-        py::array_t<double> np_vector(py::ssize_t(grp_wise_leakage.size()));
+        py::array_t<double> np_vector(static_cast<py::ssize_t>(grp_wise_leakage.size()));
         auto buffer = np_vector.request();
         auto *np_vector_data = static_cast<double*>(buffer.ptr);
         std::copy(grp_wise_leakage.begin(), grp_wise_leakage.end(), np_vector_data);
@@ -1713,8 +1713,7 @@ WrapTransient(py::module& slv)
     )");
   transient_solver.def(
     "SetPreAdvanceCallback",
-    static_cast<void (TransientSolver::*)(std::nullptr_t)>(
-      &TransientSolver::SetPreAdvanceCallback),
+    py::overload_cast<std::nullptr_t>(&TransientSolver::SetPreAdvanceCallback),
     "Clear the PreAdvance callback by passing None.");
   transient_solver.def(
     "SetPostAdvanceCallback",
@@ -1730,8 +1729,7 @@ WrapTransient(py::module& slv)
     )");
   transient_solver.def(
     "SetPostAdvanceCallback",
-    static_cast<void (TransientSolver::*)(std::nullptr_t)>(
-      &TransientSolver::SetPostAdvanceCallback),
+    py::overload_cast<std::nullptr_t>(&TransientSolver::SetPostAdvanceCallback),
     "Clear the PostAdvance callback by passing None.");
   transient_solver.def(
     "ComputeBalanceTable",
