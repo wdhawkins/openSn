@@ -13,7 +13,7 @@ if "opensn_console" not in globals():
     from pyopensn.mesh import OrthogonalMeshGenerator
     from pyopensn.xs import MultiGroupXS
     from pyopensn.source import VolumetricSource
-    from pyopensn.aquad import GLProductQuadrature1DSlab
+    from pyopensn.aquad import GLQuadrature1DSlab
     from pyopensn.solver import DiscreteOrdinatesProblem, SteadyStateSourceSolver, TransientSolver
 
 
@@ -68,7 +68,7 @@ if __name__ == "__main__":
     xs = MultiGroupXS()
     xs.CreateSimpleOneGroup(1.0, 0.0, 1.0)
     source0 = VolumetricSource(block_ids=[0], group_strength=[2.0], start_time=0.0, end_time=10.0)
-    quadrature = GLProductQuadrature1DSlab(n_polar=4, scattering_order=0)
+    quadrature = GLQuadrature1DSlab(n_polar=4, scattering_order=0)
 
     dt = 0.01
     num_steps = 5

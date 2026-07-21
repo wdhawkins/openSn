@@ -9,6 +9,7 @@
 #include "modules/linear_boltzmann_solvers/lbs_problem/groupset/lbs_groupset.h"
 #include "framework/logging/log.h"
 #include "framework/math/quadratures/angular/product_quadrature.h"
+#include "framework/math/quadratures/angular/quadrature_1d.h"
 #include "framework/mesh/mesh_continuum/grid_face_histogram.h"
 #include "framework/mesh/mesh_continuum/mesh_continuum.h"
 #include "framework/runtime.h"
@@ -124,51 +125,90 @@ AssociateSOsAndDirections(const std::string& problem_name,
           "types are supported, i.e., ORTHOGONAL, 2D or 3D EXTRUDED");
 
       const auto quad_type = quadrature.GetType();
-      if (quad_type != AngularQuadratureType::PRODUCT_QUADRATURE)
+      if (quad_type != AngularQuadratureType::PRODUCT_QUADRATURE and
+          quad_type != AngularQuadratureType::POLAR_QUADRATURE)
         throw std::logic_error(problem_name +
                                ": The simulation is using polar angle aggregation for which only "
-                               "Product-type quadratures are supported");
+                               "Product-type and 1D quadratures are supported");
 
-      try
+      if (quad_type == AngularQuadratureType::PRODUCT_QUADRATURE)
       {
-        const auto& product_quad = dynamic_cast<const ProductQuadrature&>(quadrature);
-
-        const auto& azimuthal_angles = product_quad.GetAzimuthalAngles();
-        const auto& polar_angles = product_quad.GetPolarAngles();
-        const auto num_azimuthal = azimuthal_angles.size();
-        const auto num_polar = polar_angles.size();
-
-        std::vector<size_t> upward_polar_ids;
-        std::vector<size_t> downward_polar_ids;
-        for (size_t p = 0; p < num_polar; ++p)
-          if (polar_angles[p] > M_PI_2)
-            upward_polar_ids.push_back(p);
-          else
-            downward_polar_ids.push_back(p);
-
-        auto MapPolarAndAzimuthalIDs =
-          [&product_quad, &unique_so_groupings](const DirIDs& polar_ids, size_t azimuthal_id)
+        try
         {
-          DirIDs dir_ids;
-          dir_ids.reserve(polar_ids.size());
-          for (const size_t p : polar_ids)
-            dir_ids.push_back(product_quad.GetAngleNum(p, azimuthal_id));
-          AppendNonEmptyGrouping(unique_so_groupings, std::move(dir_ids));
-        };
+          const auto& product_quad = dynamic_cast<const ProductQuadrature&>(quadrature);
 
-        for (size_t a = 0; a < num_azimuthal; ++a)
+          const auto& azimuthal_angles = product_quad.GetAzimuthalAngles();
+          const auto& polar_angles = product_quad.GetPolarAngles();
+          const auto num_azimuthal = azimuthal_angles.size();
+          const auto num_polar = polar_angles.size();
+
+          std::vector<size_t> upward_polar_ids;
+          std::vector<size_t> downward_polar_ids;
+          for (size_t p = 0; p < num_polar; ++p)
+            if (polar_angles[p] > M_PI_2)
+              upward_polar_ids.push_back(p);
+            else
+              downward_polar_ids.push_back(p);
+
+          auto MapPolarAndAzimuthalIDs =
+            [&product_quad, &unique_so_groupings](const DirIDs& polar_ids, size_t azimuthal_id)
+          {
+            DirIDs dir_ids;
+            dir_ids.reserve(polar_ids.size());
+            for (const size_t p : polar_ids)
+              dir_ids.push_back(product_quad.GetAngleNum(p, azimuthal_id));
+            AppendNonEmptyGrouping(unique_so_groupings, std::move(dir_ids));
+          };
+
+          for (size_t a = 0; a < num_azimuthal; ++a)
+          {
+            if (not upward_polar_ids.empty())
+              MapPolarAndAzimuthalIDs(upward_polar_ids, a);
+            if (not downward_polar_ids.empty())
+              MapPolarAndAzimuthalIDs(downward_polar_ids, a);
+          }
+        }
+        catch (const std::bad_cast&)
         {
-          if (not upward_polar_ids.empty())
-            MapPolarAndAzimuthalIDs(upward_polar_ids, a);
-          if (not downward_polar_ids.empty())
-            MapPolarAndAzimuthalIDs(downward_polar_ids, a);
+          throw std::runtime_error(problem_name +
+                                   ": Casting the angular quadrature to the product quadrature "
+                                   "base failed");
         }
       }
-      catch (const std::bad_cast&)
+      else // AngularQuadratureType::POLAR_QUADRATURE (1D quadrature)
       {
-        throw std::runtime_error(problem_name +
-                                 ": Casting the angular quadrature to the product quadrature base "
-                                 "failed");
+        try
+        {
+          const auto& quad_1d = dynamic_cast<const Quadrature1D&>(quadrature);
+          const auto& polar_angles = quad_1d.GetPolarAngles();
+
+          std::vector<size_t> upward_polar_ids;
+          std::vector<size_t> downward_polar_ids;
+          for (size_t p = 0; p < polar_angles.size(); ++p)
+            if (polar_angles[p] > M_PI_2)
+              upward_polar_ids.push_back(p);
+            else
+              downward_polar_ids.push_back(p);
+
+          auto MapPolarIDs = [&quad_1d, &unique_so_groupings](const DirIDs& polar_ids)
+          {
+            DirIDs dir_ids;
+            dir_ids.reserve(polar_ids.size());
+            for (const size_t p : polar_ids)
+              dir_ids.push_back(quad_1d.GetAngleNum(p));
+            AppendNonEmptyGrouping(unique_so_groupings, std::move(dir_ids));
+          };
+
+          if (not upward_polar_ids.empty())
+            MapPolarIDs(upward_polar_ids);
+          if (not downward_polar_ids.empty())
+            MapPolarIDs(downward_polar_ids);
+        }
+        catch (const std::bad_cast&)
+        {
+          throw std::runtime_error(
+            problem_name + ": Casting the angular quadrature to the 1D quadrature base failed");
+        }
       }
 
       break;

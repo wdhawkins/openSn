@@ -63,27 +63,4 @@ private:
   void InitializeParameters();
 };
 
-class GLProductQuadrature1DSpherical : public CurvilinearProductQuadrature
-{
-public:
-  GLProductQuadrature1DSpherical(
-    unsigned int Npolar,
-    unsigned int scattering_order,
-    bool verbose = false,
-    OperatorConstructionMethod method = OperatorConstructionMethod::STANDARD);
-
-  ~GLProductQuadrature1DSpherical() override = default;
-
-  std::string GetName() const override { return "1D Spherical Gauss-Legendre product"; }
-
-  void MakeHarmonicIndices();
-
-private:
-  /// Initialize with a 1D polar quadrature.
-  void Initialize(unsigned int Npolar, bool verbose = false);
-
-  /// Initialize spherical parametrizing factors from the underlying product quadrature.
-  void InitializeParameters();
-};
-
 } // namespace opensn

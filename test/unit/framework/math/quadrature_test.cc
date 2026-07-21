@@ -6,6 +6,7 @@
 #include "framework/math/quadratures/angular/lebedev_quadrature.h"
 #include "framework/math/quadratures/angular/sldfe_sq_quadrature.h"
 #include "framework/math/quadratures/angular/product_quadrature.h"
+#include "framework/math/quadratures/angular/quadrature_1d.h"
 #include "framework/math/quadratures/angular/triangular_quadrature.h"
 #include <gtest/gtest.h>
 #include <numeric>
@@ -247,10 +248,10 @@ TEST(QuadratureTest, SLDFEsqQuadrature3DXYZ)
   }
 }
 
-TEST(QuadratureTest, GLProductQuadrature1DSlab)
+TEST(QuadratureTest, GLQuadrature1DSlab)
 {
   // n_polar=4: 4 directions along the slab axis (phi=0), scattering_order=1 -> 2 moments (1D)
-  GLProductQuadrature1DSlab quad(4, 1);
+  GLQuadrature1DSlab quad(4, 1);
   ASSERT_EQ(quad.GetOmegas().size(), 4);
   EXPECT_EQ(quad.GetDimension(), 1u);
   EXPECT_EQ(quad.GetNumMoments(), 2u);

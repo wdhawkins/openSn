@@ -31,7 +31,7 @@ if "opensn_console" not in globals():
     from pyopensn.mesh import OrthogonalMeshGenerator
     from pyopensn.xs import MultiGroupXS
     from pyopensn.math import AngularFluxFunction, AngularFluxTimeFunction
-    from pyopensn.aquad import GLProductQuadrature1DSlab
+    from pyopensn.aquad import GLQuadrature1DSlab
     from pyopensn.solver import DiscreteOrdinatesProblem, TransientSolver
 
 
@@ -82,7 +82,7 @@ def make_1d_problem(boundary_conditions, num_groups=1, n_polar=4):
         ensure_multigroup_xs_file()
         xs.LoadFromOpenSn(XS2_PATH)
 
-    pquad = GLProductQuadrature1DSlab(n_polar=n_polar, scattering_order=0)
+    pquad = GLQuadrature1DSlab(n_polar=n_polar, scattering_order=0)
     return DiscreteOrdinatesProblem(
         mesh=grid,
         num_groups=num_groups,

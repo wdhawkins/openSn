@@ -5,6 +5,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_curvilinear_problem/sweep_chunks/aah_sweep_chunk_rz.h"
 #include "framework/math/spatial_discretization/finite_element/piecewise_linear/piecewise_linear_discontinuous.h"
 #include "framework/math/quadratures/angular/curvilinear_product_quadrature.h"
+#include "framework/math/quadratures/angular/curvilinear_quadrature_1d.h"
 #include "framework/mesh/mesh_continuum/mesh_continuum.h"
 #include "framework/logging/log.h"
 #include "framework/runtime.h"
@@ -125,7 +126,7 @@ DiscreteOrdinatesCurvilinearProblem::PerformInputChecks()
       case CoordinateSystemType::SPHERICAL:
       {
         const auto curvilinear_angular_quad_ptr =
-          std::dynamic_pointer_cast<GLProductQuadrature1DSpherical>(angular_quad_ptr);
+          std::dynamic_pointer_cast<GLQuadrature1DSpherical>(angular_quad_ptr);
 
         if (curvilinear_angular_quad_ptr == nullptr)
         {

@@ -16,7 +16,7 @@ if "opensn_console" not in globals():
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../../")))
     from pyopensn.mesh import OrthogonalMeshGenerator
     from pyopensn.xs import MultiGroupXS
-    from pyopensn.aquad import GLProductQuadrature1DSlab
+    from pyopensn.aquad import GLQuadrature1DSlab
     from pyopensn.solver import DiscreteOrdinatesProblem, SteadyStateSourceSolver
 
 if __name__ == "__main__":
@@ -46,7 +46,7 @@ if __name__ == "__main__":
     bsrc[0] = 2.0
 
     # Setup Physics
-    pquad = GLProductQuadrature1DSlab(n_polar=256, scattering_order=0)
+    pquad = GLQuadrature1DSlab(n_polar=256, scattering_order=0)
     phys = DiscreteOrdinatesProblem(
         mesh=grid,
         num_groups=num_groups,

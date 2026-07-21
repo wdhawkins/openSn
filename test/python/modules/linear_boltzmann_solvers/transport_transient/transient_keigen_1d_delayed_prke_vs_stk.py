@@ -29,7 +29,7 @@ if "opensn_console" not in globals():
         PowerIterationKEigenSolver,
         TransientSolver,
     )
-    from pyopensn.aquad import GLProductQuadrature1DSlab
+    from pyopensn.aquad import GLQuadrature1DSlab
     from pyopensn.xs import MultiGroupXS
     from pyopensn.mesh import OrthogonalMeshGenerator
 
@@ -91,7 +91,7 @@ if __name__ == "__main__":
         "../../../../assets/xs/xs1g_delayed_super_1p.cxs")
     )
 
-    pquad = GLProductQuadrature1DSlab(n_polar=4, scattering_order=0)
+    pquad = GLQuadrature1DSlab(n_polar=4, scattering_order=0)
 
     num_groups = 1
     phys = DiscreteOrdinatesProblem(

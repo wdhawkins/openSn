@@ -79,7 +79,7 @@ Product quadratures
    :nosignatures:
    :template: python.rst
 
-   aquad.GLProductQuadrature1DSlab
+   aquad.GLQuadrature1DSlab
    aquad.GLCProductQuadrature2DXY
    aquad.GLCProductQuadrature3DXYZ
 

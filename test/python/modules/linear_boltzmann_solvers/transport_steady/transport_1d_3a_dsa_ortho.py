@@ -19,7 +19,7 @@ if "opensn_console" not in globals():
     from pyopensn.mesh import OrthogonalMeshGenerator
     from pyopensn.xs import MultiGroupXS
     from pyopensn.source import VolumetricSource
-    from pyopensn.aquad import GLProductQuadrature1DSlab
+    from pyopensn.aquad import GLQuadrature1DSlab
     from pyopensn.solver import DiscreteOrdinatesProblem, SteadyStateSourceSolver
     from pyopensn.logvol import RPPLogicalVolume
 
@@ -58,7 +58,7 @@ if __name__ == "__main__":
     mg_src = VolumetricSource(block_ids=[0], group_strength=strength)
 
     # Setup Physics
-    pquad = GLProductQuadrature1DSlab(n_polar=4, scattering_order=1)
+    pquad = GLQuadrature1DSlab(n_polar=4, scattering_order=1)
 
     phys = DiscreteOrdinatesProblem(
         mesh=grid,

@@ -12,7 +12,7 @@ if "opensn_console" not in globals():
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../../")))
     from pyopensn.mesh import OrthogonalMeshGenerator
     from pyopensn.xs import MultiGroupXS
-    from pyopensn.aquad import GLProductQuadrature1DSlab
+    from pyopensn.aquad import GLQuadrature1DSlab
     from pyopensn.solver import DiscreteOrdinatesProblem, SteadyStateSourceSolver
     from pyopensn.math import Vector3
 
@@ -36,7 +36,7 @@ if __name__ == "__main__":
     xs_3_170.LoadFromOpenSn("../../../../assets/xs/xs_168g.xs")
 
     # Angular quadrature
-    pquad = GLProductQuadrature1DSlab(n_polar=80, scattering_order=5)
+    pquad = GLQuadrature1DSlab(n_polar=80, scattering_order=5)
 
     # Create solver
     phys = DiscreteOrdinatesProblem(

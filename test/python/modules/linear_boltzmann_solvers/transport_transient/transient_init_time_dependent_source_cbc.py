@@ -21,7 +21,7 @@ if "opensn_console" not in globals():
     from pyopensn.mesh import OrthogonalMeshGenerator
     from pyopensn.xs import MultiGroupXS
     from pyopensn.source import VolumetricSource
-    from pyopensn.aquad import GLProductQuadrature1DSlab
+    from pyopensn.aquad import GLQuadrature1DSlab
     from pyopensn.solver import DiscreteOrdinatesProblem, TransientSolver
     from pyopensn.fieldfunc import FieldFunctionInterpolationVolume
     from pyopensn.logvol import RPPLogicalVolume
@@ -54,7 +54,7 @@ if __name__ == "__main__":
 
     source = VolumetricSource(block_ids=[0], group_strength=[Q], start_time=0.0, end_time=10.0)
 
-    pquad = GLProductQuadrature1DSlab(n_polar=4, scattering_order=0)
+    pquad = GLQuadrature1DSlab(n_polar=4, scattering_order=0)
 
     phys = DiscreteOrdinatesProblem(
         mesh=grid,

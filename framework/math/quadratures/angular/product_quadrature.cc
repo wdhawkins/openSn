@@ -93,39 +93,6 @@ ProductQuadrature::AssembleCosines(const std::vector<double>& azimuthal,
     weight_sum_ += w;
 }
 
-GLProductQuadrature1DSlab::GLProductQuadrature1DSlab(unsigned int Npolar,
-                                                     unsigned int scattering_order,
-                                                     bool verbose,
-                                                     OperatorConstructionMethod method)
-  : ProductQuadrature(1, scattering_order, method)
-{
-  if (Npolar % 2 != 0)
-    throw std::invalid_argument("GLProductQuadrature1DSlab: Npolar must be even.");
-
-  n_polar_ = Npolar;
-  n_azimuthal_ = 1;
-
-  GaussLegendreQuadrature gl_polar(Npolar);
-
-  // Create azimuthal angles
-  azimu_ang_.clear();
-  azimu_ang_.emplace_back(0.0);
-
-  // Create polar angles
-  polar_ang_.clear();
-  for (unsigned int j = 0; j < Npolar; ++j)
-    polar_ang_.emplace_back(M_PI - acos(gl_polar.qpoints[j][0]));
-
-  // Create combined weights
-  auto& weights = gl_polar.weights;
-
-  // Initialize
-  AssembleCosines(azimu_ang_, polar_ang_, weights, verbose);
-  MakeHarmonicIndices();
-  BuildDiscreteToMomentOperator();
-  BuildMomentToDiscreteOperator();
-}
-
 GLCProductQuadrature2DXY::GLCProductQuadrature2DXY(unsigned int Npolar,
                                                    unsigned int Nazimuthal,
                                                    unsigned int scattering_order,

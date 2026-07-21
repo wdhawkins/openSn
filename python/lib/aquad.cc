@@ -5,6 +5,7 @@
 #include "framework/math/quadratures/angular/angular_quadrature.h"
 #include "framework/math/quadratures/angular/curvilinear_product_quadrature.h"
 #include "framework/math/quadratures/angular/product_quadrature.h"
+#include "framework/math/quadratures/angular/quadrature_1d.h"
 #include "framework/math/quadratures/angular/triangular_quadrature.h"
 #include "framework/math/quadratures/angular/sldfe_sq_quadrature.h"
 #include "framework/math/quadratures/angular/lebedev_quadrature.h"
@@ -221,47 +222,6 @@ WrapProductQuadrature(py::module& aquad)
   product_quadrature.def("GetNumPolarAngles", &ProductQuadrature::GetNumPolarAngles);
   product_quadrature.def("GetNumAzimuthalAngles", &ProductQuadrature::GetNumAzimuthalAngles);
 
-  // Gauss-Legendre 1D slab product quadrature
-  auto angular_quadrature_gl_prod_1d_slab = py::class_<GLProductQuadrature1DSlab,
-                                                       std::shared_ptr<GLProductQuadrature1DSlab>,
-                                                       ProductQuadrature>(
-    aquad,
-    "GLProductQuadrature1DSlab",
-    R"(
-    Gauss-Legendre quadrature for 1D, slab geometry.
-
-    Wrapper of :cpp:class:`opensn::GLProductQuadrature1DSlab`.
-    )"
-  );
-  angular_quadrature_gl_prod_1d_slab.def(
-    py::init(
-      [](py::kwargs& params)
-      {
-        auto scattering_order = GetScatteringOrder(params);
-        static const std::vector<std::string> required_keys = {"n_polar"};
-        const std::vector<std::pair<std::string, py::object>> optional_keys = {{"operator_method", py::str("standard")}, {"verbose", py::bool_(false)}};
-        auto [n_polar, method_str, verbose] = extract_args_tuple<unsigned int, std::string, bool>(params, required_keys, optional_keys);
-        return std::make_shared<GLProductQuadrature1DSlab>(n_polar, scattering_order, verbose, op_cons_type_map.at(method_str));
-      }
-    ),
-    R"(
-    Construct a Gauss-Legendre product quadrature for 1D, slab geometry.
-
-    Parameters
-    ----------
-    n_polar: int
-        Number of polar angles.
-    scattering_order: int
-        Maximum scattering order supported by the angular quadrature.
-        Optional when ``operator_method='galerkin_one'``, in which case the scattering order
-        is automatically determined so that the number of moments equals the number of angles.
-    operator_method: {'standard', 'galerkin_one', 'galerkin_three'}, default='standard'
-        Method used to construct the discrete-to-moment and moment-to-discrete operators.
-    verbose: bool, default=False
-        Verbosity.
-    )"
-  );
-
   // Gauss-Legendre-Chebyshev 2D XY product quadrature
   auto angular_quadrature_glc_prod_2d_xy = py::class_<GLCProductQuadrature2DXY,
                                                       std::shared_ptr<GLCProductQuadrature2DXY>,
@@ -462,6 +422,76 @@ WrapTriangularQuadrature(py::module& aquad)
     n_polar: int
         Number of polar angles (only upper hemisphere will be used). The maximum
         number of azimuthal angles (at the equator) is automatically computed as 2 * n_polar.
+    scattering_order: int
+        Maximum scattering order supported by the angular quadrature.
+        Optional when ``operator_method='galerkin_one'``, in which case the scattering order
+        is automatically determined so that the number of moments equals the number of angles.
+    operator_method: {'standard', 'galerkin_one', 'galerkin_three'}, default='standard'
+        Method used to construct the discrete-to-moment and moment-to-discrete operators.
+    verbose: bool, default=False
+        Verbosity.
+    )"
+  );
+  // clang-format on
+}
+
+// Wrap 1D quadrature
+void
+WrapQuadrature1D(py::module& aquad)
+{
+  // clang-format off
+  // 1D quadrature base class
+  auto quadrature_1d = py::class_<Quadrature1D, std::shared_ptr<Quadrature1D>,
+                                  AngularQuadrature>(
+    aquad,
+    "Quadrature1D",
+    R"(
+    1D quadrature base class.
+
+    Unlike product quadratures, 1D quadratures have no azimuthal degree of freedom: every
+    direction lies at azimuthal angle phi=0.
+
+    Wrapper of :cpp:class:`opensn::Quadrature1D`.
+    )"
+  );
+  quadrature_1d.def(
+    "GetPolarAngles",
+    &Quadrature1D::GetPolarAngles,
+    py::return_value_policy::reference_internal
+  );
+  quadrature_1d.def("GetNumPolarAngles", &Quadrature1D::GetNumPolarAngles);
+  quadrature_1d.def("GetNumAzimuthalAngles", &Quadrature1D::GetNumAzimuthalAngles);
+
+  // Gauss-Legendre 1D slab quadrature
+  auto angular_quadrature_gl_1d_slab = py::class_<GLQuadrature1DSlab,
+                                                  std::shared_ptr<GLQuadrature1DSlab>,
+                                                  Quadrature1D>(
+    aquad,
+    "GLQuadrature1DSlab",
+    R"(
+    Gauss-Legendre quadrature for 1D, slab geometry.
+
+    Wrapper of :cpp:class:`opensn::GLQuadrature1DSlab`.
+    )"
+  );
+  angular_quadrature_gl_1d_slab.def(
+    py::init(
+      [](py::kwargs& params)
+      {
+        auto scattering_order = GetScatteringOrder(params);
+        static const std::vector<std::string> required_keys = {"n_polar"};
+        const std::vector<std::pair<std::string, py::object>> optional_keys = {{"operator_method", py::str("standard")}, {"verbose", py::bool_(false)}};
+        auto [n_polar, method_str, verbose] = extract_args_tuple<unsigned int, std::string, bool>(params, required_keys, optional_keys);
+        return std::make_shared<GLQuadrature1DSlab>(n_polar, scattering_order, verbose, op_cons_type_map.at(method_str));
+      }
+    ),
+    R"(
+    Construct a Gauss-Legendre quadrature for 1D, slab geometry.
+
+    Parameters
+    ----------
+    n_polar: int
+        Number of polar angles.
     scattering_order: int
         Maximum scattering order supported by the angular quadrature.
         Optional when ``operator_method='galerkin_one'``, in which case the scattering order
@@ -808,6 +838,7 @@ py_aquad(py::module& pyopensn)
   WrapQuadrature(aquad);
   WrapProductQuadrature(aquad);
   WrapTriangularQuadrature(aquad);
+  WrapQuadrature1D(aquad);
   WrapCurvilinearProductQuadrature(aquad);
   WrapSLDFEsqQuadrature(aquad);
   WrapLebedevQuadrature(aquad);

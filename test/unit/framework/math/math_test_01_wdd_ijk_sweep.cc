@@ -3,6 +3,7 @@
 
 #include "gmock/gmock.h"
 #include "framework/math/quadratures/angular/product_quadrature.h"
+#include "framework/math/quadratures/angular/quadrature_1d.h"
 #include "framework/data_types/ndarray.h"
 #include "framework/data_types/range.h"
 #include <array>
@@ -127,7 +128,7 @@ TEST(MathTest, WDD_IJK_Sweep)
   NDArray<double, 3> sigma_t(mesh_divisions, 0.2);
   NDArray<double, 3> q(mesh_divisions, 0.0);
 
-  auto pquad = std::make_shared<GLProductQuadrature1DSlab>(2, 0, verbose);
+  auto pquad = std::make_shared<GLQuadrature1DSlab>(2, 0, verbose);
   auto phi = WDD_IJK_Sweep2(mesh_divisions, mesh_lengths, bcs, sigma_t, q, *pquad, verbose);
 
   {

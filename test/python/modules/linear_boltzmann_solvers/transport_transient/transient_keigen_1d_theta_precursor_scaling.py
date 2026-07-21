@@ -22,7 +22,7 @@ if "opensn_console" not in globals():
         PowerIterationKEigenSolver,
         TransientSolver,
     )
-    from pyopensn.aquad import GLProductQuadrature1DSlab
+    from pyopensn.aquad import GLQuadrature1DSlab
     from pyopensn.xs import MultiGroupXS
     from pyopensn.mesh import OrthogonalMeshGenerator
 
@@ -34,7 +34,7 @@ def run_case(theta, use_precursors, xs):
     grid = meshgen.Execute()
     grid.SetUniformBlockID(0)
 
-    pquad = GLProductQuadrature1DSlab(n_polar=4, scattering_order=0)
+    pquad = GLQuadrature1DSlab(n_polar=4, scattering_order=0)
 
     phys = DiscreteOrdinatesProblem(
         mesh=grid,

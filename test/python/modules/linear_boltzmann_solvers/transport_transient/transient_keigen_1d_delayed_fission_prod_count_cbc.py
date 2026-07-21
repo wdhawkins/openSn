@@ -19,7 +19,7 @@ if "opensn_console" not in globals():
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../../")))
     from pyopensn.mesh import OrthogonalMeshGenerator
     from pyopensn.xs import MultiGroupXS
-    from pyopensn.aquad import GLProductQuadrature1DSlab
+    from pyopensn.aquad import GLQuadrature1DSlab
     from pyopensn.solver import DiscreteOrdinatesProblem, PowerIterationKEigenSolver
 
 
@@ -35,7 +35,7 @@ def solve_and_get_fission_prod(xs_path):
     xs = MultiGroupXS()
     xs.LoadFromOpenSn(xs_path)
 
-    pquad = GLProductQuadrature1DSlab(n_polar=4, scattering_order=0)
+    pquad = GLQuadrature1DSlab(n_polar=4, scattering_order=0)
 
     phys = DiscreteOrdinatesProblem(
         mesh=grid,

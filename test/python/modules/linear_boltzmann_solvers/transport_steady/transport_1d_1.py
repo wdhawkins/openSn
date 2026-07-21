@@ -16,7 +16,7 @@ if "opensn_console" not in globals():
     size = MPI.COMM_WORLD.size
     rank = MPI.COMM_WORLD.rank
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../../")))
-    from pyopensn.aquad import GLProductQuadrature1DSlab
+    from pyopensn.aquad import GLQuadrature1DSlab
     from pyopensn.fieldfunc import FieldFunctionInterpolationLine, FieldFunctionInterpolationVolume
     from pyopensn.logvol import RPPLogicalVolume
     from pyopensn.math import Vector3
@@ -61,7 +61,7 @@ if __name__ == "__main__":
     bsrc[0] = 1.0
 
     # Angular quadrature
-    pquad = GLProductQuadrature1DSlab(n_polar=80, scattering_order=5)
+    pquad = GLQuadrature1DSlab(n_polar=80, scattering_order=5)
 
     # Create solver
     phys = DiscreteOrdinatesProblem(

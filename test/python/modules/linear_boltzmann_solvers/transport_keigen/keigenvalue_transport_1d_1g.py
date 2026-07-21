@@ -16,7 +16,7 @@ if "opensn_console" not in globals():
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../../")))
     from pyopensn.mesh import OrthogonalMeshGenerator
     from pyopensn.xs import MultiGroupXS
-    from pyopensn.aquad import GLProductQuadrature1DSlab
+    from pyopensn.aquad import GLQuadrature1DSlab
     from pyopensn.solver import DiscreteOrdinatesProblem, NonLinearKEigenSolver
 
 if __name__ == "__main__":
@@ -50,7 +50,7 @@ if __name__ == "__main__":
         groupsets=[
             {
                 "groups_from_to": (0, num_groups - 1),
-                "angular_quadrature": GLProductQuadrature1DSlab(
+                "angular_quadrature": GLQuadrature1DSlab(
                     n_polar=n_angles,
                     scattering_order=scat_order
                 ),

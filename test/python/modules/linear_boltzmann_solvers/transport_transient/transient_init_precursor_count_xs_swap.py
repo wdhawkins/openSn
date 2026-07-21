@@ -26,7 +26,7 @@ if "opensn_console" not in globals():
     size = MPI.COMM_WORLD.size
     rank = MPI.COMM_WORLD.rank
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../../")))
-    from pyopensn.aquad import GLProductQuadrature1DSlab
+    from pyopensn.aquad import GLQuadrature1DSlab
     from pyopensn.fieldfunc import FieldFunctionInterpolationVolume
     from pyopensn.logvol import RPPLogicalVolume
     from pyopensn.mesh import OrthogonalMeshGenerator
@@ -122,7 +122,7 @@ if __name__ == "__main__":
     xs_super_2p = MultiGroupXS()
     xs_super_2p.LoadFromOpenSn(xs_super_2p_path)
 
-    pquad = GLProductQuadrature1DSlab(n_polar=4, scattering_order=0)
+    pquad = GLQuadrature1DSlab(n_polar=4, scattering_order=0)
 
     problem = DiscreteOrdinatesProblem(
         mesh=grid,

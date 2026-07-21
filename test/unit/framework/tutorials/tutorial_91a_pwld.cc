@@ -7,6 +7,7 @@
 #include "framework/materials/multi_group_xs/multi_group_xs.h"
 #include "framework/materials/multi_group_xs/xsfile.h"
 #include "framework/math/quadratures/angular/product_quadrature.h"
+#include "framework/math/quadratures/angular/quadrature_1d.h"
 #include "framework/field_functions/field_function_grid_based.h"
 #include "framework/mesh/mesh_continuum/mesh_continuum.h"
 #include "framework/data_types/range.h"
@@ -57,7 +58,7 @@ SimTest91_PWLD(std::shared_ptr<MeshContinuum> grid)
   const size_t scat_order = 1;
   std::shared_ptr<AngularQuadrature> quadrature;
   if (dimension == 1)
-    quadrature = std::make_shared<GLProductQuadrature1DSlab>(16, scat_order);
+    quadrature = std::make_shared<GLQuadrature1DSlab>(16, scat_order);
   else if (dimension == 2)
     quadrature = std::make_shared<GLCProductQuadrature2DXY>(16, 32, scat_order);
   else if (dimension == 3)

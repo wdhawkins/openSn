@@ -13,7 +13,7 @@ if "opensn_console" not in globals():
     from pyopensn.mesh import OrthogonalMeshGenerator
     from pyopensn.xs import MultiGroupXS
     from pyopensn.source import VolumetricSource
-    from pyopensn.aquad import GLProductQuadrature1DSlab
+    from pyopensn.aquad import GLQuadrature1DSlab
     from pyopensn.solver import DiscreteOrdinatesProblem, SteadyStateSourceSolver, TransientSolver
 
 
@@ -65,7 +65,7 @@ if __name__ == "__main__":
     xs.LoadFromOpenSn("../../../../assets/xs/xs1g_delayed_crit_1p.cxs")
 
     source = VolumetricSource(block_ids=[0], group_strength=[0.5], start_time=0.0, end_time=10.0)
-    quadrature = GLProductQuadrature1DSlab(n_polar=4, scattering_order=0)
+    quadrature = GLQuadrature1DSlab(n_polar=4, scattering_order=0)
 
     common_options = {
         "save_angular_flux": True,

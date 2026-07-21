@@ -21,6 +21,7 @@ enum class AngularQuadratureType
   SLDFE_SQ = 2,
   LEBEDEV_QUADRATURE = 3,
   TRIANGULAR_QUADRATURE = 4,
+  POLAR_QUADRATURE = 5,
 };
 
 /// Method used to construct the discrete-to-moment and moment-to-discrete operators.

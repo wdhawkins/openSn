@@ -64,7 +64,7 @@ angles away from the equator, or local directional refinement.
 The quickest selection guide is:
 
 - 1D slab problems:
-  start with :py:class:`pyopensn.aquad.GLProductQuadrature1DSlab`.
+  start with :py:class:`pyopensn.aquad.GLQuadrature1DSlab`.
 - 2D Cartesian ``XY`` problems:
   start with :py:class:`pyopensn.aquad.GLCProductQuadrature2DXY`.
 - 3D Cartesian ``XYZ`` problems:
@@ -81,30 +81,18 @@ The quickest selection guide is:
 - If you want local angular refinement around selected directions:
   consider an SLDFE square quadrature.
 
-===================
-Product Quadratures
-===================
+==============
+1D Quadratures
+==============
 
-These are the standard tensor-product style quadratures used in most OpenSn
-transport examples.
+1D transport has no azimuthal degree of freedom: every direction lies in the
+plane ``phi=0``, so a 1D quadrature is purely a function of the polar angle.
+These quadratures are not product quadratures — there is no independent
+azimuthal quadrature being combined with the polar one — but for 1D slab
+problems they play the same "standard baseline" role that product quadratures
+play in 2D and 3D.
 
-If there is no strong reason to do otherwise, this is the family to choose
-first. Product quadratures are the most common choice for OpenSn problems and
-have the most straightforward relationship between user input and angular
-resolution.
-
-Why users usually start here:
-
-- product quadratures are the most familiar and easiest to reason about,
-- they work naturally with the standard aggregation choices,
-- their angular resolution is controlled directly through ``n_polar`` and, in
-  2D and 3D, ``n_azimuthal``,
-- they are the best-covered family in standard regression inputs and examples.
-
-If a user wants a reliable baseline quadrature, product quadratures are usually
-the right answer.
-
-``GLProductQuadrature1DSlab``
+``GLQuadrature1DSlab``
 -----------------------------
 
 For 1D slab geometry.
@@ -124,12 +112,35 @@ Example:
 
 .. code-block:: python
 
-   from pyopensn.aquad import GLProductQuadrature1DSlab
+   from pyopensn.aquad import GLQuadrature1DSlab
 
-   quad = GLProductQuadrature1DSlab(
+   quad = GLQuadrature1DSlab(
        n_polar=32,
        scattering_order=3,
    )
+
+===================
+Product Quadratures
+===================
+
+These are the standard tensor-product style quadratures used in most OpenSn
+transport examples for 2D and 3D geometries.
+
+If there is no strong reason to do otherwise, this is the family to choose
+first for 2D and 3D problems. Product quadratures are the most common choice
+for OpenSn problems and have the most straightforward relationship between
+user input and angular resolution.
+
+Why users usually start here:
+
+- product quadratures are the most familiar and easiest to reason about,
+- they work naturally with the standard aggregation choices,
+- their angular resolution is controlled directly through ``n_polar`` and, in
+  2D and 3D, ``n_azimuthal``,
+- they are the best-covered family in standard regression inputs and examples.
+
+If a user wants a reliable baseline quadrature, product quadratures are usually
+the right answer.
 
 ``GLCProductQuadrature2DXY``
 ----------------------------
@@ -443,9 +454,9 @@ For product quadratures, a good starting rule is:
 - raise ``n_polar`` and ``n_azimuthal`` as you raise ``scattering_order``
 - verify convergence of problem outputs with respect to quadrature refinement
 
-For non-product quadratures such as Lebedev, triangular, and SLDFE sets, the
-same principle applies: increasing the supported moment order should be paired
-with a richer directional set.
+For non-product quadratures such as Lebedev, triangular, SLDFE, and 1D sets,
+the same principle applies: increasing the supported moment order should be
+paired with a richer directional set.
 
 Operator construction methods
 -----------------------------
@@ -555,12 +566,12 @@ quadrature together with the requested aggregation mode.
 ``polar``
 ---------
 
-``polar`` aggregation is only supported for product quadratures on Cartesian
-orthogonal meshes.
+``polar`` aggregation is only supported for product quadratures and 1D
+quadratures on Cartesian orthogonal meshes.
 
 It is therefore appropriate for:
 
-- ``GLProductQuadrature1DSlab``
+- ``GLQuadrature1DSlab``
 - ``GLCProductQuadrature2DXY``
 - ``GLCProductQuadrature3DXYZ``
 
@@ -632,9 +643,9 @@ Examples
 
 .. code-block:: python
 
-   from pyopensn.aquad import GLProductQuadrature1DSlab
+   from pyopensn.aquad import GLQuadrature1DSlab
 
-   quad = GLProductQuadrature1DSlab(
+   quad = GLQuadrature1DSlab(
        n_polar=80,
        scattering_order=5,
    )
@@ -731,7 +742,7 @@ Example:
 Recommendations
 ===============
 
-- For standard 1D slab problems, start with ``GLProductQuadrature1DSlab``.
+- For standard 1D slab problems, start with ``GLQuadrature1DSlab``.
 - For standard Cartesian 2D and 3D problems, start with
   ``GLCProductQuadrature2DXY`` or ``GLCProductQuadrature3DXYZ``.
 - For Cartesian problems using Lebedev, triangular, or SLDFE quadratures, set

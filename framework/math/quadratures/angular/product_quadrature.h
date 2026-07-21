@@ -68,19 +68,6 @@ protected:
   unsigned int n_azimuthal_ = 0;
 };
 
-class GLProductQuadrature1DSlab : public ProductQuadrature
-{
-public:
-  /// Constructor for 1D slab Gauss-Legendre product quadrature
-  explicit GLProductQuadrature1DSlab(
-    unsigned int Npolar,
-    unsigned int scattering_order,
-    bool verbose = false,
-    OperatorConstructionMethod method = OperatorConstructionMethod::STANDARD);
-
-  std::string GetName() const override { return "1D Slab Gauss-Legendre product"; }
-};
-
 class GLCProductQuadrature2DXY : public ProductQuadrature
 {
 public:
