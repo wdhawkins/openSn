@@ -2265,11 +2265,13 @@ WrapDiscreteOrdinatesKEigenAcceleration(py::module& slv)
         the model can learn from nearby alternatives. A value of 1 corresponds to
         halving/doubling trials.
     ml_max_aggregation_size: int, default=0
-        Experimental. Maximum repaired spatial aggregation size. A value of 0 uses the
-        global fine-cell count as the limit.
+        Experimental. Optional maximum repaired spatial aggregation target. A value of 0
+        applies no problem-size-based upper bound; the coarse-mesh builder uses the
+        selected value as a target and creates the coarsest connected aggregation it can.
     ml_max_group_aggregation_size: int, default=0
-        Experimental. Maximum repaired energy-group aggregation size. A value of 0 uses
-        the number of transport groups as the limit.
+        Experimental. Optional maximum repaired energy-group aggregation target. A value
+        of 0 applies no problem-size-based upper bound; values larger than the number of
+        transport groups naturally produce one coarse energy group.
     ml_min_relaxation: float, default=0.1
         Experimental. Minimum repaired relaxation value the ML model may select.
     ml_max_relaxation: float, default=1.0

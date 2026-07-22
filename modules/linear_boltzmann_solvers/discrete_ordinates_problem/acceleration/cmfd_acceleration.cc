@@ -122,7 +122,8 @@ RoundToUInt(const double value)
 {
   if (not std::isfinite(value))
     return 1;
-  return static_cast<unsigned int>(std::max(1.0, std::round(value)));
+  constexpr double max_uint = static_cast<double>(std::numeric_limits<unsigned int>::max());
+  return static_cast<unsigned int>(std::clamp(std::round(value), 1.0, max_uint));
 }
 
 double
@@ -284,13 +285,15 @@ CMFDAcceleration::GetInputParameters()
   params.AddOptionalParameter(
     "ml_max_aggregation_size",
     0,
-    "[experimental] Maximum spatial aggregation size allowed after ML proposal repair. A value of "
-    "0 uses the global fine-cell count as the limit.");
+    "[experimental] Optional maximum spatial aggregation target allowed after ML proposal repair. "
+    "A value of 0 applies no problem-size-based upper bound; the coarse-mesh builder uses the "
+    "selected value as a target and creates the coarsest connected aggregation it can.");
   params.AddOptionalParameter(
     "ml_max_group_aggregation_size",
     0,
-    "[experimental] Maximum energy-group aggregation size allowed after ML proposal repair. A "
-    "value of 0 uses the number of transport groups as the limit.");
+    "[experimental] Optional maximum energy-group aggregation target allowed after ML proposal "
+    "repair. A value of 0 applies no problem-size-based upper bound; values larger than the "
+    "number of transport groups naturally produce one coarse energy group.");
   params.AddOptionalParameter(
     "ml_min_relaxation",
     0.1,
@@ -1134,21 +1137,19 @@ CMFDAcceleration::AddMLSample(MLState& state, const double score)
 unsigned int
 CMFDAcceleration::RepairAggregationSize(const double value) const
 {
-  const auto grid = do_problem_.GetGrid();
-  const unsigned int global_cells =
-    static_cast<unsigned int>(std::max<std::size_t>(1, grid->GetGlobalNumberOfCells()));
-  const unsigned int max_size =
-    ml_max_aggregation_size_ > 0 ? std::min(ml_max_aggregation_size_, global_cells) : global_cells;
-  return std::clamp(RoundToUInt(value), 1u, max_size);
+  const unsigned int repaired = RoundToUInt(value);
+  if (ml_max_aggregation_size_ > 0)
+    return std::min(repaired, ml_max_aggregation_size_);
+  return repaired;
 }
 
 unsigned int
 CMFDAcceleration::RepairGroupAggregationSize(const double value) const
 {
-  const unsigned int max_size =
-    ml_max_group_aggregation_size_ > 0 ? std::min(ml_max_group_aggregation_size_, num_groups_)
-                                       : num_groups_;
-  return std::clamp(RoundToUInt(value), 1u, std::max(1u, max_size));
+  const unsigned int repaired = RoundToUInt(value);
+  if (ml_max_group_aggregation_size_ > 0)
+    return std::min(repaired, ml_max_group_aggregation_size_);
+  return repaired;
 }
 
 double
@@ -1199,9 +1200,11 @@ CMFDAcceleration::SelectUntriedExplorationAction(const MLAction& base_action,
       ++ml_tried_actions_for_problem_;
   }
 
+  ml_raw_repaired_action_was_tried_ = HasTriedMLAction(base_action);
+  ml_exploration_replacement_ = false;
   if (ml_explore_ <= 0.0 or ml_state_.runs == 0)
   {
-    ml_repeated_action_ = HasTriedMLAction(base_action);
+    ml_repeated_action_ = ml_raw_repaired_action_was_tried_;
     return base_action;
   }
 
@@ -1229,12 +1232,17 @@ CMFDAcceleration::SelectUntriedExplorationAction(const MLAction& base_action,
                                        relaxation_candidates[index % 3]);
     if (not HasTriedMLAction(action))
     {
+      ml_exploration_replacement_ =
+        action.aggregation_size != base_action.aggregation_size or
+        action.group_aggregation_size != base_action.group_aggregation_size or
+        std::llround(action.relaxation * 1000.0) !=
+          std::llround(base_action.relaxation * 1000.0);
       ml_repeated_action_ = false;
       return action;
     }
   }
 
-  ml_repeated_action_ = HasTriedMLAction(base_action);
+  ml_repeated_action_ = ml_raw_repaired_action_was_tried_;
   return base_action;
 }
 
@@ -1303,16 +1311,19 @@ CMFDAcceleration::ConfigureMLAggregation()
                          : PredictMLValue(ml_state_.relaxation_feature_weights,
                                           ml_state_.relaxation_weight);
 
+  const auto raw_repaired_action =
+    RepairMLAction(ml_raw_aggregation_size_, ml_raw_group_aggregation_size_, ml_raw_relaxation_);
   const auto proposed_action = SelectUntriedExplorationAction(
-    RepairMLAction(ml_raw_aggregation_size_, ml_raw_group_aggregation_size_, ml_raw_relaxation_),
+    raw_repaired_action,
     ml_raw_aggregation_size_,
     ml_raw_group_aggregation_size_,
     ml_raw_relaxation_);
 
   ml_repair_distance_ =
-    static_cast<unsigned int>(std::fabs(static_cast<double>(proposed_action.aggregation_size) -
+    static_cast<unsigned int>(std::fabs(static_cast<double>(raw_repaired_action.aggregation_size) -
                                        std::max(1.0, std::round(ml_raw_aggregation_size_)))) +
-    static_cast<unsigned int>(std::fabs(static_cast<double>(proposed_action.group_aggregation_size) -
+    static_cast<unsigned int>(std::fabs(static_cast<double>(
+                                          raw_repaired_action.group_aggregation_size) -
                                        std::max(1.0, std::round(ml_raw_group_aggregation_size_))));
 
   aggregation_size_ = proposed_action.aggregation_size;
@@ -1324,12 +1335,20 @@ CMFDAcceleration::ConfigureMLAggregation()
             << " CMFD ML aggregation proposal: raw aggregation_size=" << ml_raw_aggregation_size_
             << ", raw group_aggregation_size=" << ml_raw_group_aggregation_size_
             << ", raw relaxation=" << ml_raw_relaxation_
-            << ", repaired aggregation_size=" << aggregation_size_
-            << ", repaired group_aggregation_size=" << group_aggregation_size_
-            << ", repaired relaxation=" << relaxation_
-            << ", repeated_action=" << (ml_repeated_action_ ? "true" : "false")
+            << ", constraint_repaired aggregation_size="
+            << raw_repaired_action.aggregation_size
+            << ", constraint_repaired group_aggregation_size="
+            << raw_repaired_action.group_aggregation_size
+            << ", constraint_repaired relaxation=" << raw_repaired_action.relaxation
+            << ", selected aggregation_size=" << aggregation_size_
+            << ", selected group_aggregation_size=" << group_aggregation_size_
+            << ", selected relaxation=" << relaxation_
+            << ", raw_repaired_action_was_tried="
+            << (ml_raw_repaired_action_was_tried_ ? "true" : "false")
+            << ", exploration_replacement=" << (ml_exploration_replacement_ ? "true" : "false")
+            << ", selected_action_was_repeated=" << (ml_repeated_action_ ? "true" : "false")
             << ", tried_actions_for_problem=" << ml_tried_actions_for_problem_
-            << ", repair_distance=" << ml_repair_distance_
+            << ", constraint_repair_distance=" << ml_repair_distance_
             << ", state_file=\"" << ml_state_file_ << "\".";
 }
 

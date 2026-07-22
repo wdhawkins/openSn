@@ -231,6 +231,8 @@ private:
   double ml_raw_group_aggregation_size_ = 0.0;
   double ml_raw_relaxation_ = 1.0;
   unsigned int ml_repair_distance_ = 0;
+  bool ml_raw_repaired_action_was_tried_ = false;
+  bool ml_exploration_replacement_ = false;
   bool ml_repeated_action_ = false;
   std::size_t ml_tried_actions_for_problem_ = 0;
   unsigned int ml_skipped_corrections_ = 0;
