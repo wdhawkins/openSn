@@ -51,6 +51,7 @@ private:
     double score = std::numeric_limits<double>::infinity();
     unsigned int aggregation_size = 1;
     unsigned int group_aggregation_size = 1;
+    double relaxation = 1.0;
     std::vector<double> features;
   };
 
@@ -60,13 +61,23 @@ private:
     unsigned int runs = 0;
     double spatial_weight = 0.0;
     double group_weight = 0.0;
+    double relaxation_weight = 0.0;
     std::vector<double> spatial_feature_weights;
     std::vector<double> group_feature_weights;
+    std::vector<double> relaxation_feature_weights;
     unsigned int best_aggregation_size = 0;
     unsigned int best_group_aggregation_size = 0;
+    double best_relaxation = 0.0;
     double best_score = std::numeric_limits<double>::infinity();
     std::map<std::string, double> baseline_scores;
     std::map<std::string, MLSample> best_samples_by_fingerprint;
+  };
+
+  struct MLAction
+  {
+    unsigned int aggregation_size = 1;
+    unsigned int group_aggregation_size = 1;
+    double relaxation = 1.0;
   };
 
   struct CoarseMeshDiagnostics
@@ -153,7 +164,7 @@ private:
   std::string BuildMLProblemSignature() const;
   std::string ComputeMLProblemFingerprint(const std::string& signature) const;
   double PredictMLValue(const std::vector<double>& weights, double fallback) const;
-  std::pair<double, double> PredictMLAggregationFromSamples() const;
+  std::tuple<double, double, double> PredictMLActionFromSamples() const;
   double MLFeatureDistance(const std::vector<double>& lhs, const std::vector<double>& rhs) const;
   MLState LoadMLState();
   void SaveMLState(const MLState& state) const;
@@ -161,6 +172,15 @@ private:
   void AddMLSample(MLState& state, double score);
   unsigned int RepairAggregationSize(double value) const;
   unsigned int RepairGroupAggregationSize(double value) const;
+  double RepairRelaxation(double value) const;
+  MLAction RepairMLAction(double aggregation_size,
+                          double group_aggregation_size,
+                          double relaxation) const;
+  bool HasTriedMLAction(const MLAction& action) const;
+  MLAction SelectUntriedExplorationAction(const MLAction& base_action,
+                                          double raw_aggregation_size,
+                                          double raw_group_aggregation_size,
+                                          double raw_relaxation);
   double ComputeMLScore(bool converged,
                         unsigned int num_power_iterations,
                         std::size_t num_sweeps,
@@ -180,7 +200,7 @@ private:
   const bool automatic_closure_;
   unsigned int aggregation_size_;
   unsigned int group_aggregation_size_;
-  const double relaxation_;
+  double relaxation_;
   const unsigned int correction_max_attempts_;
   const double correction_min_damping_;
   const double negative_flux_tolerance_;
@@ -197,9 +217,11 @@ private:
   const bool ml_record_baseline_;
   const std::string ml_state_file_;
   const double ml_learning_rate_;
-  const bool ml_explore_;
+  const double ml_explore_;
   const unsigned int ml_max_aggregation_size_;
   const unsigned int ml_max_group_aggregation_size_;
+  const double ml_min_relaxation_;
+  const double ml_max_relaxation_;
   MLState ml_state_;
   std::vector<MLSample> ml_samples_;
   std::vector<double> ml_features_;
@@ -207,7 +229,10 @@ private:
   std::string ml_problem_fingerprint_;
   double ml_raw_aggregation_size_ = 0.0;
   double ml_raw_group_aggregation_size_ = 0.0;
+  double ml_raw_relaxation_ = 1.0;
   unsigned int ml_repair_distance_ = 0;
+  bool ml_repeated_action_ = false;
+  std::size_t ml_tried_actions_for_problem_ = 0;
   unsigned int ml_skipped_corrections_ = 0;
   unsigned int ml_damped_corrections_ = 0;
   unsigned int outer_iteration_ = 0;
