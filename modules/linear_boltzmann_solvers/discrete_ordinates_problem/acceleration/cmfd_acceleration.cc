@@ -19,7 +19,6 @@
 #include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/iteration_logging.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/vecops/lbs_vecops.h"
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <cmath>
 #include <fstream>
@@ -1202,44 +1201,130 @@ CMFDAcceleration::SelectUntriedExplorationAction(const MLAction& base_action,
 
   ml_raw_repaired_action_was_tried_ = HasTriedMLAction(base_action);
   ml_exploration_replacement_ = false;
+  ml_exploration_candidates_ = 0;
   if (ml_explore_ <= 0.0 or ml_state_.runs == 0)
   {
     ml_repeated_action_ = ml_raw_repaired_action_was_tried_;
     return base_action;
   }
 
-  const double lower_factor = std::pow(2.0, -ml_explore_);
-  const double upper_factor = std::pow(2.0, ml_explore_);
-  const std::array<double, 3> spatial_candidates = {
-    raw_aggregation_size,
-    lower_factor * static_cast<double>(std::max(1u, ml_state_.best_aggregation_size)),
-    upper_factor * static_cast<double>(std::max(1u, ml_state_.best_aggregation_size))};
-  const std::array<double, 3> group_candidates = {
-    raw_group_aggregation_size,
-    lower_factor * static_cast<double>(std::max(1u, ml_state_.best_group_aggregation_size)),
-    upper_factor * static_cast<double>(std::max(1u, ml_state_.best_group_aggregation_size))};
-  const std::array<double, 3> relaxation_candidates = {
-    raw_relaxation,
-    lower_factor * ml_state_.best_relaxation,
-    upper_factor * ml_state_.best_relaxation};
+  const auto grid = do_problem_.GetGrid();
+  const double global_cells =
+    static_cast<double>(std::max<std::size_t>(1, grid->GetGlobalNumberOfCells()));
+  const double local_cells = static_cast<double>(std::max<std::size_t>(1, grid->local_cells.size()));
+  const double exploration = std::max(ml_explore_, 0.25);
 
-  const std::size_t start = ml_state_.runs % 27;
-  for (std::size_t offset = 0; offset < 27; ++offset)
+  const auto BuildTargetCandidates = [exploration](const std::initializer_list<double> seeds,
+                                                   const std::initializer_list<double> anchors)
   {
-    const std::size_t index = (start + offset) % 27;
-    const auto action = RepairMLAction(spatial_candidates[index / 9],
-                                       group_candidates[(index / 3) % 3],
-                                       relaxation_candidates[index % 3]);
-    if (not HasTriedMLAction(action))
+    std::vector<double> candidates;
+    const auto add_candidate = [&candidates](const double value)
     {
-      ml_exploration_replacement_ =
-        action.aggregation_size != base_action.aggregation_size or
-        action.group_aggregation_size != base_action.group_aggregation_size or
-        std::llround(action.relaxation * 1000.0) !=
-          std::llround(base_action.relaxation * 1000.0);
-      ml_repeated_action_ = false;
-      return action;
+      if (std::isfinite(value) and value > 0.0)
+        candidates.push_back(value);
+    };
+    for (const auto value : seeds)
+      add_candidate(value);
+    for (const auto value : anchors)
+      add_candidate(value);
+
+    const int max_exponent = std::max(1, static_cast<int>(std::ceil(3.0 * exploration)));
+    for (const auto seed : seeds)
+      if (std::isfinite(seed) and seed > 0.0)
+        for (int exponent = -max_exponent; exponent <= max_exponent; ++exponent)
+          add_candidate(seed * std::pow(2.0, exploration * static_cast<double>(exponent)));
+
+    return candidates;
+  };
+
+  const auto spatial_candidates = BuildTargetCandidates(
+    {raw_aggregation_size,
+     static_cast<double>(std::max(1u, ml_state_.best_aggregation_size)),
+     ml_state_.spatial_weight},
+    {1.0,
+     std::sqrt(local_cells),
+     local_cells,
+     std::sqrt(global_cells),
+     global_cells,
+     2.0 * global_cells});
+  const auto group_candidates = BuildTargetCandidates(
+    {raw_group_aggregation_size,
+     static_cast<double>(std::max(1u, ml_state_.best_group_aggregation_size)),
+     ml_state_.group_weight},
+    {1.0,
+     std::sqrt(static_cast<double>(std::max(1u, num_groups_))),
+     static_cast<double>(std::max(1u, num_groups_)),
+     2.0 * static_cast<double>(std::max(1u, num_groups_))});
+  const auto relaxation_candidates =
+    BuildTargetCandidates({raw_relaxation, ml_state_.best_relaxation, ml_state_.relaxation_weight},
+                          {ml_min_relaxation_, 0.25, 0.5, 0.75, ml_max_relaxation_});
+
+  std::vector<MLAction> actions;
+  std::set<std::tuple<unsigned int, unsigned int, long long>> action_keys;
+  const auto relaxation_bin = [](const double value)
+  { return static_cast<long long>(std::llround(value * 1000.0)); };
+  const auto add_action = [this, &actions, &action_keys, &relaxation_bin](const double spatial,
+                                                                          const double group,
+                                                                          const double relaxation)
+  {
+    const auto action = RepairMLAction(spatial, group, relaxation);
+    const auto key =
+      std::make_tuple(action.aggregation_size,
+                      action.group_aggregation_size,
+                      relaxation_bin(action.relaxation));
+    if (action_keys.insert(key).second)
+      actions.push_back(action);
+  };
+
+  for (const auto spatial : spatial_candidates)
+    for (const auto group : group_candidates)
+      for (const auto relaxation : relaxation_candidates)
+        add_action(spatial, group, relaxation);
+  ml_exploration_candidates_ = actions.size();
+
+  if (actions.empty())
+  {
+    ml_repeated_action_ = ml_raw_repaired_action_was_tried_;
+    return base_action;
+  }
+
+  const std::size_t start = ml_state_.runs % actions.size();
+  std::size_t stride = actions.size() > 1 ? std::min<std::size_t>(37, actions.size() - 1) : 1;
+  while (stride > 1 and std::gcd(stride, actions.size()) != 1)
+    --stride;
+
+  const auto aggregation_changed = [&base_action](const MLAction& action)
+  {
+    return action.aggregation_size != base_action.aggregation_size or
+           action.group_aggregation_size != base_action.group_aggregation_size;
+  };
+  const auto try_select_action = [&](const bool require_aggregation_change,
+                                     MLAction& selected_action)
+  {
+    for (std::size_t offset = 0; offset < actions.size(); ++offset)
+    {
+      const std::size_t index = (start + offset * stride) % actions.size();
+      const auto action = actions[index];
+      if (require_aggregation_change and not aggregation_changed(action))
+        continue;
+      if (not HasTriedMLAction(action))
+      {
+        selected_action = action;
+        return true;
+      }
     }
+    return false;
+  };
+
+  MLAction action;
+  if (try_select_action(true, action) or try_select_action(false, action))
+  {
+    ml_exploration_replacement_ =
+      action.aggregation_size != base_action.aggregation_size or
+      action.group_aggregation_size != base_action.group_aggregation_size or
+      relaxation_bin(action.relaxation) != relaxation_bin(base_action.relaxation);
+    ml_repeated_action_ = false;
+    return action;
   }
 
   ml_repeated_action_ = ml_raw_repaired_action_was_tried_;
@@ -1348,6 +1433,7 @@ CMFDAcceleration::ConfigureMLAggregation()
             << ", exploration_replacement=" << (ml_exploration_replacement_ ? "true" : "false")
             << ", selected_action_was_repeated=" << (ml_repeated_action_ ? "true" : "false")
             << ", tried_actions_for_problem=" << ml_tried_actions_for_problem_
+            << ", exploration_candidates=" << ml_exploration_candidates_
             << ", constraint_repair_distance=" << ml_repair_distance_
             << ", state_file=\"" << ml_state_file_ << "\".";
 }

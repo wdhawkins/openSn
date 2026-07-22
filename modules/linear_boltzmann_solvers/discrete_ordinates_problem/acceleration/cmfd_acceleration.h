@@ -235,6 +235,7 @@ private:
   bool ml_exploration_replacement_ = false;
   bool ml_repeated_action_ = false;
   std::size_t ml_tried_actions_for_problem_ = 0;
+  std::size_t ml_exploration_candidates_ = 0;
   unsigned int ml_skipped_corrections_ = 0;
   unsigned int ml_damped_corrections_ = 0;
   unsigned int outer_iteration_ = 0;
