@@ -4,6 +4,7 @@
 #pragma once
 
 #include "framework/parameters/input_parameters.h"
+#include <cstddef>
 #include <string>
 
 namespace opensn
@@ -65,6 +66,18 @@ public:
    * Returns the k-eigenvalue from the acceleration solve.
    */
   virtual double PostPowerIteration() = 0;
+
+  /**
+   * Optional hook called by the owning power-iteration solver after the solve
+   * has converged or reached the iteration limit.
+   */
+  virtual void PostExecute(bool,
+                           unsigned int,
+                           std::size_t,
+                           double,
+                           double)
+  {
+  }
 
   /**
    * Return whether the most recent acceleration update permits the owning power iteration solver

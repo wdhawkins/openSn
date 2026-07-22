@@ -2201,6 +2201,7 @@ WrapDiscreteOrdinatesKEigenAcceleration(py::module& slv)
     ``update_wgs_max_its``, ``update_wgs_abs_tol``, and
     ``balance_residual_tolerance``. Parameters marked "developer/debug" are exposed for
     investigations and regression testing, but normally should be left at their defaults.
+    Parameters marked "experimental" are intended for method-development studies.
 
     Parameters
     ----------
@@ -2238,6 +2239,34 @@ WrapDiscreteOrdinatesKEigenAcceleration(py::module& slv)
         final number of coarse groups. A value of 1 preserves the full transport group
         structure in the low-order system. To target ``N`` total coarse groups, use
         ``(num_groups + N - 1) // N``.
+    ml_enabled: bool, default=False
+        Experimental. If true, CMFD loads an online aggregation model from
+        ``ml_state_file``, uses it to choose repaired spatial and energy aggregation
+        sizes for this run, scores the completed solve, and updates the persisted model
+        state for later runs. The model uses mesh/material/cross-section feature summaries,
+        nearest prior samples from the state file, and linear feature weights as a fallback.
+    cmfd_ml: bool, default=False
+        Experimental. Alias for ``ml_enabled``.
+    ml_record_baseline: bool, default=False
+        Experimental. If true, keeps the user-provided ``aggregation_size`` and
+        ``group_aggregation_size``, scores the completed hand-tuned CMFD run, and records
+        it as a baseline/sample in ``ml_state_file``. Use this to seed the tuning file
+        before enabling ``cmfd_ml``.
+    ml_state_file: str, default="cmfd_ml_state.txt"
+        Experimental. Plain text key/value file containing the CMFD ML aggregation
+        weights, feature weights, and a bounded replay buffer of scored feature/action
+        samples from previous runs. Baseline records are keyed by problem fingerprint.
+    ml_learning_rate: float, default=0.25
+        Experimental. Online update fraction for the persisted aggregation weights.
+    ml_explore: bool, default=True
+        Experimental. If true, periodically perturbs the current best aggregation sizes
+        before repair so the model can learn from nearby alternatives.
+    ml_max_aggregation_size: int, default=0
+        Experimental. Maximum repaired spatial aggregation size. A value of 0 uses the
+        global fine-cell count as the limit.
+    ml_max_group_aggregation_size: int, default=0
+        Experimental. Maximum repaired energy-group aggregation size. A value of 0 uses
+        the number of transport groups as the limit.
     relaxation: float, default=0.5
         Common option. Relaxation factor applied to the CMFD scalar-flux correction.
         This is the requested correction strength. The correction limiter may damp or

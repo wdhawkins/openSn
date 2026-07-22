@@ -28,6 +28,11 @@ public:
   void PreExecute() final;
   void PrePowerIteration() final;
   double PostPowerIteration() final;
+  void PostExecute(bool converged,
+                   unsigned int num_power_iterations,
+                   std::size_t num_sweeps,
+                   double k_eff,
+                   double k_eff_change) final;
   bool AllowsPowerIterationConvergence() const final { return last_update_allows_convergence_; }
   std::string GetPowerIterationConvergenceInfo() const final;
 
@@ -38,6 +43,30 @@ private:
   {
     double max_abs = 0.0;
     double relative_l2 = 0.0;
+  };
+
+  struct MLSample
+  {
+    std::string fingerprint;
+    double score = std::numeric_limits<double>::infinity();
+    unsigned int aggregation_size = 1;
+    unsigned int group_aggregation_size = 1;
+    std::vector<double> features;
+  };
+
+  struct MLState
+  {
+    bool loaded = false;
+    unsigned int runs = 0;
+    double spatial_weight = 0.0;
+    double group_weight = 0.0;
+    std::vector<double> spatial_feature_weights;
+    std::vector<double> group_feature_weights;
+    unsigned int best_aggregation_size = 0;
+    unsigned int best_group_aggregation_size = 0;
+    double best_score = std::numeric_limits<double>::infinity();
+    std::map<std::string, double> baseline_scores;
+    std::map<std::string, MLSample> best_samples_by_fingerprint;
   };
 
   struct CoarseMeshDiagnostics
@@ -119,6 +148,23 @@ private:
                                unsigned int row_coarse_group,
                                unsigned int col_coarse_group) const;
   FluxUpdateDiagnostics AnalyzeFluxUpdate(const std::vector<double>& phi, double k_eff) const;
+  void ConfigureMLAggregation();
+  std::vector<double> ExtractMLFeatures() const;
+  std::string BuildMLProblemSignature() const;
+  std::string ComputeMLProblemFingerprint(const std::string& signature) const;
+  double PredictMLValue(const std::vector<double>& weights, double fallback) const;
+  std::pair<double, double> PredictMLAggregationFromSamples() const;
+  double MLFeatureDistance(const std::vector<double>& lhs, const std::vector<double>& rhs) const;
+  MLState LoadMLState();
+  void SaveMLState(const MLState& state) const;
+  void UpdateMLFeatureWeights(MLState& state) const;
+  void AddMLSample(MLState& state, double score);
+  unsigned int RepairAggregationSize(double value) const;
+  unsigned int RepairGroupAggregationSize(double value) const;
+  double ComputeMLScore(bool converged,
+                        unsigned int num_power_iterations,
+                        std::size_t num_sweeps,
+                        double k_eff_change) const;
   double ApplyFluxCorrectionWithDamping(const std::vector<double>& transport_phi_new,
                                         const std::vector<double>& coarse_phi,
                                         double old_fission_production,
@@ -132,8 +178,8 @@ private:
   const std::string coarse_mesh_type_;
   const std::string current_closure_;
   const bool automatic_closure_;
-  const int aggregation_size_;
-  const unsigned int group_aggregation_size_;
+  unsigned int aggregation_size_;
+  unsigned int group_aggregation_size_;
   const double relaxation_;
   const unsigned int correction_max_attempts_;
   const double correction_min_damping_;
@@ -146,7 +192,24 @@ private:
   const std::size_t coarse_direct_solve_threshold_;
   const unsigned int first_group_ = 0;
   const unsigned int num_groups_;
-  const unsigned int num_coarse_groups_;
+  unsigned int num_coarse_groups_;
+  const bool ml_enabled_;
+  const bool ml_record_baseline_;
+  const std::string ml_state_file_;
+  const double ml_learning_rate_;
+  const bool ml_explore_;
+  const unsigned int ml_max_aggregation_size_;
+  const unsigned int ml_max_group_aggregation_size_;
+  MLState ml_state_;
+  std::vector<MLSample> ml_samples_;
+  std::vector<double> ml_features_;
+  std::string ml_problem_signature_;
+  std::string ml_problem_fingerprint_;
+  double ml_raw_aggregation_size_ = 0.0;
+  double ml_raw_group_aggregation_size_ = 0.0;
+  unsigned int ml_repair_distance_ = 0;
+  unsigned int ml_skipped_corrections_ = 0;
+  unsigned int ml_damped_corrections_ = 0;
   unsigned int outer_iteration_ = 0;
   bool last_update_allows_convergence_ = true;
   bool last_balance_residual_known_ = false;

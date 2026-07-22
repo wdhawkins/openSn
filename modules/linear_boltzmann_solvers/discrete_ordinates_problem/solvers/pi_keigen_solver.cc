@@ -258,6 +258,12 @@ PowerIterationKEigenSolver::Execute()
                                         total_num_sweeps,
                                         "sweeps",
                                         IterationStatusFromSolve(converged, true));
+  if (acceleration_)
+  {
+    CALI_CXX_MARK_SCOPE("Acceleration");
+    acceleration_->PostExecute(
+      converged, num_power_iterations_, total_num_sweeps, k_eff_, k_eff_change);
+  }
 
   if (options.use_precursors)
   {

@@ -19,7 +19,10 @@
 #include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/iteration_logging.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/vecops/lbs_vecops.h"
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <fstream>
+#include <functional>
 #include <iomanip>
 #include <limits>
 #include <numeric>
@@ -113,6 +116,52 @@ RelativeL2Difference(const std::vector<double>& lhs, const std::vector<double>& 
   return std::sqrt(numerator / std::max(denominator, 1.0e-300));
 }
 
+unsigned int
+RoundToUInt(const double value)
+{
+  if (not std::isfinite(value))
+    return 1;
+  return static_cast<unsigned int>(std::max(1.0, std::round(value)));
+}
+
+double
+SafeDivide(const double numerator, const double denominator)
+{
+  return numerator / std::max(denominator, 1.0e-300);
+}
+
+double
+ClampFeature(const double value)
+{
+  if (not std::isfinite(value))
+    return 0.0;
+  return std::clamp(value, -10.0, 10.0);
+}
+
+double
+LogFeature(const double value)
+{
+  return std::log1p(std::max(0.0, value));
+}
+
+bool
+LooksLikeNumber(const std::string& value)
+{
+  if (value.empty())
+    return false;
+  const auto first = value.front();
+  return std::isdigit(static_cast<unsigned char>(first)) or first == '-' or first == '+' or
+         first == '.';
+}
+
+bool
+TryParseDouble(const std::string& text, double& value)
+{
+  std::istringstream input(text);
+  input >> value;
+  return static_cast<bool>(input);
+}
+
 } // namespace
 
 OpenSnRegisterObjectInNamespace(lbs, CMFDAcceleration);
@@ -147,6 +196,46 @@ CMFDAcceleration::GetInputParameters()
     "Number of transport energy groups per CMFD coarse energy group, not the final number of "
     "coarse groups. Use (num_groups + target_coarse_groups - 1) / target_coarse_groups to target "
     "a desired number of CMFD energy groups.");
+  params.AddOptionalParameter(
+    "ml_enabled",
+    false,
+    "[experimental] If true, CMFD loads an online aggregation model from ml_state_file, lets it "
+    "choose spatial and energy aggregation sizes for this run, scores the completed solve, and "
+    "updates the persisted model state.");
+  params.AddOptionalParameter("cmfd_ml",
+                              false,
+                              "[experimental] Alias for ml_enabled.");
+  params.AddOptionalParameter(
+    "ml_record_baseline",
+    false,
+    "[experimental] If true, CMFD keeps the user-provided aggregation sizes, scores the completed "
+    "hand-tuned run, and records it as a baseline/sample in ml_state_file. This can be used with "
+    "ml_enabled=false.");
+  params.AddOptionalParameter(
+    "ml_state_file",
+    std::string("cmfd_ml_state.txt"),
+    "[experimental] Plain text key/value file used to persist CMFD ML aggregation weights across "
+    "runs. Only rank 0 writes the updated state.");
+  params.AddOptionalParameter(
+    "ml_learning_rate",
+    0.25,
+    "[experimental] Online update fraction for CMFD ML aggregation weights after each completed "
+    "solve.");
+  params.AddOptionalParameter(
+    "ml_explore",
+    true,
+    "[experimental] If true, the online model periodically perturbs the current best aggregation "
+    "sizes before repair so it can learn from nearby alternatives.");
+  params.AddOptionalParameter(
+    "ml_max_aggregation_size",
+    0,
+    "[experimental] Maximum spatial aggregation size allowed after ML proposal repair. A value of "
+    "0 uses the global fine-cell count as the limit.");
+  params.AddOptionalParameter(
+    "ml_max_group_aggregation_size",
+    0,
+    "[experimental] Maximum energy-group aggregation size allowed after ML proposal repair. A "
+    "value of 0 uses the number of transport groups as the limit.");
   params.AddOptionalParameter(
     "relaxation",
     0.5,
@@ -217,6 +306,9 @@ CMFDAcceleration::GetInputParameters()
     AllowableRangeList::New({"auto", "direct", "iterative", "petsc_options"}));
   params.ConstrainParameterRange("aggregation_size", AllowableRangeLowLimit::New(1));
   params.ConstrainParameterRange("group_aggregation_size", AllowableRangeLowLimit::New(1));
+  params.ConstrainParameterRange("ml_learning_rate", AllowableRangeLowLimit::New(0.0));
+  params.ConstrainParameterRange("ml_max_aggregation_size", AllowableRangeLowLimit::New(0));
+  params.ConstrainParameterRange("ml_max_group_aggregation_size", AllowableRangeLowLimit::New(0));
   params.ConstrainParameterRange("relaxation", AllowableRangeLowLimit::New(0.0));
   params.ConstrainParameterRange("correction_max_attempts", AllowableRangeLowLimit::New(1));
   params.ConstrainParameterRange("correction_min_damping", AllowableRangeLowLimit::New(0.0));
@@ -264,7 +356,7 @@ CMFDAcceleration::CMFDAcceleration(const InputParameters& params)
     coarse_mesh_type_(params.GetParamValue<std::string>("coarse_mesh")),
     current_closure_(params.GetParamValue<std::string>("current_closure")),
     automatic_closure_(current_closure_ == "auto"),
-    aggregation_size_(params.GetParamValue<int>("aggregation_size")),
+    aggregation_size_(static_cast<unsigned int>(params.GetParamValue<int>("aggregation_size"))),
     group_aggregation_size_(
       static_cast<unsigned int>(params.GetParamValue<int>("group_aggregation_size"))),
     relaxation_(params.GetParamValue<double>("relaxation")),
@@ -280,8 +372,27 @@ CMFDAcceleration::CMFDAcceleration(const InputParameters& params)
       static_cast<std::size_t>(params.GetParamValue<int>("coarse_direct_solve_threshold"))),
     num_groups_(do_problem_.GetNumGroups()),
     num_coarse_groups_((num_groups_ + group_aggregation_size_ - 1) / group_aggregation_size_),
+    ml_enabled_(params.GetParamValue<bool>("ml_enabled") or params.GetParamValue<bool>("cmfd_ml")),
+    ml_record_baseline_(params.GetParamValue<bool>("ml_record_baseline")),
+    ml_state_file_(params.GetParamValue<std::string>("ml_state_file")),
+    ml_learning_rate_(params.GetParamValue<double>("ml_learning_rate")),
+    ml_explore_(params.GetParamValue<bool>("ml_explore")),
+    ml_max_aggregation_size_(static_cast<unsigned int>(
+      params.GetParamValue<int>("ml_max_aggregation_size"))),
+    ml_max_group_aggregation_size_(static_cast<unsigned int>(
+      params.GetParamValue<int>("ml_max_group_aggregation_size"))),
     current_closure_blend_(current_closure_ == "partial" ? 1.0 : 0.0)
 {
+  const auto& assigned_params = params.GetParametersAtAssignment();
+  if (assigned_params.Has("ml_enabled") and assigned_params.Has("cmfd_ml"))
+    OpenSnInvalidArgumentIf(params.GetParamValue<bool>("ml_enabled") !=
+                              params.GetParamValue<bool>("cmfd_ml"),
+                            "CMFDAcceleration parameters ml_enabled and cmfd_ml are aliases and "
+                            "cannot be set to different values.");
+  OpenSnInvalidArgumentIf(ml_enabled_ and ml_record_baseline_,
+                          "CMFDAcceleration parameters ml_enabled/cmfd_ml and "
+                          "ml_record_baseline are mutually exclusive.");
+  ConfigureMLAggregation();
   active_current_closure_ = automatic_closure_ ? "net" : current_closure_;
 }
 
@@ -379,6 +490,756 @@ CMFDAcceleration::Initialize()
     LogMetric("local_coarse_cells", diagnostics.local_coarse_cells);
     LogMetric("undersized_coarse_cells", diagnostics.global_undersized_coarse_cells);
     LogMetric("average_faces_per_coarse_cell", average_faces_per_coarse_cell);
+  }
+}
+
+CMFDAcceleration::MLState
+CMFDAcceleration::LoadMLState()
+{
+  MLState state;
+  ml_samples_.clear();
+  std::ifstream input(ml_state_file_);
+  if (not input)
+    return state;
+
+  std::string line;
+  while (std::getline(input, line))
+  {
+    std::istringstream line_stream(line);
+    std::string key;
+    line_stream >> key;
+    if (key.empty() or key[0] == '#')
+      continue;
+
+    if (key == "runs")
+      line_stream >> state.runs;
+    else if (key == "spatial_weight")
+      line_stream >> state.spatial_weight;
+    else if (key == "group_weight")
+      line_stream >> state.group_weight;
+    else if (key == "spatial_feature_weights")
+    {
+      std::size_t count = 0;
+      line_stream >> count;
+      state.spatial_feature_weights.assign(count, 0.0);
+      for (auto& weight : state.spatial_feature_weights)
+        line_stream >> weight;
+    }
+    else if (key == "group_feature_weights")
+    {
+      std::size_t count = 0;
+      line_stream >> count;
+      state.group_feature_weights.assign(count, 0.0);
+      for (auto& weight : state.group_feature_weights)
+        line_stream >> weight;
+    }
+    else if (key == "best_aggregation_size")
+      line_stream >> state.best_aggregation_size;
+    else if (key == "best_group_aggregation_size")
+      line_stream >> state.best_group_aggregation_size;
+    else if (key == "best_score")
+      line_stream >> state.best_score;
+    else if (key == "baseline")
+    {
+      std::string fingerprint;
+      double score = std::numeric_limits<double>::infinity();
+      line_stream >> fingerprint >> score;
+      if (line_stream and not fingerprint.empty())
+        state.baseline_scores[fingerprint] = score;
+    }
+    else if (key == "best_for_problem")
+    {
+      MLSample sample;
+      std::size_t feature_count = 0;
+      line_stream >> sample.fingerprint >> sample.score >> sample.aggregation_size >>
+        sample.group_aggregation_size >> feature_count;
+      sample.features.assign(feature_count, 0.0);
+      for (auto& feature : sample.features)
+        line_stream >> feature;
+      if (line_stream and not sample.fingerprint.empty())
+        state.best_samples_by_fingerprint[sample.fingerprint] = sample;
+    }
+    else if (key == "sample")
+    {
+      MLSample sample;
+      std::size_t feature_count = 0;
+      std::string first_value;
+      line_stream >> first_value;
+      if (LooksLikeNumber(first_value))
+      {
+        if (not TryParseDouble(first_value, sample.score))
+          continue;
+        line_stream >> sample.aggregation_size >> sample.group_aggregation_size >> feature_count;
+      }
+      else
+      {
+        sample.fingerprint = first_value;
+        line_stream >> sample.score >> sample.aggregation_size >> sample.group_aggregation_size >>
+          feature_count;
+      }
+      if (not line_stream)
+        continue;
+      sample.features.assign(feature_count, 0.0);
+      for (auto& feature : sample.features)
+        line_stream >> feature;
+      if (line_stream and not sample.features.empty())
+        ml_samples_.push_back(std::move(sample));
+    }
+  }
+
+  state.loaded = true;
+  return state;
+}
+
+void
+CMFDAcceleration::SaveMLState(const MLState& state) const
+{
+  if (opensn::mpi_comm.rank() != 0)
+    return;
+
+  std::ofstream output(ml_state_file_);
+  OpenSnInvalidArgumentIf(not output, "Unable to write CMFD ML state file: " + ml_state_file_);
+
+  output << "# CMFD ML aggregation state\n"
+         << "runs " << state.runs << "\n"
+         << "spatial_weight " << std::setprecision(17) << state.spatial_weight << "\n"
+         << "group_weight " << std::setprecision(17) << state.group_weight << "\n"
+         << "spatial_feature_weights " << state.spatial_feature_weights.size();
+  for (const auto weight : state.spatial_feature_weights)
+    output << " " << std::setprecision(17) << weight;
+  output << "\n";
+  output << "group_feature_weights " << state.group_feature_weights.size();
+  for (const auto weight : state.group_feature_weights)
+    output << " " << std::setprecision(17) << weight;
+  output << "\n"
+         << "best_aggregation_size " << state.best_aggregation_size << "\n"
+         << "best_group_aggregation_size " << state.best_group_aggregation_size << "\n"
+         << "best_score " << std::setprecision(17) << state.best_score << "\n";
+  for (const auto& [fingerprint, score] : state.baseline_scores)
+    output << "baseline " << fingerprint << " " << std::setprecision(17) << score << "\n";
+  for (const auto& [fingerprint, sample] : state.best_samples_by_fingerprint)
+  {
+    output << "best_for_problem " << fingerprint << " " << std::setprecision(17) << sample.score
+           << " " << sample.aggregation_size << " " << sample.group_aggregation_size << " "
+           << sample.features.size();
+    for (const auto feature : sample.features)
+      output << " " << std::setprecision(17) << feature;
+    output << "\n";
+  }
+  for (const auto& sample : ml_samples_)
+  {
+    output << "sample " << (sample.fingerprint.empty() ? "unknown" : sample.fingerprint) << " "
+           << std::setprecision(17) << sample.score << " "
+           << sample.aggregation_size << " " << sample.group_aggregation_size << " "
+           << sample.features.size();
+    for (const auto feature : sample.features)
+      output << " " << std::setprecision(17) << feature;
+    output << "\n";
+  }
+}
+
+std::vector<double>
+CMFDAcceleration::ExtractMLFeatures() const
+{
+  const auto grid = do_problem_.GetGrid();
+  const auto& xs_map = do_problem_.GetBlockID2XSMap();
+  const auto global_cells = static_cast<double>(std::max<std::size_t>(1, grid->GetGlobalNumberOfCells()));
+  const auto local_cells = static_cast<double>(grid->local_cells.size());
+
+  double local_volume = 0.0;
+  double local_faces = 0.0;
+  double local_boundary_faces = 0.0;
+  double local_interface_faces = 0.0;
+  double local_same_block_neighbor_faces = 0.0;
+  double local_face_area = 0.0;
+  double local_boundary_area = 0.0;
+  double local_max_faces = 0.0;
+  std::set<unsigned int> local_blocks;
+  std::map<unsigned int, double> local_block_volume;
+  Vector3 local_min(std::numeric_limits<double>::infinity(),
+                    std::numeric_limits<double>::infinity(),
+                    std::numeric_limits<double>::infinity());
+  Vector3 local_max(-std::numeric_limits<double>::infinity(),
+                    -std::numeric_limits<double>::infinity(),
+                    -std::numeric_limits<double>::infinity());
+
+  for (const auto& cell : grid->local_cells)
+  {
+    local_volume += cell.volume;
+    local_faces += static_cast<double>(cell.faces.size());
+    local_max_faces = std::max(local_max_faces, static_cast<double>(cell.faces.size()));
+    local_blocks.insert(cell.block_id);
+    local_block_volume[cell.block_id] += cell.volume;
+    local_min.x = std::min(local_min.x, cell.centroid.x);
+    local_min.y = std::min(local_min.y, cell.centroid.y);
+    local_min.z = std::min(local_min.z, cell.centroid.z);
+    local_max.x = std::max(local_max.x, cell.centroid.x);
+    local_max.y = std::max(local_max.y, cell.centroid.y);
+    local_max.z = std::max(local_max.z, cell.centroid.z);
+
+    for (const auto& face : cell.faces)
+    {
+      local_face_area += face.area;
+      if (not face.has_neighbor)
+      {
+        local_boundary_faces += 1.0;
+        local_boundary_area += face.area;
+        continue;
+      }
+      const auto& neighbor = grid->cells[face.neighbor_id];
+      if (neighbor.block_id == cell.block_id)
+        local_same_block_neighbor_faces += 1.0;
+      else
+        local_interface_faces += 1.0;
+    }
+  }
+
+  double global_volume = 0.0;
+  double global_faces = 0.0;
+  double global_boundary_faces = 0.0;
+  double global_interface_faces = 0.0;
+  double global_same_block_neighbor_faces = 0.0;
+  double global_face_area = 0.0;
+  double global_boundary_area = 0.0;
+  double global_max_faces = 0.0;
+  opensn::mpi_comm.all_reduce(local_volume, global_volume, mpi::op::sum<double>());
+  opensn::mpi_comm.all_reduce(local_faces, global_faces, mpi::op::sum<double>());
+  opensn::mpi_comm.all_reduce(local_boundary_faces, global_boundary_faces, mpi::op::sum<double>());
+  opensn::mpi_comm.all_reduce(local_interface_faces, global_interface_faces, mpi::op::sum<double>());
+  opensn::mpi_comm.all_reduce(
+    local_same_block_neighbor_faces, global_same_block_neighbor_faces, mpi::op::sum<double>());
+  opensn::mpi_comm.all_reduce(local_face_area, global_face_area, mpi::op::sum<double>());
+  opensn::mpi_comm.all_reduce(local_boundary_area, global_boundary_area, mpi::op::sum<double>());
+  opensn::mpi_comm.all_reduce(local_max_faces, global_max_faces, mpi::op::max<double>());
+
+  const auto block_volumes = grid->ComputeVolumePerBlockID();
+  const double max_block_volume =
+    std::accumulate(block_volumes.begin(),
+                    block_volumes.end(),
+                    0.0,
+                    [](double current, const auto& entry) { return std::max(current, entry.second); });
+  const double block_entropy = [&]()
+  {
+    double entropy = 0.0;
+    for (const auto& [block_id, volume] : block_volumes)
+    {
+      const double fraction = SafeDivide(volume, global_volume);
+      if (fraction > 0.0)
+        entropy -= fraction * std::log(fraction);
+    }
+    return entropy;
+  }();
+
+  double extent_data[6] = {local_min.x, local_min.y, local_min.z, local_max.x, local_max.y, local_max.z};
+  double global_extent_data[6] = {};
+  opensn::mpi_comm.all_reduce(extent_data[0], global_extent_data[0], mpi::op::min<double>());
+  opensn::mpi_comm.all_reduce(extent_data[1], global_extent_data[1], mpi::op::min<double>());
+  opensn::mpi_comm.all_reduce(extent_data[2], global_extent_data[2], mpi::op::min<double>());
+  opensn::mpi_comm.all_reduce(extent_data[3], global_extent_data[3], mpi::op::max<double>());
+  opensn::mpi_comm.all_reduce(extent_data[4], global_extent_data[4], mpi::op::max<double>());
+  opensn::mpi_comm.all_reduce(extent_data[5], global_extent_data[5], mpi::op::max<double>());
+  const double dx = std::max(0.0, global_extent_data[3] - global_extent_data[0]);
+  const double dy = std::max(0.0, global_extent_data[4] - global_extent_data[1]);
+  const double dz = std::max(0.0, global_extent_data[5] - global_extent_data[2]);
+  const double max_extent = std::max({dx, dy, dz, 1.0e-30});
+  const double min_nonzero_extent = std::min({dx > 0.0 ? dx : max_extent,
+                                              dy > 0.0 ? dy : max_extent,
+                                              dz > 0.0 ? dz : max_extent});
+
+  double xs_count = 0.0;
+  double sigma_t_sum = 0.0;
+  double sigma_a_sum = 0.0;
+  double nu_sigma_f_sum = 0.0;
+  double scatter_sum = 0.0;
+  double downscatter_sum = 0.0;
+  double upscatter_sum = 0.0;
+  double xs_heterogeneity = 0.0;
+
+  for (const auto& [block_id, xs_ptr] : xs_map)
+  {
+    const auto& xs = *xs_ptr;
+    const auto& sigma_t = xs.GetSigmaTotal();
+    const auto& sigma_a = xs.GetSigmaAbsorption();
+    const auto& nu_sigma_f = xs.GetNuSigmaF();
+    for (unsigned int g = 0; g < num_groups_ and g < sigma_t.size(); ++g)
+    {
+      const double st = sigma_t[g];
+      const double sa = g < sigma_a.size() ? sigma_a[g] : 0.0;
+      const double nsf = g < nu_sigma_f.size() ? nu_sigma_f[g] : 0.0;
+      sigma_t_sum += st;
+      sigma_a_sum += sa;
+      nu_sigma_f_sum += nsf;
+      xs_heterogeneity += st * st;
+      xs_count += 1.0;
+    }
+    if (not xs.GetTransferMatrices().empty())
+    {
+      const auto& transfer = xs.GetTransferMatrix(0);
+      for (std::size_t row = 0; row < transfer.GetNumRows(); ++row)
+      {
+        for (const auto entry : transfer.Row(row))
+        {
+          const double value = std::fabs(entry.value);
+          scatter_sum += value;
+          if (entry.column_index > entry.row_index)
+            downscatter_sum += value;
+          else if (entry.column_index < entry.row_index)
+            upscatter_sum += value;
+        }
+      }
+    }
+  }
+
+  const double sigma_t_mean = SafeDivide(sigma_t_sum, xs_count);
+  const double sigma_a_mean = SafeDivide(sigma_a_sum, xs_count);
+  const double nu_sigma_f_mean = SafeDivide(nu_sigma_f_sum, xs_count);
+  const double sigma_t_rms = std::sqrt(SafeDivide(xs_heterogeneity, xs_count));
+  const double mean_cell_volume = SafeDivide(global_volume, global_cells);
+  const double mean_cell_length = std::cbrt(std::max(mean_cell_volume, 0.0));
+  const double optical_thickness = sigma_t_mean * mean_cell_length;
+
+  return {
+    1.0,
+    ClampFeature(static_cast<double>(grid->GetDimension())),
+    ClampFeature(LogFeature(global_cells)),
+    ClampFeature(LogFeature(local_cells)),
+    ClampFeature(static_cast<double>(opensn::mpi_comm.size())),
+    ClampFeature(static_cast<double>(num_groups_)),
+    ClampFeature(static_cast<double>(xs_map.size())),
+    ClampFeature(static_cast<double>(block_volumes.size())),
+    ClampFeature(SafeDivide(max_block_volume, global_volume)),
+    ClampFeature(block_entropy),
+    ClampFeature(SafeDivide(global_faces, global_cells)),
+    ClampFeature(global_max_faces),
+    ClampFeature(SafeDivide(global_boundary_faces, global_faces)),
+    ClampFeature(SafeDivide(global_interface_faces, global_faces)),
+    ClampFeature(SafeDivide(global_same_block_neighbor_faces, global_faces)),
+    ClampFeature(SafeDivide(global_boundary_area, global_face_area)),
+    ClampFeature(SafeDivide(max_extent, min_nonzero_extent)),
+    ClampFeature(SafeDivide(dx, max_extent)),
+    ClampFeature(SafeDivide(dy, max_extent)),
+    ClampFeature(SafeDivide(dz, max_extent)),
+    ClampFeature(optical_thickness),
+    ClampFeature(SafeDivide(sigma_a_mean, sigma_t_mean)),
+    ClampFeature(SafeDivide(scatter_sum, sigma_t_sum)),
+    ClampFeature(SafeDivide(nu_sigma_f_mean, sigma_t_mean)),
+    ClampFeature(SafeDivide(upscatter_sum, scatter_sum)),
+    ClampFeature(SafeDivide(downscatter_sum, scatter_sum)),
+    ClampFeature(SafeDivide(sigma_t_rms, sigma_t_mean)),
+  };
+}
+
+std::string
+CMFDAcceleration::BuildMLProblemSignature() const
+{
+  const auto grid = do_problem_.GetGrid();
+  std::ostringstream signature;
+  signature << std::setprecision(8)
+            << "dim=" << grid->GetDimension()
+            << ";cells=" << grid->GetGlobalNumberOfCells()
+            << ";mpi=" << opensn::mpi_comm.size()
+            << ";groups=" << num_groups_
+            << ";groupsets=" << groupsets_.size()
+            << ";coarse_mesh=" << coarse_mesh_type_
+            << ";sweep=" << do_problem_.GetSweepType();
+  for (const auto& groupset : groupsets_)
+    signature << ";gs=" << groupset.first_group << "-" << groupset.last_group;
+
+  const auto block_volumes = grid->ComputeVolumePerBlockID();
+  for (const auto& [block_id, volume] : block_volumes)
+    signature << ";block=" << block_id << ":" << volume;
+
+  const auto& xs_map = do_problem_.GetBlockID2XSMap();
+  for (const auto& [block_id, xs_ptr] : xs_map)
+  {
+    const auto& xs = *xs_ptr;
+    signature << ";xs=" << block_id << ":";
+    const auto& sigma_t = xs.GetSigmaTotal();
+    const auto& sigma_a = xs.GetSigmaAbsorption();
+    const auto& nu_sigma_f = xs.GetNuSigmaF();
+    for (unsigned int g = 0; g < num_groups_ and g < sigma_t.size(); ++g)
+      signature << sigma_t[g] << ",";
+    signature << ":";
+    for (unsigned int g = 0; g < num_groups_ and g < sigma_a.size(); ++g)
+      signature << sigma_a[g] << ",";
+    signature << ":";
+    for (unsigned int g = 0; g < num_groups_ and g < nu_sigma_f.size(); ++g)
+      signature << nu_sigma_f[g] << ",";
+  }
+
+  return signature.str();
+}
+
+std::string
+CMFDAcceleration::ComputeMLProblemFingerprint(const std::string& signature) const
+{
+  std::uint64_t hash = 14695981039346656037ull;
+  for (const unsigned char value : signature)
+  {
+    hash ^= static_cast<std::uint64_t>(value);
+    hash *= 1099511628211ull;
+  }
+
+  std::ostringstream out;
+  out << std::hex << std::setw(16) << std::setfill('0') << hash;
+  return out.str();
+}
+
+double
+CMFDAcceleration::PredictMLValue(const std::vector<double>& weights, const double fallback) const
+{
+  if (weights.size() != ml_features_.size())
+    return fallback;
+  double value = 0.0;
+  for (std::size_t i = 0; i < weights.size(); ++i)
+    value += weights[i] * ml_features_[i];
+  return std::isfinite(value) and value > 0.0 ? value : fallback;
+}
+
+double
+CMFDAcceleration::MLFeatureDistance(const std::vector<double>& lhs,
+                                    const std::vector<double>& rhs) const
+{
+  if (lhs.size() != rhs.size())
+    return std::numeric_limits<double>::infinity();
+  double distance = 0.0;
+  for (std::size_t i = 0; i < lhs.size(); ++i)
+  {
+    const double difference = lhs[i] - rhs[i];
+    distance += difference * difference;
+  }
+  return std::sqrt(distance);
+}
+
+std::pair<double, double>
+CMFDAcceleration::PredictMLAggregationFromSamples() const
+{
+  if (const auto it = ml_state_.best_samples_by_fingerprint.find(ml_problem_fingerprint_);
+      it != ml_state_.best_samples_by_fingerprint.end())
+    return {static_cast<double>(it->second.aggregation_size),
+            static_cast<double>(it->second.group_aggregation_size)};
+
+  if (ml_samples_.empty() or ml_features_.empty())
+    return {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()};
+
+  std::vector<std::pair<double, const MLSample*>> nearest;
+  nearest.reserve(ml_samples_.size());
+  for (const auto& sample : ml_samples_)
+  {
+    if (not std::isfinite(sample.score))
+      continue;
+    nearest.emplace_back(MLFeatureDistance(ml_features_, sample.features), &sample);
+  }
+  if (nearest.empty())
+    return {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()};
+
+  const std::size_t k = std::min<std::size_t>(5, nearest.size());
+  std::partial_sort(nearest.begin(),
+                    nearest.begin() + static_cast<std::ptrdiff_t>(k),
+                    nearest.end(),
+                    [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+
+  double weight_sum = 0.0;
+  double aggregation_sum = 0.0;
+  double group_sum = 0.0;
+  for (std::size_t i = 0; i < k; ++i)
+  {
+    const auto& [distance, sample] = nearest[i];
+    const double score_weight = 1.0 / std::max(1.0, sample->score);
+    const double feature_weight = 1.0 / (1.0 + distance);
+    const double weight = score_weight * feature_weight;
+    weight_sum += weight;
+    aggregation_sum += weight * static_cast<double>(sample->aggregation_size);
+    group_sum += weight * static_cast<double>(sample->group_aggregation_size);
+  }
+
+  if (weight_sum == 0.0)
+    return {std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::quiet_NaN()};
+  return {aggregation_sum / weight_sum, group_sum / weight_sum};
+}
+
+void
+CMFDAcceleration::UpdateMLFeatureWeights(MLState& state) const
+{
+  if (ml_features_.empty())
+    return;
+  if (state.spatial_feature_weights.size() != ml_features_.size())
+  {
+    state.spatial_feature_weights.assign(ml_features_.size(), 0.0);
+    state.spatial_feature_weights[0] = state.spatial_weight > 0.0
+                                         ? state.spatial_weight
+                                         : static_cast<double>(aggregation_size_);
+  }
+  if (state.group_feature_weights.size() != ml_features_.size())
+  {
+    state.group_feature_weights.assign(ml_features_.size(), 0.0);
+    state.group_feature_weights[0] = state.group_weight > 0.0
+                                       ? state.group_weight
+                                       : static_cast<double>(group_aggregation_size_);
+  }
+
+  const double learning_rate = std::clamp(ml_learning_rate_, 0.0, 1.0);
+  const double spatial_prediction =
+    PredictMLValue(state.spatial_feature_weights, state.spatial_weight);
+  const double group_prediction = PredictMLValue(state.group_feature_weights, state.group_weight);
+  const double spatial_error = static_cast<double>(state.best_aggregation_size) - spatial_prediction;
+  const double group_error =
+    static_cast<double>(state.best_group_aggregation_size) - group_prediction;
+  double norm = 1.0e-12;
+  for (const auto feature : ml_features_)
+    norm += feature * feature;
+  for (std::size_t i = 0; i < ml_features_.size(); ++i)
+  {
+    const double step = learning_rate * ml_features_[i] / norm;
+    state.spatial_feature_weights[i] += step * spatial_error;
+    state.group_feature_weights[i] += step * group_error;
+  }
+}
+
+void
+CMFDAcceleration::AddMLSample(MLState& state, const double score)
+{
+  MLSample sample;
+  sample.fingerprint = ml_problem_fingerprint_;
+  sample.score = score;
+  sample.aggregation_size = aggregation_size_;
+  sample.group_aggregation_size = group_aggregation_size_;
+  sample.features = ml_features_;
+  if (not sample.features.empty())
+  {
+    const auto best_it = state.best_samples_by_fingerprint.find(sample.fingerprint);
+    if (best_it == state.best_samples_by_fingerprint.end() or score < best_it->second.score)
+      state.best_samples_by_fingerprint[sample.fingerprint] = sample;
+    ml_samples_.push_back(std::move(sample));
+  }
+
+  constexpr std::size_t max_samples = 200;
+  if (ml_samples_.size() <= max_samples)
+    return;
+
+  std::sort(ml_samples_.begin(), ml_samples_.end(), [](const auto& lhs, const auto& rhs) {
+    return lhs.score < rhs.score;
+  });
+  ml_samples_.resize(max_samples);
+  state.runs = std::max<unsigned int>(state.runs, static_cast<unsigned int>(ml_samples_.size()));
+}
+
+unsigned int
+CMFDAcceleration::RepairAggregationSize(const double value) const
+{
+  const auto grid = do_problem_.GetGrid();
+  const unsigned int global_cells =
+    static_cast<unsigned int>(std::max<std::size_t>(1, grid->GetGlobalNumberOfCells()));
+  const unsigned int max_size =
+    ml_max_aggregation_size_ > 0 ? std::min(ml_max_aggregation_size_, global_cells) : global_cells;
+  return std::clamp(RoundToUInt(value), 1u, max_size);
+}
+
+unsigned int
+CMFDAcceleration::RepairGroupAggregationSize(const double value) const
+{
+  const unsigned int max_size =
+    ml_max_group_aggregation_size_ > 0 ? std::min(ml_max_group_aggregation_size_, num_groups_)
+                                       : num_groups_;
+  return std::clamp(RoundToUInt(value), 1u, std::max(1u, max_size));
+}
+
+void
+CMFDAcceleration::ConfigureMLAggregation()
+{
+  if (not ml_enabled_ and not ml_record_baseline_)
+    return;
+
+  ml_features_ = ExtractMLFeatures();
+  ml_problem_signature_ = BuildMLProblemSignature();
+  ml_problem_fingerprint_ = ComputeMLProblemFingerprint(ml_problem_signature_);
+  ml_state_ = LoadMLState();
+  if (ml_record_baseline_)
+  {
+    log.Log() << no_wrap << program_timer.GetTimeString()
+              << " CMFD ML baseline recording enabled: fingerprint="
+              << ml_problem_fingerprint_ << ", state_file=\"" << ml_state_file_ << "\".";
+    return;
+  }
+
+  if (ml_state_.spatial_weight <= 0.0 or not std::isfinite(ml_state_.spatial_weight))
+    ml_state_.spatial_weight = static_cast<double>(aggregation_size_);
+  if (ml_state_.group_weight <= 0.0 or not std::isfinite(ml_state_.group_weight))
+    ml_state_.group_weight = static_cast<double>(group_aggregation_size_);
+  if (ml_state_.best_aggregation_size == 0)
+    ml_state_.best_aggregation_size = aggregation_size_;
+  if (ml_state_.best_group_aggregation_size == 0)
+    ml_state_.best_group_aggregation_size = group_aggregation_size_;
+
+  if (ml_state_.spatial_feature_weights.size() != ml_features_.size())
+  {
+    ml_state_.spatial_feature_weights.assign(ml_features_.size(), 0.0);
+    if (not ml_state_.spatial_feature_weights.empty())
+      ml_state_.spatial_feature_weights[0] = ml_state_.spatial_weight;
+  }
+  if (ml_state_.group_feature_weights.size() != ml_features_.size())
+  {
+    ml_state_.group_feature_weights.assign(ml_features_.size(), 0.0);
+    if (not ml_state_.group_feature_weights.empty())
+      ml_state_.group_feature_weights[0] = ml_state_.group_weight;
+  }
+
+  const auto [sample_aggregation_size, sample_group_aggregation_size] =
+    PredictMLAggregationFromSamples();
+  ml_raw_aggregation_size_ =
+    std::isfinite(sample_aggregation_size)
+      ? sample_aggregation_size
+      : PredictMLValue(ml_state_.spatial_feature_weights, ml_state_.spatial_weight);
+  ml_raw_group_aggregation_size_ =
+    std::isfinite(sample_group_aggregation_size)
+      ? sample_group_aggregation_size
+      : PredictMLValue(ml_state_.group_feature_weights, ml_state_.group_weight);
+  if (ml_explore_ and ml_state_.runs > 0)
+  {
+    switch (ml_state_.runs % 5)
+    {
+      case 0:
+        ml_raw_aggregation_size_ = 0.5 * static_cast<double>(ml_state_.best_aggregation_size);
+        break;
+      case 1:
+        ml_raw_aggregation_size_ = 2.0 * static_cast<double>(ml_state_.best_aggregation_size);
+        break;
+      case 2:
+        ml_raw_group_aggregation_size_ =
+          0.5 * static_cast<double>(ml_state_.best_group_aggregation_size);
+        break;
+      case 3:
+        ml_raw_group_aggregation_size_ =
+          2.0 * static_cast<double>(ml_state_.best_group_aggregation_size);
+        break;
+      default:
+        break;
+    }
+  }
+
+  const auto proposed_aggregation_size = RepairAggregationSize(ml_raw_aggregation_size_);
+  const auto proposed_group_aggregation_size =
+    RepairGroupAggregationSize(ml_raw_group_aggregation_size_);
+
+  ml_repair_distance_ =
+    static_cast<unsigned int>(std::fabs(static_cast<double>(proposed_aggregation_size) -
+                                       std::max(1.0, std::round(ml_raw_aggregation_size_)))) +
+    static_cast<unsigned int>(std::fabs(static_cast<double>(proposed_group_aggregation_size) -
+                                       std::max(1.0, std::round(ml_raw_group_aggregation_size_))));
+
+  aggregation_size_ = proposed_aggregation_size;
+  group_aggregation_size_ = proposed_group_aggregation_size;
+  num_coarse_groups_ = (num_groups_ + group_aggregation_size_ - 1) / group_aggregation_size_;
+
+  log.Log() << no_wrap << program_timer.GetTimeString()
+            << " CMFD ML aggregation proposal: raw aggregation_size=" << ml_raw_aggregation_size_
+            << ", raw group_aggregation_size=" << ml_raw_group_aggregation_size_
+            << ", repaired aggregation_size=" << aggregation_size_
+            << ", repaired group_aggregation_size=" << group_aggregation_size_
+            << ", repair_distance=" << ml_repair_distance_
+            << ", state_file=\"" << ml_state_file_ << "\".";
+}
+
+double
+CMFDAcceleration::ComputeMLScore(const bool converged,
+                                 const unsigned int num_power_iterations,
+                                 const std::size_t num_sweeps,
+                                 const double k_eff_change) const
+{
+  const double convergence_penalty = converged ? 0.0 : 1.0e6;
+  const double correction_penalty =
+    1000.0 * static_cast<double>(ml_skipped_corrections_) +
+    50.0 * static_cast<double>(ml_damped_corrections_);
+  const double repair_penalty = 10.0 * static_cast<double>(ml_repair_distance_);
+  const double coarse_size_penalty = 1.0e-4 * static_cast<double>(GlobalUnknownCount());
+  const double residual_penalty =
+    std::isfinite(k_eff_change) ? 100.0 * k_eff_change : 1.0e5;
+  return convergence_penalty + static_cast<double>(num_sweeps) +
+         10.0 * static_cast<double>(num_power_iterations) + correction_penalty + repair_penalty +
+         coarse_size_penalty + residual_penalty;
+}
+
+void
+CMFDAcceleration::PostExecute(const bool converged,
+                              const unsigned int num_power_iterations,
+                              const std::size_t num_sweeps,
+                              const double /*k_eff*/,
+                              const double k_eff_change)
+{
+  if (not ml_enabled_ and not ml_record_baseline_)
+    return;
+
+  const double score = ComputeMLScore(converged, num_power_iterations, num_sweeps, k_eff_change);
+  MLState updated_state = ml_state_;
+  if (ml_record_baseline_)
+  {
+    const auto baseline_it = updated_state.baseline_scores.find(ml_problem_fingerprint_);
+    const bool new_baseline =
+      baseline_it == updated_state.baseline_scores.end() or score < baseline_it->second;
+    if (new_baseline)
+      updated_state.baseline_scores[ml_problem_fingerprint_] = score;
+    if (score < updated_state.best_score)
+    {
+      updated_state.best_score = score;
+      updated_state.best_aggregation_size = aggregation_size_;
+      updated_state.best_group_aggregation_size = group_aggregation_size_;
+    }
+    if (updated_state.spatial_weight <= 0.0 or not std::isfinite(updated_state.spatial_weight))
+      updated_state.spatial_weight = static_cast<double>(aggregation_size_);
+    if (updated_state.group_weight <= 0.0 or not std::isfinite(updated_state.group_weight))
+      updated_state.group_weight = static_cast<double>(group_aggregation_size_);
+    AddMLSample(updated_state, score);
+    UpdateMLFeatureWeights(updated_state);
+    ++updated_state.runs;
+    SaveMLState(updated_state);
+    log.Log() << no_wrap << program_timer.GetTimeString()
+              << " CMFD ML baseline score=" << score
+              << ", fingerprint=" << ml_problem_fingerprint_
+              << ", new_baseline=" << (new_baseline ? "true" : "false")
+              << ", aggregation_size=" << aggregation_size_
+              << ", group_aggregation_size=" << group_aggregation_size_ << ".";
+    return;
+  }
+
+  const bool new_best = score < updated_state.best_score;
+  if (new_best)
+  {
+    updated_state.best_score = score;
+    updated_state.best_aggregation_size = aggregation_size_;
+    updated_state.best_group_aggregation_size = group_aggregation_size_;
+  }
+
+  const double learning_rate = std::clamp(ml_learning_rate_, 0.0, 1.0);
+  const double target_aggregation_size =
+    static_cast<double>(updated_state.best_aggregation_size);
+  const double target_group_aggregation_size =
+    static_cast<double>(updated_state.best_group_aggregation_size);
+  updated_state.spatial_weight =
+    (1.0 - learning_rate) * updated_state.spatial_weight + learning_rate * target_aggregation_size;
+  updated_state.group_weight = (1.0 - learning_rate) * updated_state.group_weight +
+                               learning_rate * target_group_aggregation_size;
+  updated_state.spatial_weight =
+    static_cast<double>(RepairAggregationSize(updated_state.spatial_weight));
+  updated_state.group_weight =
+    static_cast<double>(RepairGroupAggregationSize(updated_state.group_weight));
+  AddMLSample(updated_state, score);
+  UpdateMLFeatureWeights(updated_state);
+  ++updated_state.runs;
+
+  SaveMLState(updated_state);
+  if (verbose_ or opensn::mpi_comm.rank() == 0)
+  {
+    const auto baseline_it = updated_state.baseline_scores.find(ml_problem_fingerprint_);
+    const double baseline_delta =
+      baseline_it == updated_state.baseline_scores.end() ? std::numeric_limits<double>::quiet_NaN()
+                                                         : score - baseline_it->second;
+    log.Log() << no_wrap << program_timer.GetTimeString()
+              << " CMFD ML score=" << score << ", new_best=" << (new_best ? "true" : "false")
+              << ", fingerprint=" << ml_problem_fingerprint_
+              << ", baseline_delta=" << baseline_delta
+              << ", saved aggregation_size=" << updated_state.spatial_weight
+              << ", saved group_aggregation_size=" << updated_state.group_weight
+              << ", best_score=" << updated_state.best_score << ".";
   }
 }
 
@@ -528,6 +1389,8 @@ CMFDAcceleration::PreExecute()
   transport_start_time_ = 0.0;
   old_fission_production_ = 0.0;
   consecutive_skipped_corrections_ = 0;
+  ml_skipped_corrections_ = 0;
+  ml_damped_corrections_ = 0;
 }
 
 void
@@ -706,11 +1569,16 @@ CMFDAcceleration::PostPowerIteration()
   if (skipped_correction)
   {
     ++consecutive_skipped_corrections_;
+    ++ml_skipped_corrections_;
     if (consecutive_skipped_corrections_ >= 2)
       k_eff = raw_transport_k_eff;
   }
   else
+  {
     consecutive_skipped_corrections_ = 0;
+    if (applied_damping < 0.25 * std::max(relaxation_, 1.0e-30))
+      ++ml_damped_corrections_;
+  }
   last_correction_skipped_ = skipped_correction;
   last_correction_skip_reason_ = skipped_correction ? correction_skip_reason : std::string();
   last_update_allows_convergence_ = transport_balance_allows_convergence and not skipped_correction;
