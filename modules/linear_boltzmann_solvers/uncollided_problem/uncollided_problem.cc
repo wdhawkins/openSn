@@ -386,14 +386,11 @@ UncollidedProblem::BuildSourcePoints()
     source_points_.push_back(std::move(source_point));
 
     // Warn when the source sits close to a face of its own containing cell, relative
-    // to that cell's size. The near-source treatment (Woodsford et al. (2026), Sec.
-    // 4) evaluates the ray-traced flux right up to that face; if the source is nearly
-    // flush against it, the field varies enormously across the cell and the resulting
-    // face-leakage/volume-removal mismatch can be large even at the current
-    // quadrature order. The conservation-scale factor (Eq. 24) keeps the cell
-    // balanced regardless, but a large factor means the nodal flux shape it is
-    // applied to was already a poor local fit, not just its integral -- so this is
-    // best caught here, before it shows up as pointwise error.
+    // to that cell's size. If the source is nearly flush against it, the field varies
+    // enormously across the cell and the resulting face-leakage/volume-removal mismatch
+    // can be large. The conservation-scale factor keeps the cell balanced, but a large
+    // factor means the flux shape it is applied to was already a poor local fit, so this
+    // is best caught here.
     const auto& subscribers = source_points_.back().subscribers;
     if (subscribers.size() == 1)
     {
@@ -409,10 +406,10 @@ UncollidedProblem::BuildSourcePoints()
       for (const auto vid : source_cell.vertex_ids)
       {
         const auto& v = grid_->vertices[vid];
-        bbox_min = Vector3(
-          std::min(bbox_min.x, v.x), std::min(bbox_min.y, v.y), std::min(bbox_min.z, v.z));
-        bbox_max = Vector3(
-          std::max(bbox_max.x, v.x), std::max(bbox_max.y, v.y), std::max(bbox_max.z, v.z));
+        bbox_min =
+          Vector3(std::min(bbox_min.x, v.x), std::min(bbox_min.y, v.y), std::min(bbox_min.z, v.z));
+        bbox_max =
+          Vector3(std::max(bbox_max.x, v.x), std::max(bbox_max.y, v.y), std::max(bbox_max.z, v.z));
       }
       const double cell_length_scale = (bbox_max - bbox_min).Norm();
 
@@ -1415,23 +1412,14 @@ UncollidedProblem::RaytraceNearSourceRegion(const SourcePoint& source_point)
         for (size_t g = 0; g < num_groups_; ++g)
           source[g] += leakages[c][f][g];
 
-    // Enforce conservation using the paper's own scheme (Woodsford et al.
+    // Enforce conservation using the algorithm in Woodsford et al.
     // (2026), Eqs. (24)-(25)): reconcile the ray-traced face leakage L+
-    // against the ray-traced volume-removal quadrature (absorption) with a
-    // single shared scale factor, alpha, trusting neither term over the
-    // other. This is always used, including with reflecting boundaries --
-    // reflected image sources are always treated as pure bulk (never
-    // near-source ray-traced, since their singularity lies outside the
-    // domain) and always use the plain, unrefined ray trace, so global
-    // conservation relies on an implicit cancellation between the real
-    // source's own near-source treatment and the images'
-    // independently-computed contribution; this symmetric scheme keeps both
-    // sides equally (if imperfectly) accurate, so that cancellation holds.
-    // A more accurate near-source treatment on the real source's side alone
-    // (e.g. trusting L+ over the volume fit) breaks it -- confirmed
-    // directly on the reflecting-boundary Kobayashi problem. Closing this
-    // properly needs bringing the images' treatment in line with whatever
-    // the real source does, not another local workaround.
+    // against the ray-traced volume-removal (absorption) with a single
+    // shared scale factor, alpha. Reflected sources are never near-source
+    // ray-traced, so global conservation relies on an implicit cancellation
+    // between the real source's own near-source treatment and the reflected
+    // source's independently-computed contribution; this symmetric scheme
+    // keeps both sides equally accurate, and cancellation holds.
     for (size_t g = 0; g < num_groups_; ++g)
     {
       double outgoing_leakage = 0.0; // L+
@@ -1449,9 +1437,8 @@ UncollidedProblem::RaytraceNearSourceRegion(const SourcePoint& source_point)
       const double raw_removal = outgoing_leakage + raw_absorption;  // diagnostic only
       const double current_tolerance = 1.0e-12 * std::max(1.0, std::abs(source[g]));
 
-      // Eq. (24)-(25): enforce non-negativity while preserving the raw
-      // integral exactly, then separately scale both Phi and L+ by the
-      // same shared factor.
+      // Eq. (24)-(25): enforce non-negativity and separately scale
+      // both Phi and L+ by the same shared factor.
       ApplyConservativePositiveCorrection(
         phi[g], IntV_shapeI, projected_integral, projected_integral);
       double leak_scale = 1.0;
@@ -1486,19 +1473,35 @@ UncollidedProblem::RaytraceNearSourceRegion(const SourcePoint& source_point)
         if (not rhs_g.empty())
           rhs_g[g] *= leak_scale;
 
-      // Degenerate case: both the ray-traced outflow and the ray-traced
-      // absorption are essentially zero for this group, yet conservation
-      // still implies source[g] must leave through some outgoing face, since
-      // essentially nothing is being absorbed either. There is no ray-traced
-      // shape to distribute it by, so split it evenly across the outgoing
-      // faces instead of silently dropping it. cell_bulk_rhs entries stay at
-      // their near-zero ray-traced value in this rare case.
+      // When both the ray-traced outflow and the ray-traced absorption are
+      // essentially zero for this group, source[g] must leave through some
+      // outgoing face. There is no ray-traced shape to distribute it by, so
+      // split it evenly across the outgoing faces. cell_bulk_rhs entries stay
+      // at their near-zero ray-traced value in this rare case. This is fine
+      //  when an outgoing face's neighbor is another near-source cell
+      // (leakages[c][f] is the only value read in that case, and it does get
+      // the redistributed value), but cell_bulk_rhs, not leakages[c][f], is
+      // what feeds a bordering bulk-region cell's first-collision source, so
+      // the redistributed share would silently never reach it. We reject that
+      // combination explicitly.
       if (raw_removal <= current_tolerance and source[g] > current_tolerance)
       {
         size_t outgoing_face_count = 0;
         for (size_t f = 0; f < cell_num_faces; ++f)
           if (cell_face_orientations_[c][f] == FOOUTGOING)
+          {
             ++outgoing_face_count;
+            const auto& face = cell.faces[f];
+            OpenSnLogicalErrorIf(
+              face.has_neighbor and
+                cell_regions_[face.GetNeighborLocalID(grid_.get())] == CellRegion::BULK,
+              GetName() + ": near-source cell " + std::to_string(cell.global_id) +
+                " has negligible ray-traced leakage and absorption for group " +
+                std::to_string(g) +
+                " but a non-negligible source, and an outgoing face borders a bulk-region "
+                "cell. The resulting evenly-split cell leakage cannot be propagated "
+                "to the bulk-region cell.");
+          }
         if (outgoing_face_count > 0)
           for (size_t f = 0; f < cell_num_faces; ++f)
             if (cell_face_orientations_[c][f] == FOOUTGOING)
@@ -1563,9 +1566,8 @@ UncollidedProblem::RaytraceNearSourceRegion(const SourcePoint& source_point)
       << "% of near-source cells exceed the mismatch threshold, with "
       << 100.0 * aggregate_relative_change
       << "% aggregate relative mismatch. The ray-traced outgoing leakage and the ray-traced "
-      << "volume-removal quadrature are reconciled with a single shared scale factor "
-      << "(Woodsford et al. (2026), Eqs. (24)-(25)); large values here mean that correction is "
-      << "significant and the mesh may need refinement near the source.";
+      << "volume-removal are reconciled with a single shared scale factor. Large values here "
+      << "mean that correction is significant and the mesh may need refinement near the source.";
 }
 
 std::vector<double>

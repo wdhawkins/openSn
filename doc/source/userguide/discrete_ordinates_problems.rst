@@ -557,13 +557,26 @@ The HDF5 file records the reflecting boundary IDs, and the collided problem
 rejects files generated with a different reflector set.
 
 The near-source calculation independently projects the ray-traced volume flux
-and integrates ray-traced face currents. These two quadratures generally do
-not satisfy exact cell balance at finite resolution. OpenSn reports their
-relative mismatch but preserves both projections; rescaling outgoing currents
-cell by cell can recursively amplify quadrature error along long streaming
-paths. The HDF5 balance metadata uses the projected removal and the
-conservative global outflow remainder. The directly integrated vacuum outflow
-is also printed as a consistency diagnostic.
+and integrates ray-traced face currents, following the near-source treatment
+of Woodsford, Ragusa, and Morel (2026) [#woodsford2026]_. These two
+quadratures generally do not agree exactly at finite resolution: near a
+point source the true flux varies too sharply for either quadrature to be
+fully resolved. Rather than letting that mismatch accumulate, OpenSn
+reconciles the two with a single shared scale factor per near-source cell
+and group, applied to both the projected flux (and thus removal) and the
+outgoing face currents together, so that source strength, removal, and
+leakage balance exactly in every near-source cell. The size of that scale
+factor (and the resulting relative mismatch between the two raw quadratures)
+is reported as a diagnostic, with a warning when it becomes large, since a
+large factor means the local flux shape -- not just its integral -- was
+poorly resolved. The HDF5 balance metadata uses the corrected removal and
+the conservative global outflow remainder. The directly integrated vacuum
+outflow is also printed as a consistency diagnostic.
+
+.. [#woodsford2026] C. Woodsford, J. C. Ragusa, and J. E. Morel,
+   "Sweep-based uncollided-flux treatment on unstructured grids,"
+   Progress in Nuclear Energy, vol. 200, 106524, 2026,
+   https://doi.org/10.1016/j.pnucene.2026.106524.
 
 
 Moment order
@@ -641,9 +654,12 @@ The uncollided HDF5 file also stores its production, removal, and outflow
 rates. The steady-state solver incorporates the uncollided production and
 outflow when reporting the combined problem balance. Reflected image sources
 are projected directly from ray traces evaluated at every finite-element
-volume quadrature point. The generator reports the integrated and conservative
-effective outflows and stores the conservative value used for combined balance
-accounting; this correction does not rescale the uncollided flux moments.
+volume quadrature point and are not near-source corrected. The generator
+reports the integrated and conservative effective outflows and stores the
+conservative value used for combined balance accounting; the near-source
+conservation correction does rescale the uncollided flux moments in
+near-source cells, by design, to keep source strength, removal, and leakage
+exactly balanced there.
 
 Field-Function Interface
 ========================

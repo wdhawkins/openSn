@@ -11,13 +11,13 @@
       {
         "type": "KeyValuePair",
         "key": "UncollidedSampleOpenSn=",
-        "goldvalue": 1.663665090990e+02,
+        "goldvalue": 1.199096804076e+02,
         "rel_tol": 1.0e-8
       },
       {
         "type": "KeyValuePair",
         "key": "UncollidedLineMeanRelativeError=",
-        "goldvalue": 7.509048340914e-03,
+        "goldvalue": 5.340919847821e-03,
         "rel_tol": 1.0e-8
       }
     ]
@@ -35,13 +35,13 @@
       {
         "type": "KeyValuePair",
         "key": "Total scalar flux at (0.024, 0.016, 0.008):",
-        "goldvalue": 4.117904369731e+02,
+        "goldvalue": 3.022020981066e+02,
         "rel_tol": 1.0e-8
       },
       {
         "type": "KeyValuePair",
         "key": "Total scalar-flux integral:",
-        "goldvalue": 2.096499026319e-02,
+        "goldvalue": 1.956488877219e-02,
         "rel_tol": 1.0e-8
       },
       {
@@ -53,7 +53,7 @@
       {
         "type": "KeyValuePair",
         "key": "Collided fraction of line-integrated flux:",
-        "goldvalue": 5.675993245977e-01,
+        "goldvalue": 6.010496653439e-01,
         "rel_tol": 1.0e-8
       }
     ]

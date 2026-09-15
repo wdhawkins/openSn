@@ -701,7 +701,11 @@ WrapLBS(py::module& slv)
     Define an uncollided transport problem for a first-collision calculation.
 
     The problem stores the mesh, materials, point sources, boundaries, and
-    near-source regions used by :class:`UncollidedSolver`.
+    near-source regions used by :class:`UncollidedSolver`. Its near-source
+    ray-tracing and conservation treatment follow C. Woodsford, J. C. Ragusa,
+    and J. E. Morel, "Sweep-based uncollided-flux treatment on unstructured
+    grids," Progress in Nuclear Energy, vol. 200, 106524, 2026,
+    https://doi.org/10.1016/j.pnucene.2026.106524.
 
     Wrapper of :cpp:class:`opensn::UncollidedProblem`.
     )");

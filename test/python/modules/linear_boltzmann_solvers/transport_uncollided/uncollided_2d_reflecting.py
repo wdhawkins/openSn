@@ -54,12 +54,7 @@ if __name__ == "__main__":
     xs = MultiGroupXS()
     xs.CreateSimpleOneGroup(sigma_t=sigma_t, c=0.0)
 
-    # Centered on the containing cell of the mesh (rather than an arbitrary
-    # coordinate) so the source doesn't sit flush against one of that cell's
-    # faces: the ray-traced near-source flux evaluation is otherwise poorly
-    # resolved right next to the source (see UncollidedProblem's runtime
-    # warning for this). images are the exact mirror images of source about
-    # the xmin=-1 and ymin=-1 reflecting planes.
+    # Centered on its containing cell so it isn't flush against a face
     source = (-0.36855, -0.392618, 0.0)
     images = [
         (-1.63145, -0.392618, 0.0),
@@ -67,8 +62,7 @@ if __name__ == "__main__":
         (-1.63145, -1.607382, 0.0),
     ]
     point_source = PointSource(location=list(source), strength=[1.0])
-    # A small region around the point source, not the whole domain: see the
-    # comment in uncollided_2d_multigroup_analytic.py.
+    # A small region around the point source
     near_source_region = RPPLogicalVolume(
         xmin=source[0] - 0.08,
         xmax=source[0] + 0.08,
@@ -182,12 +176,6 @@ if __name__ == "__main__":
         sys.stdout.flush()
 
     remove_file(file_name)
-    # Threshold set with ~1.5x margin over the error actually observed after
-    # the conservation-scaling fix (Woodsford et al. (2026), Eqs. 24-25): the
-    # near-source ray-traced treatment trades pointwise accuracy for exact
-    # per-cell conservation, and that error is not localized -- it
-    # propagates essentially unchanged through the (linear) bulk sweep to
-    # every radius, rather than decaying with distance from the source.
     if max_analytic_error > 0.2:
         raise RuntimeError(f"Reflecting analytic error is too large: {max_analytic_error}")
     if max_recombination_error > 1.0e-12:

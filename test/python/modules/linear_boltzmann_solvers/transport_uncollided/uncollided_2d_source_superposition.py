@@ -65,9 +65,8 @@ if __name__ == "__main__":
         infz=True,
     )
 
-    # Centered on each source's containing mesh cell (rather than an
-    # arbitrary coordinate) so neither sits flush against a cell face; see
-    # UncollidedProblem's runtime warning for this.
+    # Centered on each source's containing cell so neither sits flush
+    # against a face
     source_a = ((-0.322228, 0.183878, 0.0), 1.0)
     source_b = ((0.267895, -0.268373, 0.0), 0.7)
     sample_points = [

@@ -904,17 +904,25 @@ Notes:
 #. The inversion of the :math:`L` operator in the uncollided problem can
    be done using ray tracing, thus mitigating ray effects.
 
-#. OpenSn projects the ray-traced scalar flux onto the local PWLD basis.
-   A constrained lumped-mass correction keeps every nodal scalar-flux
-   coefficient nonnegative while preserving the projected cell integral.
-   Cell removal is computed from this projected analytic field, while
-   outgoing face currents are taken directly from the independently
-   ray-traced face quadratures rather than rescaled to match the cell
-   balance implied by the volume-projected removal. The mismatch between
-   these independently computed quantities is tracked only as a
-   diagnostic (with a warning issued if it becomes large), since rescaling
-   either quantity to enforce cell balance would recursively inject that
-   mismatch into downstream cells and produce strong mesh dependence.
+#. Within the near-source region, OpenSn ray-traces both a volumetric
+   least-squares projection of the scalar flux onto the local PWLD basis
+   (from which cell removal is computed) and the outgoing face currents,
+   using the point source's exact analytic attenuation, following the
+   near-source treatment of :cite:t:`woodsford2026sweep`. For the true field,
+   away from the source itself, :math:`\vec{\nabla}\cdot(\phi\vec{\Omega}_s)
+   + \sigma_t\phi = 0`, so by the divergence theorem the incoming current
+   plus the cell source equals the outgoing current plus absorption
+   exactly; a mismatch between the two independently ray-traced quadratures
+   is therefore purely a numerical artifact of finite quadrature resolution
+   near the source's own near-singular field, not missing physics. OpenSn
+   reconciles the two quadratures with a single shared scale factor per
+   near-source cell and group: it clamps the projected flux to nonnegative
+   nodal values while preserving its raw integral, then scales that
+   projected flux (and thus removal) and the outgoing currents by the same
+   factor, so that the cell's source, removal, and leakage balance exactly.
+   The magnitude of that scale factor is reported as a diagnostic (with a
+   warning if it becomes large), since a large factor indicates the local
+   flux shape, not just its integral, was poorly resolved.
 
 #. Finite-volume sources can be approximated externally by weighted point
    sources, for example at volume-quadrature points. The uncollided generation
@@ -924,7 +932,11 @@ Notes:
 #. Planar, mutually orthogonal reflecting symmetry boundaries are represented
    by image sources. Attenuation paths to an image source are folded through
    the physical mesh so heterogeneous material crossings remain consistent
-   with the reflected geometry.
+   with the reflected geometry. Image sources are always ray-traced with a
+   plain (unweighted) quadrature and receive no near-source conservation
+   correction; global conservation therefore relies on an implicit
+   cancellation between the real source's own near-source treatment and
+   the images' independently-computed contribution.
 
 #. If ``scattering_order`` is greater than zero, OpenSn also writes the
    corresponding uncollided flux moments needed by the collided solve.
@@ -952,6 +964,7 @@ References
    larsen_DSA_1984
    morel1982synthetic_anisotropic
    morel_smm_2024
+   woodsford2026sweep
    openmoc_cmfd
    oliveira1998preconditioned
    pattonapplication
