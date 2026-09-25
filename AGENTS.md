@@ -53,9 +53,9 @@ state the uncertainty and the validation still required.
 - `tools/developer/`: sanitizer and clang-tidy tooling.
 - `external/`: vendored code; edit only when the task concerns that dependency.
 
-Find current compiler, dependency, and tool requirements in
-`doc/source/install/`, the root build configuration, and `tools/dependencies/`.
-Do not copy version requirements into this file.
+Find current dependency and tool requirements in `dependencies.json`, and
+compiler requirements in `doc/source/install/` and the root build
+configuration. Do not copy version requirements into this file.
 
 Use one consistent compiler/MPI/Python/dependency stack. The CMake compiler,
 MPI wrappers, PETSc, HDF5, Python extension, and `mpi4py` must be ABI compatible.
@@ -141,6 +141,57 @@ consumer. Test Python packaging in a fresh environment without the source-tree
 `PYTHONPATH`. Verify runtime discovery of OpenSn and dependent libraries; an
 in-place build alone is insufficient.
 
+### Versions and dependencies
+
+`VERSION.txt` is the only source of the OpenSn version, and `dependencies.json`
+is the only source of dependency minimums and bootstrap releases. The complete
+procedures are in `doc/source/devguide/dependency_management.rst`; keep that
+page and this section consistent. Never add version literals elsewhere.
+
+To update the OpenSn version:
+
+- Edit only `VERSION.txt`, which must be `MAJOR.MINOR.PATCH`. CMake, `setup.py`,
+  and Sphinx read it. The shared-library `SOVERSION` follows `MAJOR`, so raise
+  `MAJOR` only for C++ or Python interface breaks.
+- For a release, also add the Spack `version(...)` entry, update the recipe
+  `url`, and update the `opensn@` examples in `distribution/spack/README.md`.
+  Tagging and publishing a GitHub release are maintainer actions; do not create
+  or push tags unless asked.
+- Verify `python setup.py --version`, the configured CMake project version, and
+  `pyopensn.__version__` after a rebuild.
+
+To update a dependency:
+
+- Edit its `dependencies.json` entry. `minimum` is the compatibility contract
+  and `bootstrap` is the tested release that `tools/dependencies` installs;
+  change them independently. Do not raise `minimum` because `bootstrap`
+  changed, and do not lower it without building and testing that version.
+- Change the bootstrap `version`, `url`, and `sha256` together. Compute the
+  checksum from the downloaded archive with `cmake -E sha256sum` and, when the
+  project publishes one, confirm that they match. Never disable verification.
+- Update the matching constraint in
+  `distribution/spack/packages/opensn/package.py`, and adjust `find_package` or
+  `ExternalProject_Add` logic when targets, components, options, or archive
+  layout change.
+- The CMake minimum is also hard-coded in `cmake_minimum_required` and in
+  `pyproject.toml`, because both are read before the manifest; update all three.
+
+To add a dependency:
+
+- Add a `dependencies.json` entry. Include `bootstrap` only when
+  `tools/dependencies` installs it, and list it in `documentation_order` when it
+  belongs in the installation table. CMake then defines `OPENSN_<NAME>_*`
+  variables automatically, with `<NAME>` upper-cased and `-` replaced by `_`.
+- Add `find_package` logic and link the imported target at the narrowest
+  visibility. Add a matching `find_dependency` to `cmake/OpenSnConfig.cmake.in`
+  when an exported target exposes it, an `ExternalProject_Add` recipe under
+  `tools/dependencies` when it is bootstrapped, and the Spack dependency.
+
+After a version or dependency change, configure from a clean build directory
+against the dependency prefix. After a bootstrap change, build the affected
+dependency through `tools/dependencies` into a scratch prefix so the download
+and checksum are exercised.
+
 ## Run, debug, and analyze
 
 Prefer the regression runner because `tests.json` supplies the working
@@ -203,6 +254,7 @@ third-party false positive, and scope the suppression narrowly.
   asynchronous operations. Do not depend on native width, byte or container
   order, undefined evaluation, or uninitialized data.
 - Check empty partitions, minimum sizes, cycles, reflecting boundaries, multiple
+  groupsets and angle sets, and ranks that own no cells.
 - Build validated temporary state before publishing it so failures leave owned
   resources releasable.
 
@@ -269,8 +321,8 @@ test/run_tests --gpu -d test/python -j 8 -v 1 \
   --exe build-cuda/python/opensn
 ```
 
-`-j` is the total CPU-slot budget; MPI tests consume their requested ranks. Do
-not oversubscribe shared resources.
+`-j` is the total CPU-slot budget; each test consumes its MPI ranks multiplied
+by `OPENSN_NUM_THREADS`. Do not oversubscribe shared resources.
 
 ### Creating unit tests
 
@@ -362,7 +414,7 @@ Check formatting by replacing `-i` with `--dry-run --Werror`.
 clang-tidy requires `build/compile_commands.json` and treats findings as errors:
 
 ```sh
-tools/developer/run-clang-tidy.sh path/to/changed_file.cc
+tools/developer/run-clang-tidy.sh path/to/changed_file.cc  # one file per call
 tools/developer/run-clang-tidy.sh  # repository-wide when warranted
 ```
 
