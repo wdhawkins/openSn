@@ -26,6 +26,7 @@ include(CheckSymbolExists)
 include(CheckCXXCompilerFlag)
 include(CheckLinkerFlag)
 include(FetchContent)
+include(cmake/OpenSnDependencyVersions.cmake)
 
 # Inherit link-time library paths into the install rpath to keep runtime
 # consistent with the build MPI/GPU/toolchain stack.
@@ -116,7 +117,7 @@ endif()
 
 if (OPENSN_WITH_CUDA)
   set(CMAKE_CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER})
-  find_package(CUDAToolkit 12.0 REQUIRED)
+  find_package(CUDAToolkit ${OPENSN_CUDA_MIN_VERSION} REQUIRED)
   message(STATUS "CUDA support enabled")
   message(STATUS "CUDA architectures detected: ${CMAKE_CUDA_ARCHITECTURES}")
   enable_language(CUDA)
@@ -154,16 +155,16 @@ endif()
 
 # dependencies
 find_package(MPI REQUIRED)
-find_package(mpicpp-lite 2.7.1 REQUIRED)
+find_package(mpicpp-lite ${OPENSN_MPICPP_LITE_MIN_VERSION} REQUIRED)
 
 find_package(HDF5 REQUIRED COMPONENTS C HL)
-find_package(Boost 1.86 CONFIG)
+find_package(Boost ${OPENSN_BOOST_MIN_VERSION} CONFIG)
 if (NOT Boost_FOUND)
   message(STATUS "Boost CONFIG not found, falling back to module mode")
-  find_package(Boost 1.86 REQUIRED)
+  find_package(Boost ${OPENSN_BOOST_MIN_VERSION} REQUIRED)
 endif()
 
-find_package(VTK QUIET)
+find_package(VTK ${OPENSN_VTK_MIN_VERSION} QUIET)
 if(VTK_VERSION VERSION_GREATER_EQUAL "9.0.0")
   find_package(VTK
         COMPONENTS
@@ -180,7 +181,7 @@ if(VTK_VERSION VERSION_GREATER_EQUAL "9.0.0")
         REQUIRED
     )
   message(STATUS "Found VTK: ${VTK_DIR} (found version \"${VTK_VERSION}\")")
-elseif(VTK_VERSION VERSION_GREATER_EQUAL "8.0.0")
+elseif(VTK_VERSION VERSION_GREATER_EQUAL "${OPENSN_VTK_MIN_VERSION}")
   find_package(VTK
         COMPONENTS
             vtkCommonCore
@@ -204,7 +205,7 @@ else()
   endif()
 endif()
 
-find_package(PETSc 3.17 REQUIRED)
+find_package(PETSc ${OPENSN_PETSC_MIN_VERSION} REQUIRED)
 # Check PETSc uses 64bit indices
 check_symbol_exists(PETSC_USE_64BIT_INDICES "${PETSC_INCLUDE_DIR}/petscconf.h" PETSC_USE_64BIT_INDICES)
 if(NOT ${PETSC_USE_64BIT_INDICES} MATCHES 1)
@@ -248,8 +249,8 @@ if(NOT TARGET GTest::gtest_main)
   message(STATUS "System GoogleTest not found. Fetching GoogleTest via FetchContent.")
   FetchContent_Declare(
         googletest
-        GIT_REPOSITORY https://github.com/google/googletest.git
-        GIT_TAG v1.15.2
+        URL "${OPENSN_GOOGLETEST_BOOTSTRAP_URL}"
+        URL_HASH "SHA256=${OPENSN_GOOGLETEST_BOOTSTRAP_SHA256}"
     )
   FetchContent_MakeAvailable(googletest)
 endif()
@@ -578,7 +579,8 @@ if(OPENSN_WITH_PYTHON)
     )
 
   if(OPENSN_WITH_PYTHON_MODULE)
-    find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+    find_package(Python3 ${OPENSN_PYTHON_MIN_VERSION}
+      COMPONENTS Interpreter Development REQUIRED)
     set(_opensn_python_module_install_dir "${Python3_SITEARCH}")
     if(NOT _opensn_python_module_install_dir)
       set(_opensn_python_module_install_dir "${Python3_SITELIB}")

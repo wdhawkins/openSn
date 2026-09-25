@@ -1,0 +1,94 @@
+{
+  "_comment": [
+    "See doc/source/devguide/dependency_management.rst for the maintenance workflow.",
+    "minimum is the oldest supported version. Use null when no minimum is enforced.",
+    "bootstrap is the exact release installed by tools/dependencies. Update its version, URL, and SHA-256 checksum together.",
+    "cmake/OpenSnDependencyVersions.cmake exposes every entry to CMake, for example OPENSN_PETSC_MIN_VERSION and OPENSN_PETSC_BOOTSTRAP_URL.",
+    "setup.py and the Sphinx configuration read this file directly. documentation_order controls the generated table."
+  ],
+  "dependencies": {
+    "boost": {
+      "display_name": "Boost",
+      "minimum": "1.86",
+      "bootstrap": {
+        "version": "1.86.0",
+        "url": "https://archives.boost.io/release/1.86.0/source/boost_1_86_0.tar.gz",
+        "sha256": "2575e74ffc3ef1cd0babac2c1ee8bdb5782a0ee672b1912da40e5b4b591ca01f"
+      }
+    },
+    "caliper": {
+      "display_name": "Caliper",
+      "minimum": null,
+      "bootstrap": {
+        "version": "2.13.0",
+        "url": "https://github.com/LLNL/Caliper/archive/refs/tags/v2.13.0.tar.gz",
+        "sha256": "28c6e8fd940bdee9e80d1e8ae1ce0f76d6a690cbb6242d4eec115d6c0204e331"
+      }
+    },
+    "cmake": {
+      "display_name": "CMake",
+      "minimum": "3.29"
+    },
+    "cuda": {
+      "display_name": "CUDA Toolkit",
+      "minimum": "12.0"
+    },
+    "googletest": {
+      "display_name": "GoogleTest",
+      "minimum": null,
+      "bootstrap": {
+        "version": "1.15.2",
+        "url": "https://github.com/google/googletest/archive/refs/tags/v1.15.2.tar.gz",
+        "sha256": "7b42b4d6ed48810c5362c265a17faebe90dc2373c885e5216439d37927f02926"
+      }
+    },
+    "hdf5": {
+      "display_name": "HDF5",
+      "minimum": null,
+      "bootstrap": {
+        "version": "1.14.6",
+        "url": "https://support.hdfgroup.org/releases/hdf5/v1_14/v1_14_6/downloads/hdf5-1.14.6.tar.gz",
+        "sha256": "e4defbac30f50d64e1556374aa49e574417c9e72c6b1de7a4ff88c4b1bea6e9b"
+      }
+    },
+    "mpicpp-lite": {
+      "display_name": "mpicpp-lite",
+      "minimum": "2.7.1",
+      "bootstrap": {
+        "version": "2.7.1",
+        "url": "https://github.com/andrsd/mpicpp-lite/archive/refs/tags/v2.7.1.tar.gz",
+        "sha256": "d2833fb61486215c0fbb2bff76354bfeadc516d59daef88f4dcaba151c06256d"
+      }
+    },
+    "petsc": {
+      "display_name": "PETSc",
+      "minimum": "3.17",
+      "bootstrap": {
+        "version": "3.23.0",
+        "url": "https://web.cels.anl.gov/projects/petsc/download/release-snapshots/petsc-3.23.0.tar.gz",
+        "sha256": "aeebd7094f4d583fd04700e73779caa7d9a3d54742e95eff2c3dd87768a79063"
+      }
+    },
+    "python": {
+      "display_name": "Python",
+      "minimum": "3.9"
+    },
+    "vtk": {
+      "display_name": "VTK",
+      "minimum": "8.0",
+      "bootstrap": {
+        "version": "9.3.0",
+        "url": "https://www.vtk.org/files/release/9.3/VTK-9.3.0.tar.gz",
+        "sha256": "fdc7b9295225b34e4fdddc49cd06e66e94260cb00efee456e0f66568c9681be9"
+      }
+    }
+  },
+  "documentation_order": [
+    "mpicpp-lite",
+    "petsc",
+    "boost",
+    "hdf5",
+    "vtk",
+    "caliper"
+  ]
+}

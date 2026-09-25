@@ -3,6 +3,7 @@ cmake_policy(SET CMP0135 NEW)
 project(OpenSnDependencies)
 include(ExternalProject)
 include(CheckSymbolExists)
+include("${PROJECT_SOURCE_DIR}/../../cmake/OpenSnDependencyVersions.cmake")
 
 if(NOT DEFINED JOBS)
   include(ProcessorCount)
@@ -24,8 +25,8 @@ set(OPENSN_ENV_DIR "${CMAKE_INSTALL_PREFIX}/bin")
 set(ENV_SCRIPT "${OPENSN_ENV_DIR}/set_opensn_env.sh")
 
 find_package(MPI REQUIRED)
-find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
-find_package(mpicpp-lite 2.7.1 QUIET)
+find_package(Python3 ${OPENSN_PYTHON_MIN_VERSION} COMPONENTS Interpreter Development REQUIRED)
+find_package(mpicpp-lite ${OPENSN_MPICPP_LITE_MIN_VERSION} QUIET)
 
 option(ENABLE_BOOST   "Install Boost"   ON)
 option(ENABLE_PETSC   "Install PETSc"   ON)
@@ -50,7 +51,8 @@ if (TARGET mpicpp-lite::mpicpp-lite)
 else()
   message(STATUS "No")
   ExternalProject_Add(mpicpp-lite
-    URL https://github.com/andrsd/mpicpp-lite/archive/refs/tags/v2.7.1.tar.gz
+    URL "${OPENSN_MPICPP_LITE_BOOTSTRAP_URL}"
+    URL_HASH "SHA256=${OPENSN_MPICPP_LITE_BOOTSTRAP_SHA256}"
     CONFIGURE_COMMAND ${CMAKE_COMMAND}
       -S <SOURCE_DIR>
       -B <BINARY_DIR>
@@ -74,9 +76,9 @@ endif()
 
 # Boost install (header-only)
 if(ENABLE_BOOST)
-  find_package(Boost CONFIG QUIET)
+  find_package(Boost ${OPENSN_BOOST_MIN_VERSION} CONFIG QUIET)
   if (NOT Boost_FOUND)
-    find_package(Boost QUIET)
+    find_package(Boost ${OPENSN_BOOST_MIN_VERSION} QUIET)
   endif()
   if(Boost_FOUND)
     message(STATUS "Found Boost: ${Boost_DIR}")
@@ -86,7 +88,8 @@ if(ENABLE_BOOST)
     list(APPEND ALL_DEP_TARGETS boost)
   else()
     ExternalProject_Add(boost
-      URL https://archives.boost.io/release/1.86.0/source/boost_1_86_0.tar.gz
+      URL "${OPENSN_BOOST_BOOTSTRAP_URL}"
+      URL_HASH "SHA256=${OPENSN_BOOST_BOOTSTRAP_SHA256}"
       CONFIGURE_COMMAND ""
       BUILD_COMMAND ""
       INSTALL_COMMAND ${CMAKE_COMMAND} -E copy_directory <SOURCE_DIR>/boost ${CMAKE_INSTALL_PREFIX}/include/boost
@@ -105,7 +108,7 @@ endif()
 
 # PETSc
 if(ENABLE_PETSC)
-  find_package(PETSc 3.17 QUIET)
+  find_package(PETSc ${OPENSN_PETSC_MIN_VERSION} QUIET)
   if (PETSC_FOUND)
     check_symbol_exists(PETSC_USE_64BIT_INDICES "${PETSC_INCLUDE_DIR}/petscconf.h" PETSC_USE_64BIT_INDICES)
     check_symbol_exists(PETSC_HAVE_PTSCOTCH "${PETSC_INCLUDE_DIR}/petscconf.h" PETSC_HAVE_PTSCOTCH)
@@ -121,7 +124,8 @@ if(ENABLE_PETSC)
   endif()
   if (NOT PETSC_FOUND OR NOT PETSC_CONFIG_OK)
     ExternalProject_Add(petsc
-      URL https://web.cels.anl.gov/projects/petsc/download/release-snapshots/petsc-3.23.0.tar.gz
+      URL "${OPENSN_PETSC_BOOTSTRAP_URL}"
+      URL_HASH "SHA256=${OPENSN_PETSC_BOOTSTRAP_SHA256}"
       SOURCE_DIR ${CMAKE_BINARY_DIR}/petsc-src
       CONFIGURE_COMMAND ${CMAKE_COMMAND} -E chdir <SOURCE_DIR> ./configure --prefix=${CMAKE_INSTALL_PREFIX}
                         --download-cmake=yes --download-hypre=yes --with-ssl=no --with-debugging=no --with-pic=yes --with-fc=0
@@ -156,7 +160,8 @@ if(ENABLE_HDF5)
     list(APPEND ALL_DEP_TARGETS hdf5)
   else()
     ExternalProject_Add(hdf5
-      URL https://support.hdfgroup.org/releases/hdf5/v1_14/v1_14_6/downloads/hdf5-1.14.6.tar.gz
+      URL "${OPENSN_HDF5_BOOTSTRAP_URL}"
+      URL_HASH "SHA256=${OPENSN_HDF5_BOOTSTRAP_SHA256}"
       SOURCE_DIR ${CMAKE_BINARY_DIR}/hdf5-src
       BINARY_DIR ${CMAKE_BINARY_DIR}/hdf5-build
       CMAKE_ARGS
@@ -201,7 +206,8 @@ if(ENABLE_VTK)
     list(APPEND ALL_DEP_TARGETS vtk)
   else()
     ExternalProject_Add(vtk
-      URL https://www.vtk.org/files/release/9.3/VTK-9.3.0.tar.gz
+      URL "${OPENSN_VTK_BOOTSTRAP_URL}"
+      URL_HASH "SHA256=${OPENSN_VTK_BOOTSTRAP_SHA256}"
       SOURCE_DIR ${CMAKE_BINARY_DIR}/vtk-src
       CONFIGURE_COMMAND ${CMAKE_COMMAND} -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
                         -DBUILD_SHARED_LIBS=ON -DVTK_USE_MPI=ON
@@ -236,7 +242,8 @@ if(ENABLE_CALIPER)
     list(APPEND ALL_DEP_TARGETS caliper)
   else()
     ExternalProject_Add(caliper
-      URL https://github.com/LLNL/Caliper/archive/refs/tags/v2.13.0.tar.gz
+      URL "${OPENSN_CALIPER_BOOTSTRAP_URL}"
+      URL_HASH "SHA256=${OPENSN_CALIPER_BOOTSTRAP_SHA256}"
       SOURCE_DIR ${CMAKE_BINARY_DIR}/caliper-src
       CONFIGURE_COMMAND ${CMAKE_COMMAND}
         -S <SOURCE_DIR>

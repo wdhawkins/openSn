@@ -1,5 +1,5 @@
 # Find Python3
-find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+find_package(Python3 ${OPENSN_PYTHON_MIN_VERSION} COMPONENTS Interpreter Development REQUIRED)
 
 # Get pybind11 CMake directory and append it to CMake prefix path
 execute_process(

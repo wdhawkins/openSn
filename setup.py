@@ -6,6 +6,7 @@ Created on Sat, February 22
 Copyright (c) 2025 The OpenSn Authors <https://open-sn.github.io/opensn/>
 """
 
+import json
 import os
 import re
 import subprocess
@@ -119,9 +120,11 @@ class CMakeBuilder(build_ext):
 
 
 if __name__ == "__main__":
-    version = (Path(__file__).parent / "VERSION.txt").read_text().strip()
+    source_dir = Path(__file__).parent
+    version = (source_dir / "VERSION.txt").read_text().strip()
     if re.fullmatch(r"[0-9]+(?:\.[0-9]+){2}", version) is None:
         raise RuntimeError("VERSION.txt must contain a semantic version such as 1.2.3")
+    dependencies = json.loads((source_dir / "dependencies.json").read_text())["dependencies"]
 
     setup(
         name="pyopensn",
@@ -131,6 +134,7 @@ if __name__ == "__main__":
         packages=["pyopensn"],
         ext_modules=[CMakeExtension("pyopensn.__init__")],
         cmdclass={"build_ext": CMakeBuilder},
+        python_requires=f">={dependencies['python']['minimum']}",
         install_requires=["mpi4py", "numpy"],
         extras_require={
             "dev": ["matplotlib", "nbconvert"],

@@ -3,9 +3,13 @@
 # For the full list of built-in configuration values, see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
+import json
 import logging
 import sys
 from pathlib import Path
+
+from docutils import nodes
+from docutils.parsers.rst import Directive
 
 # -- Import package ----------------------------------------------------------
 
@@ -21,6 +25,8 @@ for path in (str(project_dir), str(binary_dir)):
     sys.path.insert(0, path)
 
 import pyopensn  # noqa: E402
+
+dependency_manifest = json.loads((project_dir / "dependencies.json").read_text())
 
 # -- Project information -----------------------------------------------------
 
@@ -39,6 +45,10 @@ master_doc = "index"
 templates_path = ["_templates"]
 source_suffix = [".rst"]
 exclude_patterns = ["tutorials/_templates/*"]
+rst_prolog = f"""
+.. |opensn-cmake-min| replace:: {dependency_manifest["dependencies"]["cmake"]["minimum"]}
+.. |opensn-python-min| replace:: {dependency_manifest["dependencies"]["python"]["minimum"]}
+"""
 
 extensions = [
     "sphinx.ext.napoleon",
@@ -102,5 +112,44 @@ class _CppWarningFilter(logging.Filter):
         return not any(fragment in message for fragment in suppressed_fragments)
 
 
+class _DependencyVersionsDirective(Directive):
+    has_content = False
+
+    @staticmethod
+    def _row(values):
+        row = nodes.row()
+        for value in values:
+            entry = nodes.entry()
+            entry += nodes.paragraph(text=value)
+            row += entry
+        return row
+
+    def run(self):
+        table = nodes.table()
+        group = nodes.tgroup(cols=3)
+        table += group
+        for width in (2, 2, 2):
+            group += nodes.colspec(colwidth=width)
+
+        head = nodes.thead()
+        head += self._row(("Dependency", "Minimum", "Bootstrap"))
+        group += head
+
+        body = nodes.tbody()
+        dependencies = dependency_manifest["dependencies"]
+        for name in dependency_manifest["documentation_order"]:
+            dependency = dependencies[name]
+            body += self._row(
+                (
+                    dependency["display_name"],
+                    dependency["minimum"] or "Not constrained",
+                    dependency["bootstrap"]["version"],
+                )
+            )
+        group += body
+        return [table]
+
+
 def setup(app):
     logging.getLogger("sphinx").addFilter(_CppWarningFilter())
+    app.add_directive("opensn-dependency-versions", _DependencyVersionsDirective)

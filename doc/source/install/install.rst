@@ -8,9 +8,9 @@ Before installing OpenSn, you must have the following packages installed on
 your system:
 
 1. A recent version of ``clang++``/``g++`` that supports C++20
-2. Python 3.9+ with pybind11 and ``pip``
+2. Python |opensn-python-min| or newer with pybind11 and ``pip``
 3. Git version control system
-4. CMake v3.29+
+4. CMake |opensn-cmake-min| or newer
 5. MPI (OpenMPI, MPICH, and MVAPICH have been tested)
 6. ``flex`` (required by the PTSCOTCH component of PETSc)
 7. Pandoc and Doxygen (only if you plan to build documentation)
@@ -34,14 +34,13 @@ You can install these packages using your system package manager:
          brew install gcc python git cmake open-mpi flex doxygen pandoc
          export NPROC=$(sysctl -n hw.ncpu)
 
-The following additional packages will be installed by the OpenSn dependency 
-build (if not found on your system):
+The OpenSn dependency build first searches for compatible installations. When
+a dependency is unavailable or does not meet the bootstrap's requirements, it
+installs the tested bootstrap version shown below. Supported minimums and tested
+bootstrap releases are separate so routine updates need not raise OpenSn's
+compatibility requirements.
 
-1. PETSc 3.17.0+
-2. Boost 1.86+
-3. HDF5 1.14+
-4. VTK 9.3.0+
-5. Caliper 2.11+
+.. opensn-dependency-versions::
 
 Install with Docker
 -------------------
