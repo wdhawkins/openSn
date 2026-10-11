@@ -764,10 +764,11 @@ WrapLBS(py::module& slv)
         If the problem was constructed with an ``uncollided_flux`` file, or if
         ``options.csda_enabled=True`` and the new cross sections split a
         charged-particle group block across groupsets, contain more than two
-        charged-particle blocks, have negative or non-finite stopping powers or
+        electron group ranges, have negative or non-finite stopping powers or
         non-positive energy-group widths, or have stopping power or energy
         bounds that do not match the problem's group count. CSDA also rejects
-        conflicting supplied energy structures or a map with no energy structure.
+        conflicting supplied energy structures, unknown or conflicting charged-particle
+        species, or a map with no energy structure.
         Individual materials may omit bounds and use the shared structure.
 
     The new map is checked before it is installed, so a rejected map leaves the
@@ -1799,8 +1800,7 @@ WrapSteadyState(py::module& slv)
           particle deposition; use ``csda_particle_balance`` instead.
         - ``csda_particle_deposition_rate``:
           Present only when CSDA is enabled. Rate at which particles slow down
-          out of the lowest-energy group of each charged-particle block. Electron
-          and positron contributions are both counted as positive.
+          out of the lowest-energy group of each electron block.
         - ``csda_particle_balance``:
           Present only when CSDA is enabled. Signed relative particle residual:
           ``production_rate + inflow_rate - absorption_rate - outflow_rate -

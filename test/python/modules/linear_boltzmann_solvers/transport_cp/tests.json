@@ -92,46 +92,6 @@
     ]
   },
   {
-    "file": "csda_charge_sign.py",
-    "comment": "CSDA charge-deposition sign follows problem-level charged blocks",
-    "num_procs": 1,
-    "outfileprefix": "csda_charge_sign_np1",
-    "checks": [
-      {
-        "type": "KeyValuePair",
-        "key": "CSDA_CHARGE_SIGN_OK=",
-        "goldvalue": 1.0,
-        "abs_tol": 0.0
-      },
-      {
-        "type": "KeyValuePair",
-        "key": "CSDA_CHARGE_SIGN_RELATIVE_ERROR=",
-        "goldvalue": 0.0,
-        "abs_tol": 1e-9
-      }
-    ]
-  },
-  {
-    "file": "csda_charge_sign.py",
-    "comment": "CSDA charge-deposition sign follows problem-level charged blocks",
-    "num_procs": 2,
-    "outfileprefix": "csda_charge_sign_np2",
-    "checks": [
-      {
-        "type": "KeyValuePair",
-        "key": "CSDA_CHARGE_SIGN_OK=",
-        "goldvalue": 1.0,
-        "abs_tol": 0.0
-      },
-      {
-        "type": "KeyValuePair",
-        "key": "CSDA_CHARGE_SIGN_RELATIVE_ERROR=",
-        "goldvalue": 0.0,
-        "abs_tol": 1e-9
-      }
-    ]
-  },
-  {
     "file": "transport_2d_cepxs_synthetic_csda_infinite_medium.py",
     "comment": "2D synthetic CEPXS CSDA infinite medium with reflecting boundaries",
     "num_procs": 4,

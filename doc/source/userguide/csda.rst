@@ -2,10 +2,9 @@
 CSDA Charged-Particle Transport
 ================================
 
-OpenSn's CSDA mode adds continuous-slowing-down charged-particle transport to a
-steady-state discrete-ordinates solve. It is intended for electron and positron
-CEPXS-BFP data that includes stopping power, charge deposition, and energy
-deposition data.
+OpenSn's CSDA mode adds continuous-slowing-down electron transport to a
+steady-state discrete-ordinates solve. It is intended for CEPXS-BFP data that
+includes stopping power, charge deposition, and energy deposition data.
 
 The CSDA implementation augments the angular sweep with a groupwise energy-loss
 term. It also carries enough terminal charged-particle information to report
@@ -88,6 +87,25 @@ import path. With ``csda_format=True``, OpenSn imports:
 * ``charge_deposition`` as a named custom one-dimensional cross section,
 * energy deposition data,
 * stopping power data used by the CSDA sweep.
+
+BXSLIB stores each particle's energy structure but does not name the particle
+blocks. OpenSn identifies a single block with nonzero stopping power as
+electrons. A single block with zero stopping power remains unspecified so that a
+void material can inherit the species used by the other materials. For a
+multi-block CSDA library, provide the order reported in the CEPXS output file:
+
+.. code-block:: python
+
+   xs.LoadFromCEPXS(
+       "material.bxslib",
+       material_id=0,
+       csda_format=True,
+       particle_order=["electron", "photon"],
+   )
+
+Specify either ``"photon"`` or ``"electron"`` for each energy-reset block.
+OpenSn obtains the group counts from BXSLIB and validates the supplied names
+against the stopping-power data. At most one block of each type is supported.
 
 Materials without stopping power remain ordinary transport materials. Materials
 with stopping power must provide one stopping-power value per energy group.
@@ -218,10 +236,9 @@ With CSDA enabled, :py:meth:`ComputeBalanceTable` returns:
 * ``absorption_rate``, ``production_rate``, ``inflow_rate``, and
   ``outflow_rate``: the standard particle rates. ``production_rate`` is the
   volumetric particle source rate integrated over the problem volume.
-* ``csda_particle_deposition_rate``: the rate at which particles slow down out
-  of the lowest-energy group of each charged-particle block. Those particles are
+* ``csda_particle_deposition_rate``: the rate at which electrons slow down out
+  of the lowest-energy group of each electron block. Those particles are
   deposited, so this is the CSDA loss term the standard rates don't include.
-  Electrons and positrons both count as positive.
 * ``csda_particle_balance``: the signed relative particle residual,
 
   .. code-block:: text
