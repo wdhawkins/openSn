@@ -64,6 +64,8 @@ ParameterBlock::operator=(const ParameterBlock& other)
     name_ = other.name_;
     if (other.value_ptr_)
       value_ptr_ = std::make_unique<Varying>(*other.value_ptr_);
+    else
+      value_ptr_.reset();
     parameters_ = other.parameters_;
     error_origin_scope_ = other.error_origin_scope_;
   }

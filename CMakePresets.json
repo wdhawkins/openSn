@@ -21,9 +21,19 @@
       "binaryDir": "build-coverage",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_CXX_FLAGS": "-g -O1 -fprofile-arcs -ftest-coverage",
-        "CMAKE_C_FLAGS": "-g -O1 -fprofile-arcs -ftest-coverage",
+        "CMAKE_CXX_FLAGS": "-g -O1 -fprofile-arcs -ftest-coverage -fprofile-update=atomic",
+        "CMAKE_C_FLAGS": "-g -O1 -fprofile-arcs -ftest-coverage -fprofile-update=atomic",
         "CMAKE_EXE_LINKER_FLAGS": "-g -fprofile-arcs -ftest-coverage"
+      }
+    },
+    {
+      "name": "coverage-native",
+      "inherits": "coverage",
+      "displayName": "Coverage with native SIMD",
+      "description": "Configure code coverage for SIMD supported by the build host",
+      "binaryDir": "build-coverage-native",
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "-g -O1 -march=native -mtune=native -fprofile-arcs -ftest-coverage -fprofile-update=atomic"
       }
     }
   ],
@@ -39,6 +49,12 @@
       "displayName": "Coverage",
       "configurePreset": "coverage",
       "configuration": "Coverage"
+    },
+    {
+      "name": "coverage-native",
+      "displayName": "Coverage with native SIMD",
+      "configurePreset": "coverage-native",
+      "configuration": "Coverage with native SIMD"
     }
   ]
 }

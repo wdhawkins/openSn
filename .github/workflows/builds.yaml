@@ -130,7 +130,7 @@ jobs:
           # takes the Python GIL, which deadlocks AAH sweeps that launch kernels from worker
           # threads while the console holds the GIL. Device-side error and leak checking are
           # unaffected.
-          test/run_tests --gpu --gpu-jobs 4 --fail-on-nonzero-exit -j 8 -v 1 \
+          test/run_tests --gpu --gpu-jobs 4 -j 8 -v 1 \
             --exe build/python/opensn \
             --exe-prefix "compute-sanitizer --tool memcheck --leak-check full --show-backtrace device --error-exitcode=99" \
             -d test/python/modules/linear_boltzmann_solvers/transport_gpu_memcheck \

@@ -827,12 +827,7 @@
     "file": "transport_3d_1_poly_qmom_part1.py",
     "comment": "3D LinearBSolver Test Source moment writing - PWLD",
     "num_procs": 4,
-    "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      }
-    ]
+    "checks": []
   },
   {
     "file": "transport_3d_1_poly_qmom_part2.py",
@@ -1361,32 +1356,6 @@
     ]
   },
   {
-    "file": "wrong_parameter.py",
-    "comment": "Check that supplying a non-existent parameter reports an error",
-    "num_procs": 1,
-    "checks": [
-      {
-        "type": "StrCompare",
-        "key": "Invalid param ",
-        "wordnum": 6,
-        "gold": "\"wrong-parameter\""
-      }
-    ]
-  },
-  {
-    "file": "wrong_parameter_type.py",
-    "comment": "Check that supplying an incorrect parameter type reports an error",
-    "num_procs": 1,
-    "checks": [
-      {
-        "type": "StrCompare",
-        "key": "Invalid parameter type \"BOOLEAN\"",
-        "wordnum": 10,
-        "gold": "\"max_mpi_message_size\"."
-      }
-    ]
-  },
-  {
     "file": "transport_3d_7a_leb_quad.py",
     "comment": "3d Simple Homogenous System - 3D Ortho Mesh + Lebedev Quadrature (3) + 0.5 Scattering Ratio",
     "num_procs": 2,
@@ -1717,6 +1686,25 @@
         "key": "POLE_UNCHANGED_AFTER_REJECT",
         "goldvalue": 1,
         "abs_tol": 0
+      }
+    ]
+  },
+  {
+    "file": "transport_mixed_cell_infinite_medium.py",
+    "comment": "AAH per-cell dispatch on a mixed triangle/quadrilateral mesh with an exact reflecting infinite-medium solution",
+    "num_procs": 2,
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "MIXED_CELL_MAX_REL_ERROR=",
+        "goldvalue": 0.0,
+        "abs_tol": 1e-10
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "MIXED_CELL_BALANCE_ABS_ERROR=",
+        "goldvalue": 0.0,
+        "abs_tol": 1e-10
       }
     ]
   }

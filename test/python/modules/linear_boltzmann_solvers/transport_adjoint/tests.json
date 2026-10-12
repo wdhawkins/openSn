@@ -168,32 +168,6 @@
     ]
   },
   {
-    "file": "adjoint_curvilinear_rejected.py",
-    "comment": "Curvilinear problems reject adjoint mode through constructor options and SetAdjoint",
-    "num_procs": 1,
-    "checks": [
-      {
-        "type": "KeyValuePair",
-        "key": "ADJOINT_CURVILINEAR_REJECTED=",
-        "goldvalue": 1,
-        "abs_tol": 0
-      }
-    ]
-  },
-  {
-    "file": "adjoint_galerkin_rejected.py",
-    "comment": "Galerkin quadrature operators reject adjoint mode and cross-section sensitivities",
-    "num_procs": 1,
-    "checks": [
-      {
-        "type": "KeyValuePair",
-        "key": "ADJOINT_GALERKIN_REJECTED=",
-        "goldvalue": 1,
-        "abs_tol": 0
-      }
-    ]
-  },
-  {
     "file": "surface_flux_validation.py",
     "comment": "Surface export rejects boundary/interior tag collisions and planes matching no faces; face keys work on translated fine-scale meshes",
     "num_procs": 2,

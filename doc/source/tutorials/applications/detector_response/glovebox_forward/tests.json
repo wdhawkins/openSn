@@ -4,10 +4,6 @@
     "num_procs": 8,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "Total Flux in Detector-1:",
         "goldvalue": 6.109007e-2,

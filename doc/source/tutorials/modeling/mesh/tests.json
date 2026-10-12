@@ -4,10 +4,6 @@
     "num_procs": 1,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "Number of cells =",
         "goldvalue": 7710,
@@ -19,10 +15,6 @@
     "file": "mesh_ortho_2D.py",
     "num_procs": 1,
     "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
       {
         "type": "KeyValuePair",
         "key": "Number of cells =",
@@ -36,10 +28,6 @@
     "num_procs": 1,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "Number of cells =",
         "goldvalue": 1000,
@@ -51,10 +39,6 @@
     "file": "mesh_read_obj_2D.py",
     "num_procs": 1,
     "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
       {
         "type": "KeyValuePair",
         "key": "Number of cells =",
@@ -68,10 +52,6 @@
     "num_procs": 1,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "Number of cells =",
         "goldvalue": 83264,
@@ -83,10 +63,6 @@
     "file": "mesh_read_gmsh_3D.py",
     "num_procs": 1,
     "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
       {
         "type": "KeyValuePair",
         "key": "Number of cells =",
@@ -100,10 +76,6 @@
     "num_procs": 1,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "Number of cells =",
         "goldvalue": 11512,
@@ -115,10 +87,6 @@
     "file": "mesh_ortho_3D_blockIDs.py",
     "num_procs": 1,
     "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
       {
         "type": "KeyValuePair",
         "key": "Number of cells =",

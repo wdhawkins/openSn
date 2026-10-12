@@ -4,10 +4,6 @@
     "num_procs": 1,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "Block-source production rate=",
         "goldvalue": 1.0,
@@ -31,10 +27,6 @@
     "file": "logical_volume_source.py",
     "num_procs": 1,
     "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
       {
         "type": "KeyValuePair",
         "key": "Logical-volume production rate=",
@@ -78,10 +70,6 @@
     "num_procs": 1,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "Transmitted current=",
         "goldvalue": 5.903411e-2,
@@ -118,10 +106,6 @@
     "num_procs": 1,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "Point-source production rate=",
         "goldvalue": 1.0,
@@ -145,10 +129,6 @@
     "file": "arbitrary_boundary_source.py",
     "num_procs": 1,
     "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
       {
         "type": "KeyValuePair",
         "key": "Cone direction count=",
@@ -191,10 +171,6 @@
     "file": "adjoint_logical_volume_source.py",
     "num_procs": 1,
     "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
       {
         "type": "KeyValuePair",
         "key": "Adjoint-source production rate=",

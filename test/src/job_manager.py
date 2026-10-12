@@ -83,13 +83,6 @@ class TestConfiguration:
                     self.checks.append(new_check)
                 except ValueError:
                     continue
-            elif check_params["type"] == "ErrorCode":
-                try:
-                    prefix = message_prefix + f'Check number {check_num} '
-                    new_check = checks.ErrorCodeCheck(check_params, prefix)
-                    self.checks.append(new_check)
-                except ValueError:
-                    continue
             elif check_params["type"] == "GoldFile":
                 try:
                     prefix = message_prefix + f'Check number {check_num} '
@@ -100,10 +93,6 @@ class TestConfiguration:
             else:
                 warnings.warn("Unsupported check type: " + check_params["type"])
                 raise ValueError
-
-        if len(self.checks) == 0:
-            warnings.warn(message_prefix + " has no valid checks")
-            raise ValueError
 
     def GetTestPath(self):
         """Shorthand utility to get the relative path to a test"""

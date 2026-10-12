@@ -4,10 +4,6 @@
     "num_procs": 4,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "value (edit zone: whole domain)   =",
         "goldvalue": 1.0276937,
@@ -20,10 +16,6 @@
     "num_procs": 1,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "REED_MAX_FLUX=",
         "goldvalue": 1.96717796,
@@ -35,10 +27,6 @@
     "file": "reed_problem_2d.py",
     "num_procs": 1,
     "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
       {
         "type": "KeyValuePair",
         "key": "REED_2D_SOURCE_RATE=",
@@ -58,10 +46,6 @@
     "num_procs": 1,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "CHECKERBOARD_SOURCE_REGION_FLUX=",
         "goldvalue": 0.902852105,
@@ -79,10 +63,6 @@
     "file": "nested_square_source.py",
     "num_procs": 1,
     "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
       {
         "type": "KeyValuePair",
         "key": "NESTED_SQUARE_SOURCE_AVG_FLUX=",
@@ -102,10 +82,6 @@
     "num_procs": 1,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "SHIELDING_SCATTERER_AVG_FLUX=",
         "goldvalue": 4.66110837e-3,
@@ -123,10 +99,6 @@
     "file": "striped_source.py",
     "num_procs": 1,
     "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
       {
         "type": "KeyValuePair",
         "key": "STRIPED_SOURCE_AVG_FLUX=",
@@ -158,10 +130,6 @@
     "num_procs": 1,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "FIXED_SOURCE_3D_RESPONSE=",
         "goldvalue": 1.27925767e-05,
@@ -173,10 +141,6 @@
     "file": "spherical_barrier.py",
     "num_procs": 1,
     "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
       {
         "type": "KeyValuePair",
         "key": "BARRIER_MAX_REL_ERR_S64=",

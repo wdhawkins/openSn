@@ -5,6 +5,9 @@
 
 using namespace opensn;
 
+namespace
+{
+
 /// Helper for the PointInsideCellXD tests
 void
 TestPointInsideCell(const std::shared_ptr<MeshContinuum> grid)
@@ -186,6 +189,8 @@ TestPointInsideCellFace(const std::shared_ptr<MeshContinuum> grid)
         }
   }
 }
+
+} // namespace
 
 TEST(MeshContinuumTest, PointInsideCellFace1D)
 {

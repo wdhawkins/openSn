@@ -4,10 +4,6 @@
     "num_procs": 4,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "KEIGEN_TO_TRANSIENT_OK",
         "goldvalue": 1,
@@ -19,10 +15,6 @@
     "file": "source_step_steady_to_transient_to_steady.py",
     "num_procs": 1,
     "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
       {
         "type": "KeyValuePair",
         "key": "SOURCE_STEP_WORKFLOW_OK",

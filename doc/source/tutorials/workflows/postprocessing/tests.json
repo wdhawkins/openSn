@@ -4,10 +4,6 @@
     "num_procs": 1,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "Whole-domain integral=",
         "goldvalue": 4.0,
@@ -31,10 +27,6 @@
     "file": "field_function_line.py",
     "num_procs": 1,
     "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
       {
         "type": "KeyValuePair",
         "key": "Centerline sample count=",
@@ -78,10 +70,6 @@
     "num_procs": 1,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "Group-0 sigma-t sensitivity=",
         "goldvalue": -0.6696428571428572,
@@ -112,10 +100,6 @@
     "num_procs": 1,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "Absorption reaction rate=",
         "goldvalue": 1.2,
@@ -127,10 +111,6 @@
     "file": "boundary_leakage.py",
     "num_procs": 1,
     "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
       {
         "type": "KeyValuePair",
         "key": "XMAX leakage rate=",
@@ -150,10 +130,6 @@
     "num_procs": 1,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "Fuel fission rate=",
         "goldvalue": 0.241259364,
@@ -166,10 +142,6 @@
     "num_procs": 1,
     "weight_class": "intermediate",
     "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
       {
         "type": "KeyValuePair",
         "key": "Cf-252 spectrum normalization=",

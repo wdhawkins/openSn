@@ -109,9 +109,9 @@ math_SDM_Test01_Continuous(std::shared_ptr<MeshContinuum> grid,
     }
 
     // Develop node mapping
-    std::vector<uint64_t> imap(num_nodes, 0); // node-mapping
+    std::vector<PetscInt> imap(num_nodes, 0); // node-mapping
     for (size_t i = 0; i < num_nodes; ++i)
-      imap[i] = sdm.MapDOF(*cell, i);
+      imap[i] = static_cast<PetscInt>(sdm.MapDOF(*cell, i));
 
     // Assembly into system
     for (size_t i = 0; i < num_nodes; ++i)
@@ -140,24 +140,6 @@ math_SDM_Test01_Continuous(std::shared_ptr<MeshContinuum> grid,
   PC pc;
   KSPGetPC(petsc_solver.ksp, &pc);
   PCHYPRESetType(pc, "boomeramg");
-  std::vector<std::string> pc_options = {"pc_hypre_boomeramg_agg_nl 1",
-                                         "pc_hypre_boomeramg_P_max 4",
-                                         "pc_hypre_boomeramg_grid_sweeps_coarse 1",
-                                         "pc_hypre_boomeramg_max_levels 25",
-                                         "pc_hypre_boomeramg_relax_type_all symmetric-SOR/Jacobi",
-                                         "pc_hypre_boomeramg_coarsen_type HMIS",
-                                         "pc_hypre_boomeramg_interp_type ext+i"};
-
-  if (grid->GetDimension() == 2)
-    pc_options.emplace_back("pc_hypre_boomeramg_strong_threshold 0.6");
-  else if (grid->GetDimension() == 3)
-    pc_options.emplace_back("pc_hypre_boomeramg_strong_threshold 0.7");
-
-  for (const auto& option : pc_options)
-    PetscOptionsInsertString(nullptr, ("-" + option).c_str());
-
-  PCSetFromOptions(pc);
-  KSPSetFromOptions(petsc_solver.ksp);
 
   // Solve
   KSPSolve(petsc_solver.ksp, b, x);

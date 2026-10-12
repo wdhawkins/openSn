@@ -1,0 +1,30 @@
+# Nine uncoupled groups with unit total and absorption cross sections.
+NUM_GROUPS 9
+NUM_MOMENTS 1
+
+SIGMA_T_BEGIN
+0 1.0
+1 1.0
+2 1.0
+3 1.0
+4 1.0
+5 1.0
+6 1.0
+7 1.0
+8 1.0
+SIGMA_T_END
+
+SIGMA_A_BEGIN
+0 1.0
+1 1.0
+2 1.0
+3 1.0
+4 1.0
+5 1.0
+6 1.0
+7 1.0
+8 1.0
+SIGMA_A_END
+
+TRANSFER_MOMENTS_BEGIN
+TRANSFER_MOMENTS_END

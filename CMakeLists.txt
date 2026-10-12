@@ -477,6 +477,7 @@ if(OPENSN_WITH_PYTHON)
   add_subdirectory(python)
 
   if(OPENSN_BUILD_TESTING)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
     add_subdirectory(test)
   endif()
 

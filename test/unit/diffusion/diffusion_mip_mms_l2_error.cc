@@ -29,19 +29,33 @@ namespace
 {
 
 double
-MMS_phi(const Vector3& pt)
+MMSPhi2D(const Vector3& pt)
 {
   return std::cos(M_PI * pt.x) + std::cos(M_PI * pt.y);
 }
 
 double
-MMS_q(const Vector3& pt)
+MMSQ2D(const Vector3& pt)
 {
   return M_PI * M_PI * (std::cos(M_PI * pt.x) + std::cos(M_PI * pt.y));
 }
 
+double
+MMSPhi3D(const Vector3& pt)
+{
+  return std::cos(M_PI * pt.x) + std::cos(M_PI * pt.y) + std::cos(M_PI * pt.z);
+}
+
+double
+MMSQ3D(const Vector3& pt)
+{
+  return M_PI * M_PI * (std::cos(M_PI * pt.x) + std::cos(M_PI * pt.y) + std::cos(M_PI * pt.z));
+}
+
 std::pair<double, double>
-SimTest_IP_MMS_L2error(std::shared_ptr<MeshContinuum> grid)
+ComputeMIPL2Errors(std::shared_ptr<MeshContinuum> grid,
+                   ScalarSpatialFunction mms_phi,
+                   ScalarSpatialFunction mms_q)
 {
   using MatID2XSMap = std::map<unsigned int, Multigroup_D_and_sigR>;
 
@@ -71,9 +85,6 @@ SimTest_IP_MMS_L2error(std::shared_ptr<MeshContinuum> grid)
   {
     unit_cell_matrices[cell->local_id] = ComputeUnitCellIntegrals(sdm, *cell);
   }
-
-  ScalarSpatialFunction mms_phi = MMS_phi;
-  ScalarSpatialFunction mms_q = MMS_q;
 
   DiffusionMIPSolver solver("SimTest_IP_MMS_L2error",
                             sdm,
@@ -164,7 +175,8 @@ TEST(DiffusionMIP, MMSL2Convergence)
     grid->SetUniformBlockID(0);
     grid->SetOrthogonalBoundaries();
 
-    const auto [full_assembly_error, rhs_assembly_error] = SimTest_IP_MMS_L2error(grid);
+    const auto [full_assembly_error, rhs_assembly_error] =
+      ComputeMIPL2Errors(grid, MMSPhi2D, MMSQ2D);
     errors.push_back(full_assembly_error);
 
     EXPECT_NEAR(rhs_assembly_error, full_assembly_error, 1.0e-12);
@@ -180,4 +192,62 @@ TEST(DiffusionMIP, MMSL2Convergence)
   }
 
   opensn::mpi_comm.barrier();
+}
+
+TEST(DiffusionMIP, MMSL2ConvergenceDistributed)
+{
+  if (opensn::mpi_comm.size() != 2)
+    GTEST_SKIP() << "Distributed MIP convergence test requires two MPI ranks.";
+
+  const std::array<unsigned int, 3> refinements = {6, 12, 24};
+  const double length = 2.0;
+  std::vector<double> errors;
+
+  for (const unsigned int num_cells : refinements)
+  {
+    auto grid = BuildSquareMesh(length, num_cells, -length / 2.0);
+    grid->SetUniformBlockID(0);
+    grid->SetOrthogonalBoundaries();
+
+    const auto [full_assembly_error, rhs_assembly_error] =
+      ComputeMIPL2Errors(grid, MMSPhi2D, MMSQ2D);
+    errors.push_back(full_assembly_error);
+    EXPECT_NEAR(rhs_assembly_error, full_assembly_error, 1.0e-12);
+  }
+
+  for (size_t k = 1; k < errors.size(); ++k)
+  {
+    EXPECT_LT(errors[k], errors[k - 1]);
+    const double rate = std::log(errors[k - 1] / errors[k]) / std::log(2.0);
+    EXPECT_GT(rate, 1.75);
+  }
+}
+
+TEST(DiffusionMIP, MMSL2Convergence3D)
+{
+  if (opensn::mpi_comm.size() != 1)
+    GTEST_SKIP() << "Three-dimensional MIP convergence test is serial only.";
+
+  const std::array<unsigned int, 3> refinements = {4, 8, 16};
+  const double length = 2.0;
+  std::vector<double> errors;
+
+  for (const unsigned int num_cells : refinements)
+  {
+    auto grid = BuildBoxMesh(length, num_cells, -length / 2.0);
+    grid->SetUniformBlockID(0);
+    grid->SetOrthogonalBoundaries();
+
+    const auto [full_assembly_error, rhs_assembly_error] =
+      ComputeMIPL2Errors(grid, MMSPhi3D, MMSQ3D);
+    errors.push_back(full_assembly_error);
+    EXPECT_NEAR(rhs_assembly_error, full_assembly_error, 1.0e-11);
+  }
+
+  for (size_t k = 1; k < errors.size(); ++k)
+  {
+    EXPECT_LT(errors[k], errors[k - 1]);
+    const double rate = std::log(errors[k - 1] / errors[k]) / std::log(2.0);
+    EXPECT_GT(rate, 1.6);
+  }
 }

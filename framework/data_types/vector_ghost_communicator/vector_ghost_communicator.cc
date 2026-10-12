@@ -119,7 +119,7 @@ VectorGhostCommunicator::MakeCachedParallelData()
 
 VectorGhostCommunicator::VectorGhostCommunicator(const VectorGhostCommunicator& other)
   : local_size_(other.local_size_),
-    global_size_(other.local_size_),
+    global_size_(other.global_size_),
     ghost_ids_(other.ghost_ids_),
     comm_(other.comm_),
     location_id_(other.location_id_),

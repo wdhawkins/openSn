@@ -19,8 +19,8 @@ Usage: run-clang-tidy.sh [-h] [-use-color] [-extra-arg-before=ARG] [-extra-arg=A
 
 OpenSn-specific clang-tidy script.
 
-Runs `run-clang-tidy` on the framework, modules, and python sources; you can specify a single
-source file instead of running on the entire repository.
+Runs `run-clang-tidy` on the framework, modules, Python bindings, and unit-test sources; you can
+specify a single source file instead of running on the entire repository.
 
 Examples (run from repository root):
   Analyze everything:
@@ -83,7 +83,7 @@ if ! command -v run-clang-tidy >/dev/null 2>&1; then
 fi
 
 repo=$(git rev-parse --show-toplevel)
-header_filter="^${repo}/(framework|modules|python)/"
+header_filter="^${repo}/(framework|modules|pyopensn|python|test/unit)/"
 
 
 if (( ${#positional[@]} == 1 )); then
@@ -101,7 +101,8 @@ if (( ${#positional[@]} == 1 )); then
 else
   run-clang-tidy ${clang_tidy_args[@]:-} -p build -header-filter="$header_filter" ${before_opt[@]+"${before_opt[@]}"} \
                  ${arg_opt[@]+"${arg_opt[@]}"} ${removed_opt[@]+"${removed_opt[@]}"} "${repo}/framework" \
-                 "${repo}/modules" "${repo}/python" -warnings-as-errors='*' | tee -a "$tmp_log"
+                 "${repo}/modules" "${repo}/pyopensn" "${repo}/python" "${repo}/test/unit" \
+                 -warnings-as-errors='*' | tee -a "$tmp_log"
 fi
 
 # run-clang-tidy does not generate an exit status based on errors or warnings

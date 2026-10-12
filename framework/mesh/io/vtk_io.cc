@@ -744,7 +744,7 @@ MeshIO::FromPVTU(const UnpartitionedMesh::Options& options)
     GetBlocksOfDesiredDimension(grid_blocks, max_dimension - 1);
 
   // Process blocks
-  auto ugrid = ConsolidateGridBlocks(domain_grid_blocks);
+  auto ugrid = ConsolidateGridBlocks(domain_grid_blocks, options.block_id_fieldname);
 
   // Copy Data
   CopyUGridCellsAndPoints(mesh, *ugrid, options.scale, max_dimension, options.block_id_fieldname);

@@ -4,10 +4,6 @@
     "num_procs": 1,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "number of directions =",
         "goldvalue": 24,
@@ -19,10 +15,6 @@
     "file": "lebedev.py",
     "num_procs": 1,
     "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
       {
         "type": "KeyValuePair",
         "key": "number of directions =",
@@ -36,10 +28,6 @@
     "num_procs": 1,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "number of directions =",
         "goldvalue": 12,
@@ -51,10 +39,6 @@
     "file": "sLDFE.py",
     "num_procs": 1,
     "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
       {
         "type": "KeyValuePair",
         "key": "number of directions =",

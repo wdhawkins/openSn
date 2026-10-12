@@ -88,13 +88,13 @@
     "checks": [
       {
         "type": "StrCompare",
-        "key": "ENV_VALUE",
+        "key": "INJECTED_VALUE",
         "wordnum": 1,
         "gold": "alpha"
       },
       {
         "type": "StrCompare",
-        "key": "ENV_NUMBER",
+        "key": "INJECTED_NUMBER",
         "wordnum": 1,
         "gold": "3"
       }
@@ -112,13 +112,13 @@
     "checks": [
       {
         "type": "StrCompare",
-        "key": "ENV_VALUE",
+        "key": "INJECTED_VALUE",
         "wordnum": 1,
         "gold": "beta"
       },
       {
         "type": "StrCompare",
-        "key": "ENV_NUMBER",
+        "key": "INJECTED_NUMBER",
         "wordnum": 1,
         "gold": "7"
       }
@@ -132,13 +132,13 @@
     "checks": [
       {
         "type": "StrCompare",
-        "key": "ENV_VALUE",
+        "key": "INJECTED_VALUE",
         "wordnum": 1,
         "gold": "<unset>"
       },
       {
         "type": "StrCompare",
-        "key": "ENV_NUMBER",
+        "key": "INJECTED_NUMBER",
         "wordnum": 1,
         "gold": "<unset>"
       }

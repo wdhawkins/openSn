@@ -29,8 +29,8 @@ SimTest93_RayTracing(std::shared_ptr<MeshContinuum> grid)
 
   // Set parameters
   const unsigned int num_groups = 1;
-  const unsigned int scattering_order = 1;
-  const auto& L = scattering_order;
+  const int scattering_order = 1;
+  const auto L = static_cast<unsigned int>(scattering_order);
   const unsigned int num_moments = (dimension == 1)   ? L + 1
                                    : (dimension == 2) ? (L + 1) * (L + 2) / 2
                                    : (dimension == 3) ? (L + 1) * (L + 1)
@@ -216,7 +216,7 @@ SimTest93_RayTracing(std::shared_ptr<MeshContinuum> grid)
   const size_t num_particles = 100'000;
   for (size_t n = 0; n < num_particles; ++n)
   {
-    if (n % size_t(num_particles / 10.0) == 0)
+    if (n % (num_particles / 10) == 0)
       std::cout << "#particles = " << n << "\n";
     // Create the particle
     const auto omega = SampleRandomDirection();

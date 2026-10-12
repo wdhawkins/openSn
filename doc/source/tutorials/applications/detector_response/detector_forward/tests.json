@@ -4,10 +4,6 @@
     "num_procs": 4,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "Forward Total Flux :",
         "goldvalue": 2.896951,

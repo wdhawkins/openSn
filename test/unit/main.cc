@@ -13,7 +13,8 @@ main(int argc, char** argv)
   PetscInitialize(nullptr, nullptr, nullptr, nullptr);
 
   testing::InitGoogleTest(&argc, argv);
-  ::testing::AddGlobalTestEnvironment(new MPIEnvironment());
+  ::testing::AddGlobalTestEnvironment(
+    new MPIEnvironment()); // NOLINT(cppcoreguidelines-owning-memory)
   const auto exit_code = RUN_ALL_TESTS();
 
   PetscFinalize();

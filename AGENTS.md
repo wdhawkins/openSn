@@ -325,7 +325,8 @@ expected convergence across resolutions when that is the mathematical claim.
 
 Print stable, unique metrics from one rank. Prefer numeric `KeyValuePair` or
 `FloatCompare` checks for physical quantities, errors, norms, balances, rates,
-or selected points. `ErrorCode` alone rarely establishes scientific correctness.
+or selected points. A zero process exit is required implicitly and does not by
+itself establish scientific correctness.
 Avoid large output dumps and clean temporary files and global state.
 
 Before accepting a test, confirm it fails for the defect or a deliberate

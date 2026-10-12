@@ -4,10 +4,6 @@
     "num_procs": 1,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "Balance residual=",
         "goldvalue": 0.0,
@@ -19,10 +15,6 @@
     "file": "transient_particle_balance.py",
     "num_procs": 1,
     "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
       {
         "type": "KeyValuePair",
         "key": "Transient scalar flux=",
@@ -42,10 +34,6 @@
     "num_procs": 1,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "Computed infinite-medium eigenvalue=",
         "goldvalue": 1.0,
@@ -63,10 +51,6 @@
     "file": "spatial_convergence.py",
     "num_procs": 1,
     "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
       {
         "type": "KeyValuePair",
         "key": "Spatial-convergence leakage final order=",

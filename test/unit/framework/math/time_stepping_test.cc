@@ -12,7 +12,9 @@ TEST(TimeSteppingTest, SteppingMethodStringName)
   EXPECT_EQ(SteppingMethodStringName(SteppingMethod::CRANK_NICOLSON), "crank_nicholson");
   EXPECT_EQ(SteppingMethodStringName(SteppingMethod::THETA_SCHEME), "theta_scheme");
 
-  EXPECT_THROW(SteppingMethodStringName(static_cast<SteppingMethod>(999)), std::logic_error);
+  const auto invalid_method =
+    static_cast<SteppingMethod>(999); // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
+  EXPECT_THROW(SteppingMethodStringName(invalid_method), std::logic_error);
 }
 
 TEST(TimeSteppingTest, IsTimeInWindow)

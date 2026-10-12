@@ -175,7 +175,7 @@ class TestSlot:
 
         if test.skip == "":
             error_code = self.process.returncode
-            if self.argv.fail_on_nonzero_exit and error_code != 0:
+            if error_code != 0:
                 passed = False
                 test.annotations.append(f"Exit code {error_code}")
                 test.check_results.append(

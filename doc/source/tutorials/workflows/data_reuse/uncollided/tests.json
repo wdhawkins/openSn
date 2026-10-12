@@ -5,10 +5,6 @@
     "num_procs": 1,
     "checks": [
       {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
-      {
         "type": "KeyValuePair",
         "key": "UncollidedSampleOpenSn=",
         "goldvalue": 155.605048137,
@@ -52,10 +48,6 @@
     "num_procs": 1,
     "dependency": "uncollided.py",
     "checks": [
-      {
-        "type": "ErrorCode",
-        "error_code": 0
-      },
       {
         "type": "KeyValuePair",
         "key": "Total scalar flux at (0.024, 0.016, 0.008):",

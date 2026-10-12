@@ -15,40 +15,24 @@ jobs:
         run: |
           module load cuda/13.3.1 python3/3.12.3 opensn/gcc/14
           cmake -DOPENSN_WITH_PYTHON_MODULE=ON -DOPENSN_WITH_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=89 --preset coverage
-          cmake --build --preset coverage -j64
+          cmake --build --preset coverage --clean-first -j64
+          find build-coverage -name '*.gcda' -delete
+          cmake -DOPENSN_WITH_PYTHON_MODULE=ON --preset coverage-native
+          cmake --build --preset coverage-native --clean-first -j64
+          find build-coverage-native -name '*.gcda' -delete
       - name: test
         shell: bash
         run: |
           module load cuda/13.3.1 python3/3.12.3 opensn/gcc/14
-          mkdir -p "$RUNNER_TEMP/logs"
-          test/run_tests -d test/python -j 32 -v 1 -w 3 --exe build-coverage/python/opensn \
-            --run-log "$RUNNER_TEMP/logs/nightly_coverage_log.txt"
-      - name: gpu tests
-        shell: bash
-        run: |
-          module load cuda/13.3.1 python3/3.12.3 opensn/gcc/14
-          mkdir -p "$RUNNER_TEMP/logs"
-          test/run_tests -d test/python --gpu -j 32 -v 1 -w 3 --exe build-coverage/python/opensn \
-            --run-log "$RUNNER_TEMP/logs/nightly_coverage_gpu_log.txt"
-      - name: unit tests
-        shell: bash
-        run: |
-          module load cuda/13.3.1 python3/3.12.3 opensn/gcc/14
-          ./build-coverage/test/opensn-unit
-      - name: test tutorials
-        shell: bash
-        run: |
-          module load cuda/13.3.1 python3/3.12.3 opensn/gcc/14
-          export PYTHONPATH=$PWD/build-coverage
-          mkdir -p "$RUNNER_TEMP/logs"
-          test/run_tests -d doc/source/tutorials -j 32 -v 1 -w 3 --exe build-coverage/python/opensn --engine=jupyter \
-            --run-log "$RUNNER_TEMP/logs/nightly_coverage_tutorials_log.txt"
+          .github/workflows/run-coverage-tests.sh
       - name: coveralls
         shell: bash
         run: |
           module load cuda/13.3.1 python3/3.12.3 opensn/gcc/14
-          gcovr --gcov-ignore-parse-errors=negative_hits.warn --gcov-suspicious-hits-threshold=2000000000000 -r . \
-            --filter '^(framework|python|modules)/' --coveralls coverage.json
+          gcovr -r . --filter '^(framework|python|modules)/' --print-summary \
+            --gcov-ignore-parse-errors=negative_hits.warn_once_per_file \
+            --gcov-ignore-parse-errors=suspicious_hits.warn_once_per_file \
+            --coveralls coverage.json
           /opt/local/opensn/coveralls/bin/coveralls -c /opt/local/opensn/coveralls/.coveralls.yml -f coverage.json
       - name: upload test logs
         if: always()

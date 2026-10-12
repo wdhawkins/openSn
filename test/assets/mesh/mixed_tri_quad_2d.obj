@@ -1,0 +1,12 @@
+# Two-cell-type rectangle. The left cell is a quadrilateral and the right
+# half is split into two triangles. All faces are counterclockwise.
+o mixed_tri_quad
+v 0.0 0.0 0.0
+v 1.0 0.0 0.0
+v 2.0 0.0 0.0
+v 0.0 1.0 0.0
+v 1.0 1.0 0.0
+v 2.0 1.0 0.0
+f 1 2 5 4
+f 2 3 6
+f 2 6 5

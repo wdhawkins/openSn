@@ -4,8 +4,8 @@ OpenSn Test system
 
 Principles:
 - A test is specified by an input file
-- A test can be subjected to one or more checks
-  - RunCheck: Does it run and exit with error-code 0
+- Every test process must exit with status 0
+- A test can be subjected to zero or more result checks
   - ConsoleOutputCheck: Does the console output contain specific text
   - ConsoleGoldCheck: Diff a portion of the console output against gold output
   - OutputCheck: Compares output data (vtk, exodus, data) against gold output
@@ -127,12 +127,6 @@ parser.add_argument(
     required=False,
     default=0,
     help="Allow up to N concurrent GPU tests. Defaults to auto-detection and falls back to 1."
-)
-
-parser.add_argument(
-    "--fail-on-nonzero-exit",
-    action="store_true",
-    help="Fail a test when its process exits nonzero, in addition to its configured checks."
 )
 
 parser.add_argument(

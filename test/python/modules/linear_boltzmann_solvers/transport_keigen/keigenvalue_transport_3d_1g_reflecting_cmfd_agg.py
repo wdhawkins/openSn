@@ -2,9 +2,11 @@
 # -*- coding: utf-8 -*-
 
 """
-3D 1G reflecting-boundary k-eigenvalue test using aggregated CMFD acceleration.
+3D 1G reflecting-boundary k-eigenvalue test using irregular CMFD aggregation.
 
-Test: Final k-eigenvalue: 0.995
+The 5-by-4-by-3 fine mesh is not divisible by the aggregation size. This
+exercises partial coarse cells while retaining the analytic infinite-medium
+eigenvalue k = nu*Sigma_f/Sigma_a = 0.995.
 """
 
 import os
@@ -27,10 +29,13 @@ if __name__ == "__main__":
     if size != num_procs:
         sys.exit(f"Incorrect number of processors. Expected {num_procs} but got {size}.")
 
-    n = 4
     length = 4.0
-    nodes = [length * i / n for i in range(n + 1)]
-    meshgen = OrthogonalMeshGenerator(node_sets=[nodes, nodes, nodes])
+    dimensions = (5, 4, 3)
+    node_sets = [
+        [length * i / num_cells for i in range(num_cells + 1)]
+        for num_cells in dimensions
+    ]
+    meshgen = OrthogonalMeshGenerator(node_sets=node_sets)
     grid = meshgen.Execute()
     grid.SetUniformBlockID(0)
     grid.SetOrthogonalBoundaries()

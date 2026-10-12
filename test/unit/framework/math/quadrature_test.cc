@@ -141,8 +141,8 @@ TEST(QuadratureTest, LebedevQuadrature3DXYZ)
   // Order 3: 6-point set, scattering_order=1 -> 4 moments
   LebedevQuadrature3DXYZ quad(3, 1);
   ASSERT_EQ(quad.GetOmegas().size(), 6);
-  EXPECT_EQ(quad.GetDimension(), 3u);
-  EXPECT_EQ(quad.GetNumMoments(), 4u);
+  EXPECT_EQ(quad.GetDimension(), 3U);
+  EXPECT_EQ(quad.GetNumMoments(), 4U);
 
   // Check weight sum = 1.0
   const double weight_sum =
@@ -180,8 +180,8 @@ TEST(QuadratureTest, LebedevQuadrature2DXY)
   // Order 3 upper hemisphere: 5 points, scattering_order=1 -> 3 moments
   LebedevQuadrature2DXY quad(3, 1);
   ASSERT_EQ(quad.GetOmegas().size(), 5);
-  EXPECT_EQ(quad.GetDimension(), 2u);
-  EXPECT_EQ(quad.GetNumMoments(), 3u);
+  EXPECT_EQ(quad.GetDimension(), 2U);
+  EXPECT_EQ(quad.GetNumMoments(), 3U);
 
   // Check weight sum = 1.0
   const double weight_sum =
@@ -221,8 +221,8 @@ TEST(QuadratureTest, SLDFEsqQuadrature3DXYZ)
   // scattering_order=1 -> 4 moments (3D)
   SLDFEsqQuadrature3DXYZ quad(0, 1);
   ASSERT_EQ(quad.GetOmegas().size(), 96);
-  EXPECT_EQ(quad.GetDimension(), 3u);
-  EXPECT_EQ(quad.GetNumMoments(), 4u);
+  EXPECT_EQ(quad.GetDimension(), 3U);
+  EXPECT_EQ(quad.GetNumMoments(), 4U);
 
   // Check weight sum = 1.0
   const double weight_sum =
@@ -253,8 +253,8 @@ TEST(QuadratureTest, GLProductQuadrature1DSlab)
   // n_polar=4: 4 directions along the slab axis (phi=0), scattering_order=1 -> 2 moments (1D)
   GLProductQuadrature1DSlab quad(4, 1);
   ASSERT_EQ(quad.GetOmegas().size(), 4);
-  EXPECT_EQ(quad.GetDimension(), 1u);
-  EXPECT_EQ(quad.GetNumMoments(), 2u);
+  EXPECT_EQ(quad.GetDimension(), 1U);
+  EXPECT_EQ(quad.GetNumMoments(), 2U);
 
   // Check weight sum = 1.0
   const double weight_sum =
@@ -294,8 +294,8 @@ TEST(QuadratureTest, GLCProductQuadrature2DXY)
   // scattering_order=1 -> 3 moments (2D)
   GLCProductQuadrature2DXY quad(2, 4, 1);
   ASSERT_EQ(quad.GetOmegas().size(), 4);
-  EXPECT_EQ(quad.GetDimension(), 2u);
-  EXPECT_EQ(quad.GetNumMoments(), 3u);
+  EXPECT_EQ(quad.GetDimension(), 2U);
+  EXPECT_EQ(quad.GetNumMoments(), 3U);
 
   // Check weight sum = 1.0
   const double weight_sum =
@@ -329,8 +329,8 @@ TEST(QuadratureTest, GLCProductQuadrature3DXYZ)
   // scattering_order=1 -> 4 moments (3D)
   GLCProductQuadrature3DXYZ quad(2, 4, 1);
   ASSERT_EQ(quad.GetOmegas().size(), 8);
-  EXPECT_EQ(quad.GetDimension(), 3u);
-  EXPECT_EQ(quad.GetNumMoments(), 4u);
+  EXPECT_EQ(quad.GetDimension(), 3U);
+  EXPECT_EQ(quad.GetNumMoments(), 4U);
 
   // Check weight sum = 1.0
   const double weight_sum =
@@ -364,8 +364,8 @@ TEST(QuadratureTest, GLCTriangularQuadrature2DXY)
   // scattering_order=1 -> 3 moments (2D)
   GLCTriangularQuadrature2DXY quad(4, 1);
   ASSERT_EQ(quad.GetOmegas().size(), 12);
-  EXPECT_EQ(quad.GetDimension(), 2u);
-  EXPECT_EQ(quad.GetNumMoments(), 3u);
+  EXPECT_EQ(quad.GetDimension(), 2U);
+  EXPECT_EQ(quad.GetNumMoments(), 3U);
 
   // Check weight sum = 1.0
   const double weight_sum =
@@ -405,8 +405,8 @@ TEST(QuadratureTest, GLCTriangularQuadrature3DXYZ)
   // scattering_order=1 -> 4 moments (3D)
   GLCTriangularQuadrature3DXYZ quad(4, 1);
   ASSERT_EQ(quad.GetOmegas().size(), 24);
-  EXPECT_EQ(quad.GetDimension(), 3u);
-  EXPECT_EQ(quad.GetNumMoments(), 4u);
+  EXPECT_EQ(quad.GetDimension(), 3U);
+  EXPECT_EQ(quad.GetNumMoments(), 4U);
 
   // Check weight sum = 1.0
   const double weight_sum =
@@ -537,7 +537,9 @@ TEST(QuadratureTest, GLProductQuadrature1DSphericalAngularSequence)
   {
     const auto n = sequence[p];
     if (p > 0)
+    {
       EXPECT_GT(omegas[n].z, omegas[sequence[p - 1]].z);
+    }
     EXPECT_GT(tau[n], 0.0);
     EXPECT_LE(tau[n], 1.0);
     mu_edge += 2.0 * weights[n];

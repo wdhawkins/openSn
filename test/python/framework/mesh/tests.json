@@ -97,5 +97,36 @@
         "abs_tol": 1.0e-6
       }
     ]
+  },
+  {
+    "file": "pvtu_roundtrip_transport.py",
+    "comment": "Two-rank PVTU round trip preserves block volumes and an exact transport solution.",
+    "num_procs": 2,
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "PVTU_BLOCK_1_VOLUME=",
+        "goldvalue": 2.0,
+        "abs_tol": 1.0e-12
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "PVTU_BLOCK_2_VOLUME=",
+        "goldvalue": 4.0,
+        "abs_tol": 1.0e-12
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "PVTU_FLUX_MAX_REL_ERROR=",
+        "goldvalue": 0.0,
+        "abs_tol": 1.0e-10
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "PVTU_BALANCE_ABS_ERROR=",
+        "goldvalue": 0.0,
+        "abs_tol": 1.0e-10
+      }
+    ]
   }
 ]

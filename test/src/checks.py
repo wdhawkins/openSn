@@ -591,47 +591,6 @@ class IntCompareCheck(Check):
         return False
 
 
-class ErrorCodeCheck(Check):
-    """Purely compares the error_code of the simulation. Useful for seeing if
-      the program just runs (not crashing) and for checking that programs fail
-      in a sane way"""
-
-    def __init__(self, params: dict, message_prefix: str):
-        super().__init__()
-        self.error_code: int = 0
-
-        CheckUnknownFields(params, {"type", "error_code"}, message_prefix)
-        RequireInteger(params, "error_code", message_prefix)
-
-        self.error_code = params["error_code"]
-
-    def __str__(self):
-        return f'error_code="{self.error_code}"'
-
-    def PerformCheck(self, filename, errorcode, verbose: bool):
-        try:
-            if errorcode == self.error_code:
-                self.SetLastResultSummary(
-                    f'ErrorCode expected={self.error_code} actual={errorcode} result=PASSED')
-                return True
-
-            if verbose:
-                warnings.warn(f'Check failed: error_code, {self.error_code} vs {errorcode}')
-            self.SetLastResultSummary(
-                f'ErrorCode expected={self.error_code} actual={errorcode} result=FAILED')
-
-        except Exception as e:
-            self.annotations.append("Python error")
-            self.SetLastResultSummary(
-                f'ErrorCode expected={self.error_code} actual={errorcode} '
-                f'result=FAILED reason=python_error')
-            if verbose:
-                warnings.warn(str(e))
-
-        return False
-
-
-# ===================================================================
 class GoldFileCheck(Check):
     """Compares the output of a test against a gold-file"""
 
