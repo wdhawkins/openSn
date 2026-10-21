@@ -72,6 +72,15 @@ struct AAHD_NonLocalBank : public AAHD_Bank
   /// Update views.
   void UpdateViews(std::vector<std::span<double>>& views);
 
+  /**
+   * Update views to the device storage, one per location.
+   * The views point to device memory. They are only passed to GPU-aware MPI and must not be
+   * dereferenced on the host.
+   *
+   * \param views Views to update.
+   */
+  void UpdateDeviceViews(std::vector<std::span<double>>& views);
+
   /// Reference to the sizes of each location.
   const std::vector<std::size_t>* location_sizes = nullptr;
   /// Reference to the offsets of each location.
@@ -174,11 +183,18 @@ public:
   /// \{
   /// Copy delayed local and delayed non-local incoming psi to device.
   void CopyDelayedPsiToDevice();
-  /// Copy non-local incoming psi to device.
+  /**
+   * Copy non-local incoming psi to device.
+   * With GPU-aware MPI the fluxes are received into device memory, so there is nothing to copy.
+   */
   void CopyNonLocalIncomingPsiToDevice();
   /// Get device pointers for each bank in FLUDS.
   AAHD_FLUDSPointerSet GetDevicePointerSet();
-  /// Copy non-local outgoing and delayed local psi from device to host.
+  /**
+   * Copy non-local outgoing and delayed local psi from device to host.
+   * With GPU-aware MPI the non-local outgoing fluxes are sent from device memory, so only the
+   * delayed local fluxes are copied.
+   */
   void CopyPsiFromDevice();
   /// Copy save angular flux from device to host.
   void CopySaveAngularFluxFromDevice();

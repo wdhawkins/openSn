@@ -85,6 +85,13 @@ Practical guidance:
   problem is steady-state or transient.
 * The batch system or manual GPU binding determines which GPU is associated
   with each MPI rank.
+* On more than one MPI rank, a GPU ``"AAH"`` sweep can exchange angular fluxes
+  between ranks directly from GPU memory. This requires a GPU-aware MPI library
+  and OpenSn configured with ``-DOPENSN_USE_GPU_AWARE_MPI=ON``. It removes the
+  copies through host memory on every exchange, which matters most at large rank
+  counts. Without it, the fluxes are staged through host memory. Some MPI
+  libraries also need GPU support enabled at run time (for example
+  ``MPICH_GPU_SUPPORT_ENABLED=1`` for Cray MPICH).
 
 .. note::
 

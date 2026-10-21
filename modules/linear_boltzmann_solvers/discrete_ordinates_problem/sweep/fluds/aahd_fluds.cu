@@ -70,6 +70,17 @@ AAHD_NonLocalBank::AAHD_NonLocalBank(const std::vector<std::size_t>& loc_sizes,
 }
 
 void
+AAHD_NonLocalBank::UpdateDeviceViews(std::vector<std::span<double>>& views)
+{
+  views.resize(location_sizes->size());
+  for (std::size_t i = 0; i < location_sizes->size(); ++i)
+  {
+    views[i] = std::span<double>(device_storage.get() + (*location_offsets)[i] * stride_size,
+                                 (*location_sizes)[i] * stride_size);
+  }
+}
+
+void
 AAHD_NonLocalBank::UpdateViews(std::vector<std::span<double>>& views)
 {
   views.resize(location_sizes->size());
@@ -132,8 +143,15 @@ AAHD_FLUDS::AAHD_FLUDS(unsigned int num_groups,
                                 common_data_.GetNonLocalOutgoingNodeOffsets(),
                                 num_groups_and_angles_)
 {
+#ifdef __OPENSN_USE_GPU_AWARE_MPI__
+  // GPU-aware MPI sends the non-local outgoing fluxes from device memory and receives the
+  // non-local incoming fluxes into device memory, so they are not staged through the host.
+  nonlocal_outgoing_psi_bank_.UpdateDeviceViews(deplocI_outgoing_psi_view_);
+  nonlocal_incoming_psi_bank_.UpdateDeviceViews(prelocI_outgoing_psi_view_);
+#else
   nonlocal_outgoing_psi_bank_.UpdateViews(deplocI_outgoing_psi_view_);
   nonlocal_incoming_psi_bank_.UpdateViews(prelocI_outgoing_psi_view_);
+#endif
 }
 
 void
@@ -204,7 +222,9 @@ AAHD_FLUDS::CopyDelayedPsiToDevice()
 void
 AAHD_FLUDS::CopyNonLocalIncomingPsiToDevice()
 {
+#ifndef __OPENSN_USE_GPU_AWARE_MPI__
   nonlocal_incoming_psi_bank_.UploadToDevice(stream_);
+#endif
 }
 
 AAHD_FLUDSPointerSet
@@ -248,7 +268,9 @@ AAHD_FLUDS::GetDevicePointerSet()
 void
 AAHD_FLUDS::CopyPsiFromDevice()
 {
+#ifndef __OPENSN_USE_GPU_AWARE_MPI__
   nonlocal_outgoing_psi_bank_.DownloadToHost(stream_);
+#endif
   delayed_local_psi_bank_.DownloadToHost(stream_);
 }
 
