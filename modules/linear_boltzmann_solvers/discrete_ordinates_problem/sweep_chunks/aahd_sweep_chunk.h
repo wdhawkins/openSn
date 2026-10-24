@@ -25,6 +25,7 @@ class AAHDSweepChunk : public SweepChunk
 {
 public:
   AAHDSweepChunk(DiscreteOrdinatesProblem& problem, LBSGroupset& groupset);
+  ~AAHDSweepChunk() override;
 
   DiscreteOrdinatesProblem& GetProblem() { return problem_; }
   Mesh& GetGrid() { return *grid_; }
@@ -61,8 +62,13 @@ public:
    *
    * \param lane Index of an idle lane.
    * \param batch Angle sets of the run.
+   * \param early_completion Enqueue each member's completion copies right after its last level,
+   *        followed by a callback that sets its AAHD_AngleSet::CompletionReady flag.
+   * \return Number of kernel launches of the run.
    */
-  void SubmitBatchRun(std::size_t lane, const std::vector<AAHD_AngleSet*>& batch);
+  std::size_t SubmitBatchRun(std::size_t lane,
+                             const std::vector<AAHD_AngleSet*>& batch,
+                             bool early_completion = false);
 
   /**
    * Check whether a lane is idle.
@@ -71,6 +77,42 @@ public:
    * \return True when all work submitted to the lane has completed.
    */
   bool IsLaneIdle(std::size_t lane) { return lanes_[lane].stream.is_completed(); }
+
+  /// Angle set in a rolling run, with its slot and the level it sweeps next (prototype).
+  struct RollingMember
+  {
+    AAHD_AngleSet* angle_set;
+    std::size_t level;
+    gpu_kernel::AAHD_BatchSlot slot;
+  };
+
+  /**
+   * Size the ring of rolling steps (prototype). A step's buffers are reused only after
+   * IsRollingStepDone reports it done.
+   *
+   * \param num_streams Number of rolling streams (lanes 0 to num_streams - 1).
+   * \param num_steps Number of steps in each stream's ring.
+   * \param capacity Largest number of active angle sets in a step.
+   */
+  void InitRolling(std::size_t num_streams, std::size_t num_steps, std::size_t capacity);
+
+  /**
+   * Sweep the next level of every active angle set with one launch on lane 0 (prototype).
+   * Angle sets that finish their last level get their completion copies after the launch. They
+   * are moved from `active` to `completing`, and the others advance one level.
+   *
+   * \param ring_index Ring entry of the step. It must be done or unused.
+   * \param active Active angle sets.
+   * \param completing Angle sets this step completes.
+   * \return Number of kernel launches (0 or 1).
+   */
+  std::size_t SubmitRollingStep(std::size_t stream_index,
+                                std::size_t ring_index,
+                                std::vector<RollingMember>& active,
+                                std::vector<AAHD_AngleSet*>& completing);
+
+  /// Return true when the work of a rolling step has completed on the device (prototype).
+  bool IsRollingStepDone(std::size_t stream_index, std::size_t ring_index);
   /** \} */
 
 protected:
@@ -92,6 +134,21 @@ private:
   };
   /// Lanes for concurrent fused runs.
   std::vector<FusedLane> lanes_;
+
+  /// Buffers and completion event of one rolling step (prototype).
+  struct RollingStep
+  {
+    /// Pinned host copy of the step's slots.
+    crb::HostVector<gpu_kernel::AAHD_BatchSlot> host_slots;
+    /// Device copy of the step's slots.
+    crb::DeviceMemory<gpu_kernel::AAHD_BatchSlot> device_slots;
+    /// Native event recorded after the step's work.
+    void* event = nullptr;
+  };
+  /// Rings of rolling steps, `rolling_steps_` entries per stream.
+  std::vector<RollingStep> rolling_;
+  /// Number of steps in each rolling stream's ring.
+  std::size_t rolling_steps_ = 0;
   /**
    * Fused-kernel launch parameters.
    * They are derived once from the device's warp (wavefront) size and compute-unit count, so the

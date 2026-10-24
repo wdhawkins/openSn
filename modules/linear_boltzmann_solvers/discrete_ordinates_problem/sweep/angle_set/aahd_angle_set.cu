@@ -177,6 +177,29 @@ AAHD_AngleSet::FillBatchSlots(std::size_t num_levels,
 }
 
 void
+AAHD_AngleSet::FillLevelSlot(std::size_t level, gpu_kernel::AAHD_BatchSlot& slot) const
+{
+  auto* aahd_fluds = dynamic_cast<AAHD_FLUDS*>(fluds_.get());
+  const auto& spds = dynamic_cast<const AAH_SPDS&>(spds_);
+  slot.directions = device_angle_indices_.get();
+  slot.boundary_offset = device_boundary_offsets_.get();
+  slot.angleset_size = static_cast<std::uint32_t>(angles_.size());
+  slot.flud_index = aahd_fluds->GetCommonData().GetDeviceIndex();
+  slot.flud_data = aahd_fluds->GetDevicePointerSet();
+  slot.saved_psi = aahd_fluds->GetSavedAngularFluxDevicePointer();
+  slot.cells_to_sweep = spds.GetDeviceLevelVector(level);
+  slot.num_cells = static_cast<unsigned int>(spds.GetLevelizedLocalSubgrid()[level].size());
+}
+
+void
+AAHD_AngleSet::UpdateSlotLevel(std::size_t level, gpu_kernel::AAHD_BatchSlot& slot) const
+{
+  const auto& spds = static_cast<const AAH_SPDS&>(spds_);
+  slot.cells_to_sweep = spds.GetDeviceLevelVector(level);
+  slot.num_cells = static_cast<unsigned int>(spds.GetLevelizedLocalSubgrid()[level].size());
+}
+
+void
 AAHD_AngleSet::SubmitCompletionCopies()
 {
   auto* aahd_fluds = dynamic_cast<AAHD_FLUDS*>(fluds_.get());

@@ -33,6 +33,8 @@ struct AAHD_BatchSlot
   unsigned int num_cells = 0;
   /// This angle set's saved-angular-flux device buffer (nullptr if not in use).
   double* __restrict__ saved_psi = nullptr;
+  /// First flattened (cell, angle-group) index of this slot in a flat launch.
+  std::uint32_t work_offset = 0;
 };
 
 } // namespace opensn::gpu_kernel

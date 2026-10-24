@@ -7,6 +7,7 @@
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep/communicators/aahd_async_comm.h"
 #include "modules/linear_boltzmann_solvers/discrete_ordinates_problem/sweep_chunks/gpu_kernel/aahd_batch_slot.h"
 #include "caribou/main.hpp"
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -104,6 +105,22 @@ public:
                       gpu_kernel::AAHD_BatchSlot* slots) const;
 
   /**
+   * Write this angle set's batch slot for one level.
+   *
+   * \param level Level index, below NumLevels().
+   * \param slot Slot to write.
+   */
+  void FillLevelSlot(std::size_t level, gpu_kernel::AAHD_BatchSlot& slot) const;
+
+  /**
+   * Point a slot filled by FillLevelSlot at another level's cells.
+   *
+   * \param level Level index, below NumLevels().
+   * \param slot Slot to update.
+   */
+  void UpdateSlotLevel(std::size_t level, gpu_kernel::AAHD_BatchSlot& slot) const;
+
+  /**
    * Enqueue this angle set's post-sweep device-to-host copies without synchronizing.
    * The copies go on the angle set's FLUDS stream, which is its run's lane. The caller waits for
    * that stream before FinishCompletion.
@@ -119,6 +136,12 @@ public:
    * \param sweep_chunk Sweep chunk that ran the batch.
    */
   void FinishCompletion(SweepChunk& sweep_chunk);
+
+  /**
+   * Flag set by a stream callback once this angle set's last level and completion copies in its
+   * batch run are done. FinishCompletion may then run before the rest of the run finishes.
+   */
+  std::atomic<bool>& CompletionReady() { return completion_ready_; }
   /** \} */
 
   static std::mutex m;
@@ -138,6 +161,9 @@ protected:
 
   /// Boundary offset on GPU.
   crb::DeviceMemory<std::uint64_t> device_boundary_offsets_;
+
+  /// Flag that this angle set's part of its batch run is done (see CompletionReady).
+  std::atomic<bool> completion_ready_{false};
 };
 
 } // namespace opensn

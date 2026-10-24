@@ -17,6 +17,8 @@
 #include "framework/utils/caliper_scopes.h"
 #include "framework/runtime.h"
 #include "caliper/cali.h"
+#include <cstdlib>
+#include <fstream>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -46,6 +48,83 @@ DiscreteOrdinatesProblem::InitializeSweepDataStructures()
   quadrature_unq_so_grouping_map_ = std::move(sweep_runtime.quadrature_unq_so_grouping_map);
   quadrature_spds_map_ = std::move(sweep_runtime.quadrature_spds_map);
   quadrature_fluds_commondata_map_ = std::move(sweep_runtime.quadrature_fluds_commondata_map);
+
+  // Prototype diagnostic: write each rank's sweep graph for offline critical-path modeling.
+  // Per SPDS: level count, predecessor and delayed-predecessor locations, the levels of local
+  // cells with outgoing faces to other ranks, and for each incoming face from another rank the
+  // upwind cell's global id and rank with the level of the local cell that reads it.
+  if (const char* prefix = std::getenv("OPENSN_SWEEP_GRAPH_DUMP"))
+  {
+    const int rank = opensn::mpi_comm.rank();
+    std::ofstream out(std::string(prefix) + ".r" + std::to_string(rank) + ".bin", std::ios::binary);
+    auto put = [&out](const auto& v) { out.write(reinterpret_cast<const char*>(&v), sizeof(v)); };
+    auto put_vec = [&](const std::vector<int>& v)
+    {
+      put(static_cast<std::int32_t>(v.size()));
+      for (int x : v)
+        put(static_cast<std::int32_t>(x));
+    };
+    std::int32_t num_spds = 0;
+    for (const auto& [quad, spds_list] : quadrature_spds_map_)
+      num_spds += static_cast<std::int32_t>(spds_list.size());
+    put(static_cast<std::int32_t>(rank));
+    put(num_spds);
+    for (const auto& [quad, spds_list] : quadrature_spds_map_)
+      for (const auto& spds : spds_list)
+      {
+        const auto& levels = spds->GetLevelizedLocalSubgrid();
+        std::vector<std::int32_t> level_of(grid_->GetLocalCells().size(), -1);
+        for (std::size_t l = 0; l < levels.size(); ++l)
+          for (auto c : levels[l])
+            level_of[c] = static_cast<std::int32_t>(l);
+        const auto& omega = spds->GetOmega();
+        std::vector<std::pair<std::uint64_t, std::int32_t>> outgoing;
+        struct Incoming
+        {
+          std::uint64_t up_gid;
+          std::int32_t up_rank;
+          std::int32_t level;
+        };
+        std::vector<Incoming> incoming;
+        for (const auto& cell_ptr : grid_->GetLocalCells())
+        {
+          const auto& cell = *cell_ptr;
+          bool has_outgoing = false;
+          for (const auto& face : cell.faces)
+          {
+            if (not face.has_neighbor or grid_->IsCellLocal(face.neighbor_id))
+              continue;
+            const double mu = omega.Dot(face.normal);
+            if (mu > 0.0)
+              has_outgoing = true;
+            else if (mu < 0.0)
+              incoming.push_back(
+                {face.neighbor_id,
+                 static_cast<std::int32_t>(grid_->GetGlobalCell(face.neighbor_id).partition_id),
+                 level_of[cell.local_id]});
+          }
+          if (has_outgoing)
+            outgoing.emplace_back(cell.global_id, level_of[cell.local_id]);
+        }
+        put(static_cast<std::int32_t>(levels.size()));
+        put_vec(spds->GetLocationDependencies());
+        put_vec(spds->GetDelayedLocationDependencies());
+        put(static_cast<std::int32_t>(outgoing.size()));
+        for (const auto& [gid, level] : outgoing)
+        {
+          put(gid);
+          put(level);
+        }
+        put(static_cast<std::int32_t>(incoming.size()));
+        for (const auto& in : incoming)
+        {
+          put(in.up_gid);
+          put(in.up_rank);
+          put(in.level);
+        }
+      }
+    log.Log() << "Wrote sweep graph dump " << prefix << ".r<rank>.bin";
+  }
 }
 
 #ifndef __OPENSN_WITH_GPU__

@@ -14,6 +14,8 @@
 #include "caliper/cali.h"
 #include "caribou/main.hpp"
 #include <algorithm>
+#include <atomic>
+#include <cstdlib>
 
 namespace crb = caribou;
 
@@ -124,13 +126,182 @@ LaunchFusedLevel(crb::Stream& stream,
 #endif
 }
 
+/// Launch the flat one-level kernel over `total_work` (cell, angle-group) pairs of `count` slots.
+void
+LaunchFlatLevel(crb::Stream& stream,
+                const gpu_kernel::Arguments<SweepKind::AAH>& shared_args,
+                const gpu_kernel::AAHD_BatchSlot* slots,
+                std::size_t count,
+                std::size_t total_work,
+                std::uint32_t fixed_ndofs,
+                unsigned int block_size)
+{
+  const auto grid = static_cast<unsigned int>((total_work + block_size - 1) / block_size);
+  auto launch = [&](auto fixed_c)
+  {
+    constexpr std::uint32_t nd = decltype(fixed_c)::value;
+#if defined(__NVCC__) || defined(__HIPCC__)
+    gpu_kernel::AAHDFusedFlatKernel<nd>
+      <<<crb::Dim3(grid, 1, 1), crb::Dim3(block_size, 1), 0, stream>>>(
+        shared_args,
+        slots,
+        static_cast<unsigned int>(count),
+        static_cast<unsigned int>(total_work));
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+    const auto n = static_cast<unsigned int>(count);
+    const auto w = static_cast<unsigned int>(total_work);
+    stream.parallel_for(
+      sycl::nd_range<3>(sycl::range<3>(1, 1, grid * block_size), sycl::range<3>(1, 1, block_size)),
+      [=](sycl::nd_item<3>) { gpu_kernel::AAHDFusedFlatKernel<nd>(shared_args, slots, n, w); });
+#endif
+  };
+  switch (fixed_ndofs)
+  {
+    case 2:
+      launch(std::integral_constant<std::uint32_t, 2>{});
+      break;
+    case 3:
+      launch(std::integral_constant<std::uint32_t, 3>{});
+      break;
+    case 4:
+      launch(std::integral_constant<std::uint32_t, 4>{});
+      break;
+    case 6:
+      launch(std::integral_constant<std::uint32_t, 6>{});
+      break;
+    case 8:
+      launch(std::integral_constant<std::uint32_t, 8>{});
+      break;
+    default:
+      launch(std::integral_constant<std::uint32_t, 0>{});
+      break;
+  }
+}
+
+/**
+ * Launch the fused kernel for one level of `count` batch slots.
+ * Large levels use the linear (cell, angle-group) mapping, which leaves no idle lanes. Small
+ * levels put the angle-groups on x and the cells on y, which spreads their few threads over more
+ * warps for latency hiding, unless a cell has too few angle-groups to fill a useful part of a warp.
+ * grid-z is the number of slots.
+ */
+void
+LaunchLevelSlots(crb::Stream& stream,
+                 const gpu_kernel::Arguments<SweepKind::AAH>& shared_args,
+                 const gpu_kernel::AAHD_BatchSlot* slots,
+                 std::size_t count,
+                 unsigned int max_level_size,
+                 unsigned int stride_size,
+                 std::uint32_t fixed_ndofs,
+                 unsigned int linear_block_size,
+                 unsigned int min_small_level_stride,
+                 std::size_t linear_mapping_min_threads)
+{
+  max_level_size = std::max(max_level_size, 1U);
+  const std::size_t level_threads = static_cast<std::size_t>(max_level_size) * stride_size * count;
+  const bool linear_mapping =
+    level_threads >= linear_mapping_min_threads or stride_size < min_small_level_stride;
+  crb::Dim3 block_size;
+  crb::Dim3 grid_size;
+  if (linear_mapping)
+  {
+    block_size = crb::Dim3(linear_block_size, 1);
+    grid_size =
+      crb::Dim3((max_level_size * stride_size + linear_block_size - 1) / linear_block_size,
+                1,
+                static_cast<unsigned int>(count));
+  }
+  else
+  {
+    unsigned int block_size_x = std::min(gpu_kernel::RoundUp(stride_size), gpu_kernel::threshold);
+    unsigned int block_size_y = gpu_kernel::threshold / block_size_x;
+    block_size = crb::Dim3(block_size_x, block_size_y);
+    grid_size = crb::Dim3((stride_size + block_size_x - 1) / block_size_x,
+                          (max_level_size + block_size_y - 1) / block_size_y,
+                          static_cast<unsigned int>(count));
+  }
+  auto launch = [&](auto fixed_c)
+  {
+    LaunchFusedLevel<decltype(fixed_c)::value>(
+      stream, shared_args, slots, grid_size, block_size, linear_mapping);
+  };
+  switch (fixed_ndofs)
+  {
+    case 2:
+      launch(std::integral_constant<std::uint32_t, 2>{});
+      break;
+    case 3:
+      launch(std::integral_constant<std::uint32_t, 3>{});
+      break;
+    case 4:
+      launch(std::integral_constant<std::uint32_t, 4>{});
+      break;
+    case 6:
+      launch(std::integral_constant<std::uint32_t, 6>{});
+      break;
+    case 8:
+      launch(std::integral_constant<std::uint32_t, 8>{});
+      break;
+    default:
+      launch(std::integral_constant<std::uint32_t, 0>{});
+      break;
+  }
+}
+
+template <std::uint32_t fixed_ndofs>
+void
+LaunchFusedRun(crb::Stream& stream,
+               const gpu_kernel::Arguments<SweepKind::AAH>& shared_args,
+               const gpu_kernel::AAHD_BatchSlot* slots,
+               unsigned int batch_size,
+               unsigned int num_levels,
+               unsigned int block_size)
+{
+#if defined(__NVCC__) || defined(__HIPCC__)
+  gpu_kernel::AAHDFusedRunKernel<fixed_ndofs>
+    <<<crb::Dim3(1, 1, batch_size), crb::Dim3(block_size, 1), 0, stream>>>(
+      shared_args, slots, batch_size, num_levels);
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+  stream.parallel_for(
+    sycl::nd_range<3>(sycl::range<3>(batch_size, 1, block_size), sycl::range<3>(1, 1, block_size)),
+    [=](sycl::nd_item<3> work_index)
+    { gpu_kernel::AAHDFusedRunKernel<fixed_ndofs>(shared_args, slots, batch_size, num_levels); });
+#endif
+}
+
+/// Prototype settings of the one-launch run kernel, read once from the environment.
+struct PersistKnobs
+{
+  /// OPENSN_FUSED_PERSIST: largest level work (cells x angle-groups) for one launch per run.
+  std::size_t max_level_work = 0;
+  /// OPENSN_FUSED_PBLOCK: threads per block of the one-launch run kernel.
+  unsigned int block_size = 256;
+};
+
+const PersistKnobs&
+GetPersistKnobs()
+{
+  static const PersistKnobs knobs = []
+  {
+    PersistKnobs k;
+    if (const char* v = std::getenv("OPENSN_FUSED_PERSIST"))
+      k.max_level_work = std::strtoul(v, nullptr, 10);
+    if (const char* v = std::getenv("OPENSN_FUSED_PBLOCK"))
+      k.block_size = static_cast<unsigned int>(std::strtoul(v, nullptr, 10));
+    return k;
+  }();
+  return knobs;
+}
+
 } // namespace
 
-void
-AAHDSweepChunk::SubmitBatchRun(std::size_t lane, const std::vector<AAHD_AngleSet*>& batch)
+std::size_t
+AAHDSweepChunk::SubmitBatchRun(std::size_t lane,
+                               const std::vector<AAHD_AngleSet*>& batch,
+                               bool early_completion)
 {
   if (batch.empty())
-    return;
+    return 0;
   FusedLane& run_lane = lanes_[lane];
 
   // Build the shared (angle-set-independent) arguments from any one representative angle set.
@@ -150,11 +321,34 @@ AAHDSweepChunk::SubmitBatchRun(std::size_t lane, const std::vector<AAHD_AngleSet
     max_depth = std::max(max_depth, as->NumLevels());
     max_angleset_size = std::max(max_angleset_size, as->GetNumAngles());
   }
+  // Enqueue the completion copies of the members whose last level is `level` (-1 for members
+  // with no levels), then a callback that marks them complete.
+  auto complete_members = [&](std::ptrdiff_t level)
+  {
+    std::vector<std::atomic<bool>*> flags;
+    for (auto* as : batch)
+      if (static_cast<std::ptrdiff_t>(as->NumLevels()) - 1 == level)
+      {
+        as->SubmitCompletionCopies();
+        flags.push_back(&as->CompletionReady());
+      }
+    if (not flags.empty())
+      run_lane.stream.add_callback(
+        [](std::vector<std::atomic<bool>*>&& done)
+        {
+          for (auto* flag : done)
+            flag->store(true, std::memory_order_release);
+        },
+        std::move(flags));
+  };
+  if (early_completion)
+    complete_members(-1);
   if (max_depth == 0)
   {
-    for (auto* as : batch)
-      as->SubmitCompletionCopies();
-    return;
+    if (not early_completion)
+      for (auto* as : batch)
+        as->SubmitCompletionCopies();
+    return 0;
   }
   const auto stride_size = static_cast<unsigned int>(max_angleset_size * groupset_.GetNumGroups());
 
@@ -181,43 +375,23 @@ AAHDSweepChunk::SubmitBatchRun(std::size_t lane, const std::vector<AAHD_AngleSet
     (min_num_cell_dofs_ == max_num_cell_dofs_) ? max_num_cell_dofs_ : 0;
 
   auto* device_slots_base = run_lane.device_slots.get();
-  for (std::size_t level = 0; level < max_depth; ++level)
-  {
-    // Large levels use the linear (cell, angle-group) mapping, which leaves no idle lanes. Small
-    // levels put the angle-groups on x and the cells on y, which spreads their few threads over
-    // more warps for latency hiding, unless a cell has too few angle-groups to fill a useful part
-    // of a warp. grid-z is the batch width.
-    const unsigned int max_level_size = std::max(max_level_size_per_level[level], 1U);
-    const std::size_t level_threads =
-      static_cast<std::size_t>(max_level_size) * stride_size * batch_size;
-    const bool linear_mapping = level_threads >= fused_launch_.linear_mapping_min_threads or
-                                stride_size < fused_launch_.min_small_level_stride;
-    crb::Dim3 block_size;
-    crb::Dim3 grid_size;
-    if (linear_mapping)
-    {
-      const unsigned int linear_block_size = fused_launch_.linear_block_size;
-      block_size = crb::Dim3(linear_block_size, 1);
-      grid_size =
-        crb::Dim3((max_level_size * stride_size + linear_block_size - 1) / linear_block_size,
-                  1,
-                  static_cast<unsigned int>(batch_size));
-    }
-    else
-    {
-      unsigned int block_size_x = std::min(gpu_kernel::RoundUp(stride_size), gpu_kernel::threshold);
-      unsigned int block_size_y = gpu_kernel::threshold / block_size_x;
-      block_size = crb::Dim3(block_size_x, block_size_y);
-      grid_size = crb::Dim3((stride_size + block_size_x - 1) / block_size_x,
-                            (max_level_size + block_size_y - 1) / block_size_y,
-                            static_cast<unsigned int>(batch_size));
-    }
 
-    auto* level_slots_ptr = device_slots_base + level * batch_size;
+  // Small runs sweep every level in one launch, with one block per member.
+  const auto& persist = GetPersistKnobs();
+  const std::size_t max_level_work =
+    static_cast<std::size_t>(
+      *std::max_element(max_level_size_per_level.begin(), max_level_size_per_level.end())) *
+    stride_size;
+  if (persist.max_level_work > 0 and max_level_work <= persist.max_level_work)
+  {
     auto launch = [&](auto fixed_c)
     {
-      LaunchFusedLevel<decltype(fixed_c)::value>(
-        run_lane.stream, shared_args, level_slots_ptr, grid_size, block_size, linear_mapping);
+      LaunchFusedRun<decltype(fixed_c)::value>(run_lane.stream,
+                                               shared_args,
+                                               device_slots_base,
+                                               static_cast<unsigned int>(batch_size),
+                                               static_cast<unsigned int>(max_depth),
+                                               persist.block_size);
     };
     switch (fixed_ndofs)
     {
@@ -240,11 +414,171 @@ AAHDSweepChunk::SubmitBatchRun(std::size_t lane, const std::vector<AAHD_AngleSet
         launch(std::integral_constant<std::uint32_t, 0>{});
         break;
     }
+    if (early_completion)
+      for (std::size_t level = 0; level < max_depth; ++level)
+        complete_members(static_cast<std::ptrdiff_t>(level));
+    else
+      for (auto* as : batch)
+        as->SubmitCompletionCopies();
+    return 1;
+  }
+
+  for (std::size_t level = 0; level < max_depth; ++level)
+  {
+    LaunchLevelSlots(run_lane.stream,
+                     shared_args,
+                     device_slots_base + level * batch_size,
+                     batch_size,
+                     max_level_size_per_level[level],
+                     stride_size,
+                     fixed_ndofs,
+                     fused_launch_.linear_block_size,
+                     fused_launch_.min_small_level_stride,
+                     fused_launch_.linear_mapping_min_threads);
+    if (early_completion)
+      complete_members(static_cast<std::ptrdiff_t>(level));
   }
   // The members' device-to-host copies follow the last level on the same stream. The caller
   // polls IsLaneIdle instead of waiting.
-  for (auto* as : batch)
-    as->SubmitCompletionCopies();
+  if (not early_completion)
+    for (auto* as : batch)
+      as->SubmitCompletionCopies();
+  return max_depth;
+}
+
+AAHDSweepChunk::~AAHDSweepChunk()
+{
+  for (auto& step : rolling_)
+  {
+#if defined(__NVCC__)
+    if (step.event)
+      cudaEventDestroy(static_cast<cudaEvent_t>(step.event));
+#elif defined(__HIPCC__)
+    if (step.event)
+      (void)hipEventDestroy(static_cast<hipEvent_t>(step.event));
+#endif
+  }
+}
+
+void
+AAHDSweepChunk::InitRolling(std::size_t num_streams, std::size_t num_steps, std::size_t capacity)
+{
+  if (rolling_steps_ == num_steps and rolling_.size() == num_streams * num_steps and
+      not rolling_.empty() and rolling_.front().host_slots.size() >= capacity)
+    return;
+  for (auto& step : rolling_)
+  {
+#if defined(__NVCC__)
+    if (step.event)
+      cudaEventDestroy(static_cast<cudaEvent_t>(step.event));
+#elif defined(__HIPCC__)
+    if (step.event)
+      (void)hipEventDestroy(static_cast<hipEvent_t>(step.event));
+#endif
+  }
+  rolling_.clear();
+  rolling_steps_ = num_steps;
+  rolling_.resize(num_streams * num_steps);
+  for (auto& step : rolling_)
+  {
+    step.host_slots.resize(std::max<std::size_t>(capacity, 1));
+    step.device_slots = crb::DeviceMemory<gpu_kernel::AAHD_BatchSlot>(step.host_slots.size());
+#if defined(__NVCC__)
+    cudaEvent_t event;
+    cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
+    step.event = event;
+#elif defined(__HIPCC__)
+    hipEvent_t event;
+    (void)hipEventCreateWithFlags(&event, hipEventDisableTiming);
+    step.event = event;
+#endif
+  }
+}
+
+bool
+AAHDSweepChunk::IsRollingStepDone(std::size_t stream_index, std::size_t ring_index)
+{
+  auto& step = rolling_[stream_index * rolling_steps_ + ring_index];
+#if defined(__NVCC__)
+  return cudaEventQuery(static_cast<cudaEvent_t>(step.event)) == cudaSuccess;
+#elif defined(__HIPCC__)
+  return hipEventQuery(static_cast<hipEvent_t>(step.event)) == hipSuccess;
+#else
+  return lanes_[stream_index].stream.is_completed();
+#endif
+}
+
+std::size_t
+AAHDSweepChunk::SubmitRollingStep(std::size_t stream_index,
+                                  std::size_t ring_index,
+                                  std::vector<RollingMember>& active,
+                                  std::vector<AAHD_AngleSet*>& completing)
+{
+  completing.clear();
+  RollingStep& step = rolling_[stream_index * rolling_steps_ + ring_index];
+  crb::Stream& stream = lanes_[stream_index].stream;
+
+  // One slot per active angle set at its current level. The slots' work is flattened, so each
+  // slot records where its (cell, angle-group) pairs start.
+  std::size_t count = 0;
+  std::size_t total_work = 0;
+  AAHD_AngleSet* front = nullptr;
+  const std::size_t num_groups = groupset_.GetNumGroups();
+  for (auto& m : active)
+  {
+    if (m.level >= m.angle_set->NumLevels())
+      continue;
+    m.angle_set->UpdateSlotLevel(m.level, m.slot);
+    m.slot.work_offset = static_cast<std::uint32_t>(total_work);
+    total_work += static_cast<std::size_t>(m.slot.num_cells) * m.slot.angleset_size * num_groups;
+    step.host_slots[count++] = m.slot;
+    if (front == nullptr)
+      front = m.angle_set;
+  }
+
+  std::size_t launches = 0;
+  if (count > 0 and total_work > 0)
+  {
+    crb::copy(step.device_slots, step.host_slots, count, 0, 0, stream);
+    auto* front_fluds = dynamic_cast<AAHD_FLUDS*>(&front->GetFLUDS());
+    gpu_kernel::Arguments<SweepKind::AAH> shared_args(
+      problem_, groupset_, *front, *front_fluds, surface_source_active_);
+    const std::uint32_t fixed_ndofs =
+      (min_num_cell_dofs_ == max_num_cell_dofs_) ? max_num_cell_dofs_ : 0;
+    LaunchFlatLevel(stream,
+                    shared_args,
+                    step.device_slots.get(),
+                    count,
+                    total_work,
+                    fixed_ndofs,
+                    fused_launch_.linear_block_size);
+    launches = 1;
+  }
+
+  // Angle sets past their last level are complete. The others advance.
+  auto keep = active.begin();
+  for (auto& m : active)
+  {
+    const std::size_t num_levels = m.angle_set->NumLevels();
+    if (m.level + 1 >= num_levels)
+    {
+      m.angle_set->SubmitCompletionCopies();
+      completing.push_back(m.angle_set);
+    }
+    else
+    {
+      ++m.level;
+      *keep++ = m;
+    }
+  }
+  active.erase(keep, active.end());
+
+#if defined(__NVCC__)
+  cudaEventRecord(static_cast<cudaEvent_t>(step.event), stream);
+#elif defined(__HIPCC__)
+  (void)hipEventRecord(static_cast<hipEvent_t>(step.event), stream);
+#endif
+  return launches;
 }
 
 } // namespace opensn

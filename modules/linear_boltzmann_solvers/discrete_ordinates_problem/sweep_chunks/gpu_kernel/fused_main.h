@@ -69,6 +69,52 @@ SlotArguments(const Arguments<SweepKind::AAH>& shared_args, const AAHD_BatchSlot
 }
 
 /**
+ * Sweep one (cell, angle-group) pair of a batch slot's level.
+ *
+ * \tparam fixed_ndofs Single compiled cell DOF count, or 0 for all counts (see DispatchCellDOFs).
+ * \param shared_args Launch data shared by every angle set of the launch.
+ * \param slot Batch slot of the angle set's level.
+ * \param cell_idx Index of the cell in the level.
+ * \param angle_group_idx Angle-group index within the angle set.
+ */
+template <std::uint32_t fixed_ndofs>
+__CRB_DEVICE_FUNC__ void
+SweepSlotCell(const Arguments<SweepKind::AAH>& shared_args,
+              const AAHD_BatchSlot& slot,
+              unsigned int cell_idx,
+              unsigned int angle_group_idx)
+{
+  const Arguments<SweepKind::AAH> args = SlotArguments(shared_args, slot);
+  unsigned int angle_idx = angle_group_idx / args.groupset_size;
+  unsigned int group_idx = angle_group_idx - angle_idx * args.groupset_size;
+  const std::uint32_t cell_local_idx = slot.cells_to_sweep[cell_idx];
+  CellView cell;
+  MeshView(args.mesh_data).GetCellView(cell, cell_local_idx);
+  if (cell.num_nodes == 0)
+    return;
+  auto [cell_edge_data, _] = GetCellDataIndex(args.flud_index, cell_local_idx);
+  std::uint32_t num_moments;
+  DirectionView direction;
+  {
+    QuadratureView quadrature(args.quad_data);
+    num_moments = quadrature.num_moments;
+    quadrature.GetDirectionView(direction, args.directions[angle_idx]);
+  }
+  auto sweep = [&](auto dof_c)
+  {
+    Sweep<decltype(dof_c)::value, SweepKind::AAH>(args,
+                                                  cell,
+                                                  direction,
+                                                  cell_edge_data,
+                                                  angle_group_idx,
+                                                  group_idx,
+                                                  num_moments,
+                                                  slot.saved_psi);
+  };
+  DispatchCellDOFs<fixed_ndofs>(cell.num_nodes, sweep);
+}
+
+/**
  * Sweep the current level of every batch slot, with one thread per cell and angle-group.
  * Each grid-z slice (blockIdx.z, or SYCL dimension 0) is a different angle set's current level.
  * One launch therefore covers many angle sets instead of one. The per-thread work is the same
@@ -104,35 +150,102 @@ AAHDFusedSweepKernel(Arguments<SweepKind::AAH> shared_args,
   unsigned int angle_group_idx = linear_mapping ? x_idx - cell_idx * slot_stride : x_idx;
   if (cell_idx >= slot.num_cells || angle_group_idx >= slot_stride)
     return;
+  SweepSlotCell<fixed_ndofs>(shared_args, slot, cell_idx, angle_group_idx);
+}
 
-  const Arguments<SweepKind::AAH> args = SlotArguments(shared_args, slot);
-  unsigned int angle_idx = angle_group_idx / args.groupset_size;
-  unsigned int group_idx = angle_group_idx - angle_idx * args.groupset_size;
-  const std::uint32_t cell_local_idx = slot.cells_to_sweep[cell_idx];
-  CellView cell;
-  MeshView(args.mesh_data).GetCellView(cell, cell_local_idx);
-  if (cell.num_nodes == 0)
+/**
+ * Sweep one level of every batch slot, with the slots' (cell, angle-group) pairs flattened into one
+ * index range. Slot `s` owns the indices from `batch_slots[s].work_offset` to the next slot's
+ * offset, so slots with small levels launch no idle threads. A thread finds its slot by binary
+ * search over the offsets.
+ *
+ * \tparam fixed_ndofs Single compiled cell DOF count, or 0 for all counts (see DispatchCellDOFs).
+ * \param shared_args Launch data shared by every angle set of the launch.
+ * \param batch_slots Batch slots of the launch, in increasing work_offset order.
+ * \param num_slots Number of slots.
+ * \param total_work Total number of (cell, angle-group) pairs.
+ */
+template <std::uint32_t fixed_ndofs>
+__CRB_GLOBAL_FUNC__ void
+AAHDFusedFlatKernel(Arguments<SweepKind::AAH> shared_args,
+                    const AAHD_BatchSlot* batch_slots,
+                    unsigned int num_slots,
+                    unsigned int total_work)
+{
+#if defined(__NVCC__) || defined(__HIPCC__)
+  const unsigned int idx = threadIdx.x + blockDim.x * blockIdx.x;
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+  auto work_index = ::sycl::ext::oneapi::this_work_item::get_nd_item<3>();
+  const unsigned int idx = work_index.get_global_id(2);
+#endif
+  if (idx >= total_work)
     return;
-  auto [cell_edge_data, _] = GetCellDataIndex(args.flud_index, cell_local_idx);
-  std::uint32_t num_moments;
-  DirectionView direction;
+  unsigned int lo = 0;
+  unsigned int hi = num_slots - 1;
+  while (lo < hi)
   {
-    QuadratureView quadrature(args.quad_data);
-    num_moments = quadrature.num_moments;
-    quadrature.GetDirectionView(direction, args.directions[angle_idx]);
+    const unsigned int mid = (lo + hi + 1) / 2;
+    if (batch_slots[mid].work_offset <= idx)
+      lo = mid;
+    else
+      hi = mid - 1;
   }
-  auto sweep = [&](auto dof_c)
+  const AAHD_BatchSlot& slot = batch_slots[lo];
+  const unsigned int slot_stride = shared_args.groupset_size * slot.angleset_size;
+  const unsigned int local = idx - slot.work_offset;
+  const unsigned int cell_idx = local / slot_stride;
+  SweepSlotCell<fixed_ndofs>(shared_args, slot, cell_idx, local - cell_idx * slot_stride);
+}
+
+/**
+ * Sweep every level of every batch slot in one launch, with one block per angle set.
+ * The block walks its angle set's levels in order. Its threads stride over each level's
+ * (cell, angle-group) pairs, and a block barrier separates the levels, so a level reads the
+ * angular fluxes the previous levels wrote. This replaces one launch per level with one launch
+ * per run, at the cost of putting each angle set on one compute unit. It suits runs whose levels
+ * are small.
+ *
+ * \tparam fixed_ndofs Single compiled cell DOF count, or 0 for all counts (see DispatchCellDOFs).
+ * \param shared_args Launch data shared by every angle set of the launch.
+ * \param batch_slots Batch slots of the run, `num_levels` rows of `batch_size` slots.
+ * \param batch_size Number of angle sets in the run.
+ * \param num_levels Number of levels in the run.
+ */
+template <std::uint32_t fixed_ndofs>
+__CRB_GLOBAL_FUNC__ void
+AAHDFusedRunKernel(Arguments<SweepKind::AAH> shared_args,
+                   const AAHD_BatchSlot* batch_slots,
+                   unsigned int batch_size,
+                   unsigned int num_levels)
+{
+#if defined(__NVCC__) || defined(__HIPCC__)
+  const unsigned int member = blockIdx.z;
+  const unsigned int tid = threadIdx.x;
+  const unsigned int num_threads = blockDim.x;
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+  auto work_index = ::sycl::ext::oneapi::this_work_item::get_nd_item<3>();
+  const unsigned int member = work_index.get_group(0);
+  const unsigned int tid = work_index.get_local_id(2);
+  const unsigned int num_threads = work_index.get_local_range(2);
+#endif
+  for (unsigned int level = 0; level < num_levels; ++level)
   {
-    Sweep<decltype(dof_c)::value, SweepKind::AAH>(args,
-                                                  cell,
-                                                  direction,
-                                                  cell_edge_data,
-                                                  angle_group_idx,
-                                                  group_idx,
-                                                  num_moments,
-                                                  slot.saved_psi);
-  };
-  DispatchCellDOFs<fixed_ndofs>(cell.num_nodes, sweep);
+    const AAHD_BatchSlot& slot = batch_slots[level * batch_size + member];
+    if (slot.cells_to_sweep == nullptr)
+      break;
+    const unsigned int slot_stride = shared_args.groupset_size * slot.angleset_size;
+    const unsigned int work = slot.num_cells * slot_stride;
+    for (unsigned int i = tid; i < work; i += num_threads)
+    {
+      const unsigned int cell_idx = i / slot_stride;
+      SweepSlotCell<fixed_ndofs>(shared_args, slot, cell_idx, i - cell_idx * slot_stride);
+    }
+#if defined(__NVCC__) || defined(__HIPCC__)
+    __syncthreads();
+#elif defined(SYCL_LANGUAGE_VERSION) && defined(__INTEL_LLVM_COMPILER)
+    ::sycl::group_barrier(work_index.get_group());
+#endif
+  }
 }
 
 } // namespace opensn::gpu_kernel
