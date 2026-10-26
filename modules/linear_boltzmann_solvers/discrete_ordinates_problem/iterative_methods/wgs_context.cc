@@ -61,14 +61,6 @@ WGSContext::MatrixAction(Mat& matrix, Vec& action_vector, Vec& action)
   LBSVecOps::SetPrimarySTLvectorFromGSPETScVec(
     do_problem, groupset, action_vector, PhiSTLOption::PHI_OLD);
 
-  // Setting the source using updated phi_old
-  do_problem.ZeroQMoments();
-  {
-    CALI_CXX_MARK_SCOPE("Source");
-    set_source_function(
-      groupset, do_problem.GetQMomentsLocal(), do_problem.GetPhiOldLocal(), lhs_src_scope_);
-  }
-
   // Disable RHS time term in Krylov operator
   if (auto* sweep_ctx = dynamic_cast<SweepWGSContext*>(gs_context_ptr))
   {
@@ -76,8 +68,8 @@ WGSContext::MatrixAction(Mat& matrix, Vec& action_vector, Vec& action)
       sweep_ctx->sweep_chunk->IncludeRHSTimeTerm(false);
   }
 
-  // Apply transport operator
-  gs_context_ptr->ApplyInverseTransportOperator(lhs_src_scope_);
+  // Set the source from the updated phi_old and apply the transport operator
+  ApplySourceAndInverseTransportOperator(lhs_src_scope_ | ZERO_SOURCE_MOMENTS);
 
   // Copy local into operating vector
   // We copy the STL data to the operating vector
@@ -92,6 +84,19 @@ WGSContext::MatrixAction(Mat& matrix, Vec& action_vector, Vec& action)
   OpenSnPETScCall(VecAYPX(action, -1.0, action_vector));
 
   return 0;
+}
+
+void
+WGSContext::ApplySourceAndInverseTransportOperator(SourceFlags scope)
+{
+  if (do_problem.UseGPUs())
+    scope |= KEEP_SOURCE_MOMENTS_ON_DEVICE;
+  {
+    CALI_CXX_MARK_SCOPE("Source");
+    set_source_function(
+      groupset, do_problem.GetQMomentsLocal(), do_problem.GetPhiOldLocal(), scope);
+  }
+  ApplyInverseTransportOperator(scope);
 }
 
 ScopedRestore

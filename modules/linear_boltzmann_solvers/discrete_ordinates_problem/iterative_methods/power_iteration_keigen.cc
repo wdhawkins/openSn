@@ -62,14 +62,15 @@ PowerIterationKEigen(LBSProblem& lbs_problem,
   {
     CALI_CXX_MARK_LOOP_ITERATION(pi_iteration, nit);
 
-    lbs_problem.ZeroQMoments();
+    SourceFlags fission_flags =
+      APPLY_AGS_FISSION_SOURCES | APPLY_WGS_FISSION_SOURCES | ZERO_SOURCE_MOMENTS;
     for (const auto& groupset : groupsets)
     {
       CALI_CXX_MARK_SCOPE("Source");
-      active_set_source_function(groupset,
-                                 lbs_problem.GetQMomentsLocal(),
-                                 phi_old_local,
-                                 APPLY_AGS_FISSION_SOURCES | APPLY_WGS_FISSION_SOURCES);
+      active_set_source_function(
+        groupset, lbs_problem.GetQMomentsLocal(), phi_old_local, fission_flags);
+      // Later groupsets add to the source moments the first one zeroed.
+      fission_flags.Unset(ZERO_SOURCE_MOMENTS);
     }
 
     lbs_problem.ScaleQMoments(1.0 / k_eff);

@@ -323,13 +323,15 @@ void
 PowerIterationKEigenSolver::SetLBSFissionSource(const std::vector<double>& input,
                                                 const bool additive)
 {
+  SourceFlags source_flags = APPLY_AGS_FISSION_SOURCES | APPLY_WGS_FISSION_SOURCES;
   if (not additive)
-    do_problem_->ZeroQMoments();
+    source_flags |= ZERO_SOURCE_MOMENTS;
 
   for (const auto& groupset : groupsets_)
   {
-    active_set_source_function_(
-      groupset, q_moments_local_, input, APPLY_AGS_FISSION_SOURCES | APPLY_WGS_FISSION_SOURCES);
+    active_set_source_function_(groupset, q_moments_local_, input, source_flags);
+    // Later groupsets add to the source moments the first one zeroed.
+    source_flags.Unset(ZERO_SOURCE_MOMENTS);
   }
 }
 
@@ -338,16 +340,17 @@ PowerIterationKEigenSolver::SetLBSScatterSource(const std::vector<double>& input
                                                 const bool additive,
                                                 const bool suppress_wg_scat)
 {
-  if (not additive)
-    do_problem_->ZeroQMoments();
-
   SourceFlags source_flags = APPLY_AGS_SCATTER_SOURCES | APPLY_WGS_SCATTER_SOURCES;
   if (suppress_wg_scat)
     source_flags |= SUPPRESS_WG_SCATTER;
+  if (not additive)
+    source_flags |= ZERO_SOURCE_MOMENTS;
 
   for (const auto& groupset : groupsets_)
   {
     active_set_source_function_(groupset, q_moments_local_, input, source_flags);
+    // Later groupsets add to the source moments the first one zeroed.
+    source_flags.Unset(ZERO_SOURCE_MOMENTS);
   }
 }
 

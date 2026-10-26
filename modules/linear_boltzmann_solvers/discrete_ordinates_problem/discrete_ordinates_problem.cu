@@ -10,16 +10,27 @@ namespace opensn
 {
 
 void
-DiscreteOrdinatesProblem::CopyPhiAndSrcToDevice()
+DiscreteOrdinatesProblem::PreparePhiAndSrcForDeviceSweep(const LBSGroupset& groupset,
+                                                         const bool source_moments_on_device)
 {
   if (!use_gpus_)
     return;
   CaliperRegionScope cali_gpu_transfer_scope("GPUTransfer", CaliperGPUTransferScopeDepth());
   auto* src = GetSourceMomentsPinner();
-  src->CopyToDevice();
+  if (not source_moments_on_device)
+    src->CopyToDevice();
   DeviceVectorMirror<double>* phi = GetPhiPinner();
-  phi->CopyToDevice();
-  outflow_carrier_->CopyToDevice();
+  if (DeviceSweepZeroesDestinations(groupset))
+  {
+    // CopyPhiAndOutflowBackToHost overwrites the complete host arrays, which were not zeroed.
+    phi->ZeroOnDevice();
+    outflow_carrier_->ZeroOnDevice();
+  }
+  else
+  {
+    phi->CopyToDevice();
+    outflow_carrier_->CopyToDevice();
+  }
 }
 
 void

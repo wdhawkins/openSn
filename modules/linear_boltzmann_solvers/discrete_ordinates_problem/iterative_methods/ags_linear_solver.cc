@@ -58,11 +58,15 @@ AGSLinearSolver::Solve()
   const bool print_ags_stats = verbose_ and is_multi_groupset;
   last_solve_ = {};
 
-  phi_old_ = lbs_problem_.GetPhiOldLocal();
+  // A single pass has no use for the change between iterations, which is only reported for multiple
+  // groupsets, so skip measuring it.
+  const bool measure_change = is_multi_groupset or max_iterations_ > 1;
+  if (measure_change)
+    phi_old_ = lbs_problem_.GetPhiOldLocal();
 
   // Save qmoms to be restored after each iteration. This is necessary for multiple ags iterations
   // to function and for keigen-value problems
-  const auto saved_qmoms = lbs_problem_.GetQMomentsLocal();
+  saved_q_moments_ = lbs_problem_.GetQMomentsLocal();
 
   double pw_change_prev = 1.0;
   double last_error = 0.0;
@@ -97,7 +101,7 @@ AGSLinearSolver::Solve()
     std::stringstream iter_stats;
     iter_stats << program_timer.GetTimeString() << " AGS iteration = " << iter;
 
-    if (lbs_problem_.GetOptions().ags_pointwise_convergence)
+    if (measure_change and lbs_problem_.GetOptions().ags_pointwise_convergence)
     {
       double pw_change = ComputePointwisePhiChange(lbs_problem_, phi_old_);
       last_error = pw_change;
@@ -110,7 +114,7 @@ AGSLinearSolver::Solve()
       if (pw_change < std::max(tolerance_ * (1.0 - rho), 1.0e-10))
         converged = true;
     }
-    else
+    else if (measure_change)
     {
       double norm = ComputeL2PhiChange(lbs_problem_, phi_old_);
       last_error = norm;
@@ -130,7 +134,7 @@ AGSLinearSolver::Solve()
       log.Log() << no_wrap << iter_stats.str();
 
     // Restore qmoms
-    lbs_problem_.SetQMomentsFrom(saved_qmoms);
+    lbs_problem_.SetQMomentsFrom(saved_q_moments_);
 
     if (wgs_status == IterationStatus::FAILED)
     {

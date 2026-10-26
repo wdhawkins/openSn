@@ -58,6 +58,8 @@ public:
    *
    * @note Scaling factors do not compound. Each time this routine is called, the cross sections
    *       are scaled from the original, unscaled data.
+   * @note Problems that already use these cross sections are not updated; reassign them with
+   *       LBSProblem::SetBlockID2XSMap to rebuild derived data.
    */
   void Scale(double factor);
 

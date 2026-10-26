@@ -49,6 +49,8 @@ private:
   LBSProblem& lbs_problem_; // NOLINT(clang-diagnostic-unused-private-field)
   std::vector<std::shared_ptr<LinearSolver>> wgs_solvers_;
   std::vector<double> phi_old_;
+  /// Source moments restored after each iteration; a member so its storage is reused.
+  std::vector<double> saved_q_moments_;
   unsigned int max_iterations_;
   double tolerance_;
   bool verbose_;

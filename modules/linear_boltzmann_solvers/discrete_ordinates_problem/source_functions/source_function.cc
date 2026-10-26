@@ -6,6 +6,7 @@
 #include "framework/mesh/mesh/mesh.h"
 #include "framework/runtime.h"
 #include "framework/logging/log.h"
+#include <algorithm>
 
 namespace opensn
 {
@@ -20,8 +21,19 @@ SourceFunction::operator()(const LBSGroupset& groupset,
                            const std::vector<double>& phi,
                            const SourceFlags source_flags)
 {
-  if (source_flags.Empty())
+  const bool zero_q = source_flags & ZERO_SOURCE_MOMENTS;
+  const bool keep_on_device = source_flags & KEEP_SOURCE_MOMENTS_ON_DEVICE;
+  auto source_terms = source_flags;
+  source_terms.Unset(ZERO_SOURCE_MOMENTS);
+  source_terms.Unset(KEEP_SOURCE_MOMENTS_ON_DEVICE);
+  if (source_terms.Empty())
+  {
+    if (zero_q)
+      std::fill(q.begin(), q.end(), 0.0);
+    if (keep_on_device)
+      lbs_problem_.CopySourceMomentsToDevice(q);
     return;
+  }
 
   apply_fixed_src_ = (source_flags & APPLY_FIXED_SOURCES);
   apply_wgs_scatter_src_ = (source_flags & APPLY_WGS_SCATTER_SOURCES);
@@ -46,6 +58,22 @@ SourceFunction::operator()(const LBSGroupset& groupset,
   const auto& ext_src_moments_local = lbs_problem_.GetExtSrcMomentsLocal();
 
   const auto& m_to_ell_em_map = groupset.quadrature->GetMomentToHarmonicsIndexMap();
+
+  // The GPU computes the scattering and prompt fission sources. Point and volumetric sources are
+  // added on the host, so a result they modify must come back to the host first.
+  const bool host_sources = apply_fixed_src_ and (not lbs_problem_.GetPointSources().empty() or
+                                                  not lbs_problem_.GetVolumetricSources().empty());
+  if (lbs_problem_.AddMaterialSourceGPU(
+        groupset, q, phi, source_flags, host_sources or not keep_on_device))
+  {
+    AddAdditionalSources(groupset, q, phi, source_flags);
+    if (keep_on_device and host_sources)
+      lbs_problem_.CopySourceMomentsToDevice(q);
+    return;
+  }
+
+  if (zero_q)
+    std::fill(q.begin(), q.end(), 0.0);
 
   // The transfer and production matrices of the problem's mode (transposed in adjoint mode)
   const bool adjoint = lbs_problem_.GetOptions().adjoint;
@@ -153,6 +181,8 @@ SourceFunction::operator()(const LBSGroupset& groupset,
   } // for cell
 
   AddAdditionalSources(groupset, q, phi, source_flags);
+  if (keep_on_device)
+    lbs_problem_.CopySourceMomentsToDevice(q);
 }
 
 double

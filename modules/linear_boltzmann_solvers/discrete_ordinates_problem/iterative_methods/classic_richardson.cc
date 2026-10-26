@@ -69,12 +69,7 @@ ClassicRichardson::Solve()
 
     num_iterations = k + 1;
     do_problem.SetQMomentsFrom(saved_q_moments_local_);
-    {
-      CALI_CXX_MARK_SCOPE("Source");
-      gs_context_ptr->set_source_function(
-        groupset, do_problem.GetQMomentsLocal(), do_problem.GetPhiOldLocal(), scope);
-    }
-    gs_context_ptr->ApplyInverseTransportOperator(scope);
+    gs_context_ptr->ApplySourceAndInverseTransportOperator(scope);
 
     // Scalar flux before acceleration, to form the DSA correction applied to the lagged
     // boundary angular fluxes.

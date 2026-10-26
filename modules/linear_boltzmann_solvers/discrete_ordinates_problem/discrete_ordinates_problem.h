@@ -222,7 +222,14 @@ public:
   BoundaryCarrier* GetBoundaryCarrier() { return boundary_carrier_.get(); }
   const BoundaryCarrier* GetBoundaryCarrier() const { return boundary_carrier_.get(); }
 
-  void CopyPhiAndSrcToDevice();
+  /// Upload sweep inputs and initialize the device destination arrays. The source moments are
+  /// uploaded unless `source_moments_on_device` states that their device copy is current.
+  void PreparePhiAndSrcForDeviceSweep(const LBSGroupset& groupset, bool source_moments_on_device);
+  /**
+   * Whether a sweep of `groupset` zeroes the destination scalar flux and outflows on the device and
+   * copies all of them back afterward, so their host copies need no zeroing before the sweep.
+   */
+  bool DeviceSweepZeroesDestinations(const LBSGroupset& groupset) const;
   void CopyPhiAndOutflowBackToHost();
   /**
    * Transfer data in boundary to device or vice-versa.

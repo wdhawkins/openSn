@@ -33,6 +33,9 @@ public:
   /// Copy host outflow values to device storage.
   void CopyToDevice();
 
+  /// Set all device outflow values to zero without transferring the zeroed host array.
+  void ZeroOnDevice();
+
   /// Copy device outflow values to host storage.
   void CopyFromDevice();
 

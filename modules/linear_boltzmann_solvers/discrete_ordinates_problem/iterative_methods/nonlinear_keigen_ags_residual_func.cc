@@ -64,14 +64,15 @@ NLKEigenResidualFunction(SNES snes, Vec phi, Vec r, void* ctx)
   }
 
   // Compute 1/k F phi
-  lbs_problem->ZeroQMoments();
+  SourceFlags fission_flags =
+    APPLY_AGS_FISSION_SOURCES | APPLY_WGS_FISSION_SOURCES | ZERO_SOURCE_MOMENTS;
   for (const auto& groupset : lbs_problem->GetGroupsets())
   {
     CALI_CXX_MARK_SCOPE("Source");
-    active_set_source_function(groupset,
-                               lbs_problem->GetQMomentsLocal(),
-                               lbs_problem->GetPhiOldLocal(),
-                               APPLY_AGS_FISSION_SOURCES | APPLY_WGS_FISSION_SOURCES);
+    active_set_source_function(
+      groupset, lbs_problem->GetQMomentsLocal(), lbs_problem->GetPhiOldLocal(), fission_flags);
+    // Later groupsets add to the source moments the first one zeroed.
+    fission_flags.Unset(ZERO_SOURCE_MOMENTS);
   }
 
   const double k_eff = ComputeFissionProduction(*lbs_problem, lbs_problem->GetPhiOldLocal());

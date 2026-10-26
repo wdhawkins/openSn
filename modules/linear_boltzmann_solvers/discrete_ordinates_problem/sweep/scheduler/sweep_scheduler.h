@@ -54,7 +54,12 @@ public:
 
   void Sweep();
 
-  void PrepareForSweep(bool use_boundary_source, bool zero_incoming_delayed_psi);
+  /// `source_moments_on_device` states that the device copy of the source moments is current, and
+  /// `zero_destination_phi` whether the host destination scalar flux is zeroed.
+  void PrepareForSweep(bool use_boundary_source,
+                       bool zero_incoming_delayed_psi,
+                       bool source_moments_on_device,
+                       bool zero_destination_phi);
 
 private:
   /// Applies a first-in-first-out sweep scheduling.
@@ -79,6 +84,8 @@ private:
   SchedulingAlgorithm scheduler_type_;
   AngleAggregation& angle_agg_;
   SweepChunk& sweep_chunk_;
+  /// Set by PrepareForSweep for the following device sweep.
+  bool source_moments_on_device_ = false;
 
   std::vector<RuleValues> rule_values_;
 

@@ -256,6 +256,9 @@ WrapMultiGroupXS(py::module& xs)
     Named custom 1D XS are scaled along with the standard 1D cross-section data.
     CEPXS stopping power and energy-deposition responses are also scaled;
     energy-group bounds are unchanged.
+    A problem that already uses these cross sections is not updated, including
+    its GPU copies; pass them to the problem's ``SetXSMap`` again so that data
+    derived from them is rebuilt.
     )",
     py::arg("factor")
   );

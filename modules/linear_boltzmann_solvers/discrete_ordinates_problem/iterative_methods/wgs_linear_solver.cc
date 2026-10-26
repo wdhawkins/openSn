@@ -178,20 +178,14 @@ WGSLinearSolver::SetRHS()
 
   if (not single_richardson)
   {
-    const auto scope = gs_context_ptr->GetRHSSourceScope() | ZERO_INCOMING_DELAYED_PSI;
-    {
-      CALI_CXX_MARK_SCOPE("Source");
-      gs_context_ptr->set_source_function(
-        groupset, do_problem.GetQMomentsLocal(), do_problem.GetPhiOldLocal(), scope);
-    }
-
     // Enable RHS time (tau*psi^n)
     auto sweep_ctx = std::dynamic_pointer_cast<SweepWGSContext>(gs_context_ptr);
     if (sweep_ctx && sweep_ctx->sweep_chunk->IsTimeDependent())
       sweep_ctx->sweep_chunk->IncludeRHSTimeTerm(true);
 
-    // Apply transport operator
-    gs_context_ptr->ApplyInverseTransportOperator(scope);
+    // Set the RHS source and apply transport operator
+    gs_context_ptr->ApplySourceAndInverseTransportOperator(gs_context_ptr->GetRHSSourceScope() |
+                                                           ZERO_INCOMING_DELAYED_PSI);
 
     // Assemble PETSc vector
     LBSVecOps::SetGSPETScVecFromPrimarySTLvector(do_problem, groupset, b_, PhiSTLOption::PHI_NEW);
@@ -212,15 +206,9 @@ WGSLinearSolver::SetRHS()
   // RHS, and just suppress the kspsolve part.
   else
   {
-    const auto scope = gs_context_ptr->GetRHSSourceScope() | gs_context_ptr->GetLHSSourceScope();
-    {
-      CALI_CXX_MARK_SCOPE("Source");
-      gs_context_ptr->set_source_function(
-        groupset, do_problem.GetQMomentsLocal(), do_problem.GetPhiOldLocal(), scope);
-    }
-
-    // Apply transport operator
-    gs_context_ptr->ApplyInverseTransportOperator(scope);
+    // Set the source and apply transport operator
+    gs_context_ptr->ApplySourceAndInverseTransportOperator(gs_context_ptr->GetRHSSourceScope() |
+                                                           gs_context_ptr->GetLHSSourceScope());
 
     // Assemble PETSc vector
     LBSVecOps::SetGSPETScVecFromPrimarySTLvector(do_problem, groupset, x_, PhiSTLOption::PHI_NEW);

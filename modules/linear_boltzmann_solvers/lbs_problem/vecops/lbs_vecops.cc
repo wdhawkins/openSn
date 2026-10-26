@@ -4,6 +4,7 @@
 #include "modules/linear_boltzmann_solvers/lbs_problem/vecops/lbs_vecops.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/lbs_problem.h"
 #include "framework/math/petsc_utils/petsc_utils.h"
+#include <algorithm>
 
 namespace opensn
 {
@@ -20,7 +21,32 @@ LBSVecOps::GroupsetScopedCopy(LBSProblem& lbs_problem,
   const auto& cell_transport_views = lbs_problem.GetCellTransportViews();
   auto num_moments = lbs_problem.GetNumMoments();
 
-  int64_t idx = -1;
+  // A groupset of all groups is one run when the cells store their unknowns back to back in
+  // local-cell order.
+  if (gsi == 0 and gss == lbs_problem.GetNumGroups())
+  {
+    std::size_t count = 0;
+    bool contiguous = true;
+    for (const auto& cell : grid->GetLocalCells())
+    {
+      const auto& transport_view = cell_transport_views[cell->local_id];
+      if (transport_view.MapDOF(0, 0, 0) != count)
+      {
+        contiguous = false;
+        break;
+      }
+      count += static_cast<std::size_t>(transport_view.GetNumNodes()) * num_moments * gss;
+    }
+    if (contiguous)
+    {
+      if (count > 0)
+        func(int64_t{0}, std::size_t{0}, count);
+      return static_cast<int64_t>(count) - 1;
+    }
+  }
+
+  // Otherwise each node-moment pair holds the groupset's groups contiguously.
+  int64_t idx = 0;
   for (const auto& cell : grid->GetLocalCells())
   {
     const auto& transport_view = cell_transport_views[cell->local_id];
@@ -29,16 +55,12 @@ LBSVecOps::GroupsetScopedCopy(LBSProblem& lbs_problem,
     {
       for (unsigned int m = 0; m < num_moments; ++m)
       {
-        auto mapped_idx = transport_view.MapDOF(i, m, gsi);
-        for (unsigned int g = 0; g < gss; ++g)
-        {
-          ++idx;
-          func(idx, mapped_idx + g);
-        }
+        func(idx, transport_view.MapDOF(i, m, gsi), std::size_t{gss});
+        idx += gss;
       }
     }
   }
-  return idx;
+  return idx - 1;
 }
 
 void
@@ -106,11 +128,13 @@ LBSVecOps::SetGSPETScVecFromPrimarySTLvector(
     (src == PhiSTLOption::PHI_NEW) ? lbs_problem.GetPhiNewLocal() : lbs_problem.GetPhiOldLocal();
   PetscScalar* petsc_dest = nullptr;
   OpenSnPETScCall(VecGetArray(dest, &petsc_dest));
-  int64_t index = offset + GroupsetScopedCopy(lbs_problem,
-                                              groupset.first_group,
-                                              groupset.GetNumGroups(),
-                                              [&](int64_t idx, size_t mapped_idx)
-                                              { petsc_dest[offset + idx] = src_phi[mapped_idx]; });
+  int64_t index =
+    offset + GroupsetScopedCopy(
+               lbs_problem,
+               groupset.first_group,
+               groupset.GetNumGroups(),
+               [&](int64_t idx, size_t mapped_idx, size_t count)
+               { std::copy_n(src_phi.data() + mapped_idx, count, petsc_dest + offset + idx); });
   if (groupset.angle_agg)
   {
     if (src == PhiSTLOption::PHI_NEW)
@@ -129,11 +153,13 @@ LBSVecOps::SetPrimarySTLvectorFromGSPETScVec(
     (dest == PhiSTLOption::PHI_NEW) ? lbs_problem.GetPhiNewLocal() : lbs_problem.GetPhiOldLocal();
   const PetscScalar* petsc_src = nullptr;
   OpenSnPETScCall(VecGetArrayRead(src, &petsc_src));
-  int64_t index = offset + GroupsetScopedCopy(lbs_problem,
-                                              groupset.first_group,
-                                              groupset.GetNumGroups(),
-                                              [&](int64_t idx, size_t mapped_idx)
-                                              { dest_phi[mapped_idx] = petsc_src[offset + idx]; });
+  int64_t index =
+    offset + GroupsetScopedCopy(
+               lbs_problem,
+               groupset.first_group,
+               groupset.GetNumGroups(),
+               [&](int64_t idx, size_t mapped_idx, size_t count)
+               { std::copy_n(petsc_src + offset + idx, count, dest_phi.data() + mapped_idx); });
   if (groupset.angle_agg)
   {
     if (dest == PhiSTLOption::PHI_NEW)
@@ -156,7 +182,8 @@ LBSVecOps::SetGroupScopedPETScVecFromPrimarySTLvector(LBSProblem& lbs_problem,
   GroupsetScopedCopy(lbs_problem,
                      first_group_id,
                      last_group_id - first_group_id + 1,
-                     [&](int64_t idx, size_t mapped_idx) { petsc_dest[idx] = src[mapped_idx]; });
+                     [&](int64_t idx, size_t mapped_idx, size_t count)
+                     { std::copy_n(src.data() + mapped_idx, count, petsc_dest + idx); });
   OpenSnPETScCall(VecRestoreArray(dest, &petsc_dest));
 }
 
@@ -174,8 +201,8 @@ LBSVecOps::SetPrimarySTLvectorFromGroupScopedPETScVec(LBSProblem& lbs_problem,
   GroupsetScopedCopy(lbs_problem,
                      first_group_id,
                      last_group_id - first_group_id + 1,
-                     [&](int64_t idx, size_t mapped_idx)
-                     { dest_phi[mapped_idx] = petsc_src[idx]; });
+                     [&](int64_t idx, size_t mapped_idx, size_t count)
+                     { std::copy_n(petsc_src + idx, count, dest_phi.data() + mapped_idx); });
   OpenSnPETScCall(VecRestoreArrayRead(src, &petsc_src));
 }
 
@@ -188,7 +215,11 @@ LBSVecOps::GSScopedCopyPrimarySTLvectors(LBSProblem& lbs_problem,
   GroupsetScopedCopy(lbs_problem,
                      groupset.first_group,
                      groupset.GetNumGroups(),
-                     [&](int64_t idx, size_t mapped_idx) { dest[mapped_idx] = src[mapped_idx]; });
+                     [&](int64_t, size_t mapped_idx, size_t count)
+                     {
+                       if (&src != &dest)
+                         std::copy_n(src.data() + mapped_idx, count, dest.data() + mapped_idx);
+                     });
 }
 
 void
@@ -204,8 +235,12 @@ LBSVecOps::GSScopedCopyPrimarySTLvectors(LBSProblem& lbs_problem,
   GroupsetScopedCopy(lbs_problem,
                      groupset.first_group,
                      groupset.GetNumGroups(),
-                     [&](int64_t idx, size_t mapped_idx)
-                     { dest_phi[mapped_idx] = src_phi[mapped_idx]; });
+                     [&](int64_t, size_t mapped_idx, size_t count)
+                     {
+                       if (&src_phi != &dest_phi)
+                         std::copy_n(
+                           src_phi.data() + mapped_idx, count, dest_phi.data() + mapped_idx);
+                     });
   if (groupset.angle_agg)
   {
     if (src == PhiSTLOption::PHI_NEW and dest == PhiSTLOption::PHI_OLD)
@@ -235,11 +270,13 @@ LBSVecOps::SetMultiGSPETScVecFromPrimarySTLvector(LBSProblem& lbs_problem,
     auto gsf = groupset.last_group;
     auto gss = gsf - gsi + 1;
 
-    int64_t index = offset + GroupsetScopedCopy(lbs_problem,
-                                                gsi,
-                                                gss,
-                                                [&](int64_t idx, size_t mapped_idx)
-                                                { x_ref[offset + idx] = y[mapped_idx]; });
+    int64_t index =
+      offset +
+      GroupsetScopedCopy(lbs_problem,
+                         gsi,
+                         gss,
+                         [&](int64_t idx, size_t mapped_idx, size_t count)
+                         { std::copy_n(y.data() + mapped_idx, count, x_ref + offset + idx); });
     if (groupset.angle_agg)
     {
       if (which_phi == PhiSTLOption::PHI_NEW)
@@ -273,11 +310,13 @@ LBSVecOps::SetPrimarySTLvectorFromMultiGSPETScVec(LBSProblem& lbs_problem,
     auto gsf = groupset.last_group;
     auto gss = gsf - gsi + 1;
 
-    int64_t index = offset + GroupsetScopedCopy(lbs_problem,
-                                                gsi,
-                                                gss,
-                                                [&](int64_t idx, size_t mapped_idx)
-                                                { y[mapped_idx] = x_ref[offset + idx]; });
+    int64_t index =
+      offset +
+      GroupsetScopedCopy(lbs_problem,
+                         gsi,
+                         gss,
+                         [&](int64_t idx, size_t mapped_idx, size_t count)
+                         { std::copy_n(x_ref + offset + idx, count, y.data() + mapped_idx); });
     if (groupset.angle_agg)
     {
       if (which_phi == PhiSTLOption::PHI_NEW)

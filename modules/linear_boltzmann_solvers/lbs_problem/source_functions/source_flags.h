@@ -21,7 +21,13 @@ enum SourceType
   APPLY_AGS_FISSION_SOURCES = (1 << 4),
   SUPPRESS_WG_SCATTER = (1 << 5),
   ZERO_INCOMING_DELAYED_PSI = (1 << 6),
-  APPLY_PREVIOUS_PRECURSOR_SOURCES = (1 << 7)
+  APPLY_PREVIOUS_PRECURSOR_SOURCES = (1 << 7),
+  /// The source function sets the destination to zero before adding sources.
+  ZERO_SOURCE_MOMENTS = (1 << 8),
+  /// The result feeds a GPU sweep: on return the device copy of the problem's source moments is
+  /// current and the host copy may be stale. Added only by
+  /// WGSContext::ApplySourceAndInverseTransportOperator.
+  KEEP_SOURCE_MOMENTS_ON_DEVICE = (1 << 9)
 };
 
 /**

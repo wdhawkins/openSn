@@ -84,6 +84,11 @@ public:
                                                      PhiSTLOption which_phi);
 
 private:
+  /**
+   * Calls `func(packed_index, mapped_index, count)` for runs of `count` consecutive groupset
+   * entries, which start at `packed_index` in the groupset-packed layout and at `mapped_index` in
+   * the primary STL vectors. Returns the packed index of the last entry, or -1 when there is none.
+   */
   template <typename Functor>
   static int64_t
   GroupsetScopedCopy(LBSProblem& lbs_problem, unsigned int gsi, unsigned int gss, Functor func);

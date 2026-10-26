@@ -70,14 +70,8 @@ SweepWGSContext::RebuildAngularFluxFromConvergedPhi(bool include_rhs_time_term,
   auto scope = GetLHSSourceScope() | GetRHSSourceScope();
   if (zero_incoming_delayed_psi)
     scope |= ZERO_INCOMING_DELAYED_PSI;
-  {
-    CALI_CXX_MARK_SCOPE("Source");
-    set_source_function(
-      groupset, do_problem.GetQMomentsLocal(), do_problem.GetPhiOldLocal(), scope);
-  }
-
   sweep_chunk->IncludeRHSTimeTerm(include_rhs_time_term);
-  ApplyInverseTransportOperator(scope);
+  ApplySourceAndInverseTransportOperator(scope);
   LBSVecOps::GSScopedCopyPrimarySTLvectors(
     do_problem, groupset, PhiSTLOption::PHI_NEW, PhiSTLOption::PHI_OLD);
 }
@@ -136,8 +130,14 @@ SweepWGSContext::ApplyInverseTransportOperator(SourceFlags scope)
   const bool use_bndry_source_flag =
     (scope & APPLY_FIXED_SOURCES) and (not do_problem.GetOptions().use_src_moments);
   const bool zero_incoming_delayed_psi = (scope & ZERO_INCOMING_DELAYED_PSI);
-  do_problem.ZeroOutflowBalanceVars(groupset);
-  sweep_scheduler.PrepareForSweep(use_bndry_source_flag, zero_incoming_delayed_psi);
+  const bool source_moments_on_device = (scope & KEEP_SOURCE_MOMENTS_ON_DEVICE);
+  const bool zero_host_destinations = not do_problem.DeviceSweepZeroesDestinations(groupset);
+  if (zero_host_destinations)
+    do_problem.ZeroOutflowBalanceVars(groupset);
+  sweep_scheduler.PrepareForSweep(use_bndry_source_flag,
+                                  zero_incoming_delayed_psi,
+                                  source_moments_on_device,
+                                  zero_host_destinations);
 
   high_resolution_clock::time_point sweep_start = high_resolution_clock::now();
   sweep_scheduler.Sweep();

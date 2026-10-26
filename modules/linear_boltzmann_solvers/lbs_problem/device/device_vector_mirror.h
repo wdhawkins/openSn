@@ -29,6 +29,9 @@ public:
   /// Copy data from GPU.
   void CopyFromDevice() { crb::copy(host_, device_, host_.size()); }
 
+  /// Set all device values to zero.
+  void ZeroOnDevice() { device_.zero_fill(); }
+
   /// Get pointer to device memory.
   T* GetDevicePtr() { return device_.get(); }
 

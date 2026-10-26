@@ -26,6 +26,16 @@ OutflowCarrier::CopyToDevice()
 }
 
 void
+OutflowCarrier::ZeroOnDevice()
+{
+  const auto size = bank_.GetSize();
+  if (size == 0)
+    return;
+
+  device_outflows_.zero_fill();
+}
+
+void
 OutflowCarrier::CopyFromDevice()
 {
   const auto size = bank_.GetSize();

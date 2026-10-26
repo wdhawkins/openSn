@@ -276,13 +276,18 @@ SweepScheduler::Sweep()
 }
 
 void
-SweepScheduler::PrepareForSweep(bool use_boundary_source, bool zero_incoming_delayed_psi)
+SweepScheduler::PrepareForSweep(bool use_boundary_source,
+                                bool zero_incoming_delayed_psi,
+                                bool source_moments_on_device,
+                                bool zero_destination_phi)
 {
+  source_moments_on_device_ = source_moments_on_device;
   if (zero_incoming_delayed_psi)
     angle_agg_.ZeroIncomingDelayedPsi();
   angle_agg_.ZeroOutgoingDelayedPsi();
   sweep_chunk_.ZeroDestinationPsi();
-  sweep_chunk_.ZeroDestinationPhi();
+  if (zero_destination_phi)
+    sweep_chunk_.ZeroDestinationPhi();
   sweep_chunk_.SetBoundarySourceActiveFlag(use_boundary_source);
 }
 

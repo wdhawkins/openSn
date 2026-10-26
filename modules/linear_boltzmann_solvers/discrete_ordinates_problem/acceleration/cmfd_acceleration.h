@@ -75,6 +75,7 @@ private:
   void ConfigureTransportSolve(unsigned int max_iterations, double residual_tolerance);
   void BuildCoarseFluxCache();
   void BuildFaceCurrentCache();
+  void BuildCondensedXSCache();
   void AssembleOperator();
   void AssembleRHS(Vec rhs, double k_eff, const std::vector<double>& coarse_source_phi) const;
   std::vector<double> SolveCoarseSystem(double k_eff,
@@ -164,6 +165,12 @@ private:
   std::vector<double> coarse_phi_new_fine_;
   std::vector<double> coarse_phi_old_;
   std::vector<double> coarse_phi_new_;
+  /// Scratch for a corrected fine scalar flux; a member so its storage is reused.
+  std::vector<double> candidate_phi_new_;
+  std::vector<double> condensed_removal_xs_;
+  std::vector<double> condensed_diffusion_coeff_;
+  std::vector<double> condensed_scatter_xs_;
+  std::vector<double> condensed_production_xs_;
   std::map<std::tuple<uint64_t, unsigned int>, double> coarse_phi_cache_;
   std::map<std::tuple<uint64_t, std::size_t, uint64_t, unsigned int>, double> face_current_cache_;
 

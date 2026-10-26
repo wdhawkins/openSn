@@ -1397,6 +1397,28 @@ LBSProblem::HasCapableDevices()
 {
   return false;
 }
+
+bool
+LBSProblem::AddMaterialSourceGPU(const LBSGroupset& /*groupset*/,
+                                 std::vector<double>& /*q*/,
+                                 const std::vector<double>& /*phi*/,
+                                 SourceFlags /*source_flags*/,
+                                 bool /*copy_to_host*/) const
+{
+  return false;
+}
+
+void
+LBSProblem::CopySourceMomentsToDevice(const std::vector<double>& /*q*/) const
+{
+}
+
+bool
+LBSProblem::ComputeFissionProductionGPU(const std::vector<double>& /*phi*/,
+                                        double& /*local_production*/) const
+{
+  return false;
+}
 #endif // __OPENSN_WITH_GPU__
 
 std::vector<double>

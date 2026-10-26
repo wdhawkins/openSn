@@ -21,6 +21,15 @@ ComputeFissionProduction(const LBSProblem& lbs_problem, const std::vector<double
   assert(phi.size() == lbs_problem.GetPhiNewLocal().size() &&
          "ComputeFissionProduction size mismatch.");
 
+  double local_production = 0.0;
+  if (lbs_problem.ComputeFissionProductionGPU(phi, local_production))
+  {
+    local_production *= IntegralMeasureScale(grid->GetCoordinateSystem());
+    double global_production = 0.0;
+    mpi_comm.all_reduce(local_production, global_production, mpi::op::sum<double>());
+    return global_production;
+  }
+
   const auto first_grp = 0;
   const auto last_grp = lbs_problem.GetNumGroups() - 1;
 
@@ -29,7 +38,6 @@ ComputeFissionProduction(const LBSProblem& lbs_problem, const std::vector<double
   std::vector<double> delayed_spectrum;
 
   // Loop over local cells
-  double local_production = 0.0;
   for (const auto& cell : grid->GetLocalCells())
   {
     const auto& transport_view = cell_transport_views[cell->local_id];

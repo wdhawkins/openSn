@@ -196,5 +196,135 @@
       }
     ],
     "outfileprefix": "memcheck_keigen_cbc"
+  },
+  {
+    "file": "memcheck_keigen.py",
+    "comment": "Tiny GPU memcheck input: adjoint all-reflecting pyramid k-eigenvalue problem, AAH sweep, 2 power iterations with 1 sweep per inner, CPU/GPU parity",
+    "num_procs": 2,
+    "requires_gpu": true,
+    "args": [
+      "sweep_type=\"AAH\"",
+      "adjoint=True"
+    ],
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "GPU_CPU_K_ABS_DIFF=",
+        "goldvalue": 0.0,
+        "abs_tol": 1e-10
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "GPU_CPU_PHI_REL_L2_DIFF=",
+        "goldvalue": 0.0,
+        "abs_tol": 1e-10
+      }
+    ],
+    "outfileprefix": "memcheck_keigen_adjoint_aah"
+  },
+  {
+    "file": "memcheck_keigen.py",
+    "comment": "Tiny GPU memcheck input: pyramid k-eigenvalue problem with fuel and water and two groupsets, AAH sweep, 2 power iterations with 1 sweep per inner, CPU/GPU parity",
+    "num_procs": 2,
+    "requires_gpu": true,
+    "args": [
+      "sweep_type=\"AAH\"",
+      "num_groupsets=2",
+      "mixed_materials=True"
+    ],
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "GPU_CPU_K_ABS_DIFF=",
+        "goldvalue": 0.0,
+        "abs_tol": 1e-10
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "GPU_CPU_PHI_REL_L2_DIFF=",
+        "goldvalue": 0.0,
+        "abs_tol": 1e-10
+      }
+    ],
+    "outfileprefix": "memcheck_keigen_two_groupsets_mixed_aah"
+  },
+  {
+    "file": "memcheck_keigen.py",
+    "comment": "Tiny GPU memcheck input: adjoint pyramid k-eigenvalue problem with fuel and water and two groupsets, CBC sweep, 2 power iterations with 1 sweep per inner, CPU/GPU parity",
+    "num_procs": 2,
+    "requires_gpu": true,
+    "args": [
+      "sweep_type=\"CBC\"",
+      "adjoint=True",
+      "num_groupsets=2",
+      "mixed_materials=True"
+    ],
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "GPU_CPU_K_ABS_DIFF=",
+        "goldvalue": 0.0,
+        "abs_tol": 1e-10
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "GPU_CPU_PHI_REL_L2_DIFF=",
+        "goldvalue": 0.0,
+        "abs_tol": 1e-10
+      }
+    ],
+    "outfileprefix": "memcheck_keigen_adjoint_two_groupsets_mixed_cbc"
+  },
+  {
+    "file": "memcheck_steady.py",
+    "comment": "Tiny GPU memcheck input: source-driven problem, AAH sweep, 2 capped classic Richardson iterations, CPU/GPU parity",
+    "num_procs": 2,
+    "requires_gpu": true,
+    "args": [
+      "bc_case=\"source\"",
+      "sweep_type=\"AAH\"",
+      "inner_method=\"classic_richardson\""
+    ],
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "GPU_CPU_PHI_MAX_ABS_DIFF=",
+        "goldvalue": 0.0,
+        "abs_tol": 1e-10
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "GPU_CPU_PHI_REL_L2_DIFF=",
+        "goldvalue": 0.0,
+        "abs_tol": 1e-10
+      }
+    ],
+    "outfileprefix": "memcheck_steady_source_classic_aah"
+  },
+  {
+    "file": "memcheck_steady.py",
+    "comment": "Tiny GPU memcheck input: source-driven problem, CBC sweep, 2 capped classic Richardson iterations, CPU/GPU parity",
+    "num_procs": 2,
+    "requires_gpu": true,
+    "args": [
+      "bc_case=\"source\"",
+      "sweep_type=\"CBC\"",
+      "inner_method=\"classic_richardson\""
+    ],
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "GPU_CPU_PHI_MAX_ABS_DIFF=",
+        "goldvalue": 0.0,
+        "abs_tol": 1e-10
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "GPU_CPU_PHI_REL_L2_DIFF=",
+        "goldvalue": 0.0,
+        "abs_tol": 1e-10
+      }
+    ],
+    "outfileprefix": "memcheck_steady_source_classic_cbc"
   }
 ]

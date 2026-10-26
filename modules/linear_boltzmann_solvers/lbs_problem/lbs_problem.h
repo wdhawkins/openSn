@@ -32,6 +32,7 @@ class SweepCommunicator;
 class GridFaceHistogram;
 class FieldFunctionGridBased;
 class TotalXSCarrier;
+class MaterialSourceCarrier;
 class OutflowCarrier;
 class MeshCarrier;
 template <typename T>
@@ -226,6 +227,27 @@ public:
 
   DeviceVectorMirror<double>* GetPhiPinner() { return phi_pinner_.get(); }
   const DeviceVectorMirror<double>* GetPhiPinner() const { return phi_pinner_.get(); }
+
+  /**
+   * Adds the steady-state scattering and prompt fission sources of `source_flags` to `q` on the
+   * GPU, honoring ZERO_SOURCE_MOMENTS. The result is left in the device copy of `q`, and also in
+   * `q` when `copy_to_host` is set.
+   *
+   * Returns false, leaving `q` unchanged, when `q` is not the problem's source moments or the
+   * device operator does not support the request (fixed source moments, delayed fission,
+   * time-dependent problems); the caller then uses the CPU implementation.
+   */
+  bool AddMaterialSourceGPU(const LBSGroupset& groupset,
+                            std::vector<double>& q,
+                            const std::vector<double>& phi,
+                            SourceFlags source_flags,
+                            bool copy_to_host) const;
+
+  /// Uploads `q`, which must be the problem's source moments, to the device when GPUs are in use.
+  void CopySourceMomentsToDevice(const std::vector<double>& q) const;
+
+  /// Computes the rank-local prompt fission production on the GPU when supported.
+  bool ComputeFissionProductionGPU(const std::vector<double>& phi, double& local_production) const;
 
   /// Discretization and local transport data.
   /// Obtains a reference to the spatial discretization.
@@ -545,6 +567,7 @@ protected:
   std::shared_ptr<TotalXSCarrier> total_xs_carrier_ = nullptr;
   std::shared_ptr<OutflowCarrier> outflow_carrier_ = nullptr;
   std::shared_ptr<MeshCarrier> mesh_carrier_ = nullptr;
+  std::shared_ptr<MaterialSourceCarrier> material_source_carrier_ = nullptr;
 
   /// Memory pinners for source moments and destination phi.
   std::shared_ptr<DeviceVectorMirror<double>> source_pinner_ = nullptr;

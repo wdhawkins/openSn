@@ -1336,16 +1336,23 @@ DiscreteOrdinatesProblem::TransformAdjointSolutionOrientation()
 void
 DiscreteOrdinatesProblem::ZeroOutflowBalanceVars(LBSGroupset& groupset)
 {
-
   for (const auto& cell : grid_->GetLocalCells())
     for (int f = 0; f < cell->faces.size(); ++f)
       for (auto group = groupset.first_group; group <= groupset.last_group; ++group)
         cell_outflow_views_[cell->local_id].Zero(f, group);
 }
 
+bool
+DiscreteOrdinatesProblem::DeviceSweepZeroesDestinations(const LBSGroupset& groupset) const
+{
+  // A partial groupset must preserve the device values of the other groups, so it uploads them.
+  return use_gpus_ and groupset.first_group == 0 and groupset.GetNumGroups() == num_groups_;
+}
+
 #ifndef __OPENSN_WITH_GPU__
 void
-DiscreteOrdinatesProblem::CopyPhiAndSrcToDevice()
+DiscreteOrdinatesProblem::PreparePhiAndSrcForDeviceSweep(const LBSGroupset& /*groupset*/,
+                                                         bool /*source_moments_on_device*/)
 {
 }
 

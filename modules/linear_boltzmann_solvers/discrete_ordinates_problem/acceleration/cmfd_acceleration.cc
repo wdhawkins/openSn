@@ -341,6 +341,7 @@ CMFDAcceleration::Initialize()
   // for the first time exactly when outer_iteration_ reaches inactive_iterations_. Until then,
   // the groupsets keep whatever WGS settings the caller configured.
   InitializeLinearSystem();
+  BuildCondensedXSCache();
   AssembleOperator();
 
   CoarseMeshDiagnostics diagnostics;
@@ -422,6 +423,10 @@ CMFDAcceleration::PreExecute()
   coarse_phi_new_fine_.clear();
   coarse_phi_old_.clear();
   coarse_phi_new_.clear();
+  condensed_removal_xs_.clear();
+  condensed_diffusion_coeff_.clear();
+  condensed_scatter_xs_.clear();
+  condensed_production_xs_.clear();
   coarse_phi_cache_.clear();
   face_current_cache_.clear();
   outer_iteration_ = 0;
@@ -525,6 +530,10 @@ CMFDAcceleration::PostPowerIteration()
     ++outer_iteration_;
     return raw_transport_k_eff;
   }
+
+  t0 = NowSeconds();
+  BuildCondensedXSCache();
+  const double condensed_xs_cache_time = NowSeconds() - t0;
 
   t0 = NowSeconds();
   AssembleOperator();
@@ -685,6 +694,7 @@ CMFDAcceleration::PostPowerIteration()
     LogMetric("restrict_new_time", MaxAcrossRanks(restrict_new_time));
     LogMetric("coarse_flux_cache_time", MaxAcrossRanks(coarse_flux_cache_time));
     LogMetric("face_current_cache_time", MaxAcrossRanks(face_current_cache_time));
+    LogMetric("condensed_xs_cache_time", MaxAcrossRanks(condensed_xs_cache_time));
     LogMetric("assemble_time", MaxAcrossRanks(assemble_time));
     LogMetric("residual_time", MaxAcrossRanks(residual_time));
     LogMetric("fission_time", MaxAcrossRanks(fission_time));
@@ -917,6 +927,120 @@ CMFDAcceleration::CondensedProductionXS(const MultiGroupXS& xs,
     }
   }
   return numerator / denominator;
+}
+
+void
+CMFDAcceleration::BuildCondensedXSCache()
+{
+  const auto& xs_map = do_problem_.GetBlockID2XSMap();
+  const auto num_cells = coarse_mesh_.NumLocalCells();
+  const auto num_cell_groups = num_cells * num_coarse_groups_;
+  const auto num_cell_group_pairs = num_cell_groups * num_coarse_groups_;
+
+  condensed_removal_xs_.assign(num_cell_groups, 0.0);
+  condensed_diffusion_coeff_.assign(num_cell_groups, 0.0);
+  condensed_scatter_xs_.assign(num_cell_group_pairs, 0.0);
+  condensed_production_xs_.assign(num_cell_group_pairs, 0.0);
+  const std::vector<double> unweighted_spectrum;
+
+  for (const auto& coarse_cell : coarse_mesh_.LocalCells())
+  {
+    const auto& xs = *xs_map.at(coarse_cell.block_id);
+    const auto group_offset = coarse_cell.local_id * num_coarse_groups_;
+    const auto group_pair_offset = group_offset * num_coarse_groups_;
+    const auto fine_offset = coarse_cell.local_id * num_groups_;
+    const bool has_flux = not coarse_phi_new_fine_.empty();
+    const auto& sigma_t = xs.GetSigmaTotal();
+    const auto& diffusion_coeff = xs.GetDiffusionCoefficient();
+    const auto& scatter = xs.GetTransferMatrix(0, do_problem_.GetOptions().adjoint);
+    const auto& production = xs.GetProductionMatrix(do_problem_.GetOptions().adjoint);
+    const auto& precursors = xs.GetPrecursors();
+    const auto& nu_delayed_sigma_f = xs.GetNuDelayedSigmaF();
+    const bool add_delayed_production =
+      do_problem_.GetOptions().use_precursors and not precursors.empty();
+    const bool adjoint = do_problem_.GetOptions().adjoint;
+
+    std::vector<double> denominators(num_coarse_groups_, 0.0);
+    for (unsigned int g = 0; g < num_groups_; ++g)
+    {
+      const auto cg = g / group_aggregation_size_;
+      const double phi = has_flux ? coarse_phi_new_fine_[fine_offset + g] : 1.0;
+      denominators[cg] += phi;
+      condensed_removal_xs_[group_offset + cg] += sigma_t[g] * phi;
+      condensed_diffusion_coeff_[group_offset + cg] += diffusion_coeff[g] * phi;
+    }
+
+    // Visit each sparse scattering entry once, adding it to its coarse-group pair.
+    for (unsigned int g = 0; g < num_groups_; ++g)
+    {
+      const auto cg = g / group_aggregation_size_;
+      for (const auto& [_, gp, sigma_s] : scatter.Row(g))
+      {
+        const auto cgp = gp / group_aggregation_size_;
+        const double phi = has_flux ? coarse_phi_new_fine_[fine_offset + gp] : 1.0;
+        if (cg == cgp)
+          condensed_removal_xs_[group_offset + cg] -= sigma_s * phi;
+        else
+          condensed_scatter_xs_[group_pair_offset + cg * num_coarse_groups_ + cgp] += sigma_s * phi;
+      }
+    }
+
+    if (xs.IsFissionable())
+      // Each coarse-group pair accumulates in the same order as CondensedProductionXS.
+      for (unsigned int cgp = 0; cgp < num_coarse_groups_; ++cgp)
+        for (unsigned int gp = FineGroupBegin(cgp); gp < FineGroupEnd(cgp); ++gp)
+        {
+          const double phi = has_flux ? coarse_phi_new_fine_[fine_offset + gp] : 1.0;
+          for (unsigned int cg = 0; cg < num_coarse_groups_; ++cg)
+          {
+            const auto pair = group_pair_offset + cg * num_coarse_groups_ + cgp;
+            for (unsigned int g = FineGroupBegin(cg); g < FineGroupEnd(cg); ++g)
+            {
+              condensed_production_xs_[pair] += production[g][gp] * phi;
+              if (add_delayed_production)
+                for (const auto& precursor : precursors)
+                  condensed_production_xs_[pair] += precursor.emission_spectrum[adjoint ? gp : g] *
+                                                    precursor.fractional_yield *
+                                                    nu_delayed_sigma_f[adjoint ? g : gp] * phi;
+            }
+          }
+        }
+
+    for (unsigned int cg = 0; cg < num_coarse_groups_; ++cg)
+    {
+      if (std::fabs(denominators[cg]) <= 1.0e-30)
+      {
+        condensed_removal_xs_[group_offset + cg] =
+          CondensedRemovalXS(xs, unweighted_spectrum, coarse_cell, cg);
+        condensed_diffusion_coeff_[group_offset + cg] =
+          CondensedDiffusionCoefficient(xs, unweighted_spectrum, coarse_cell, cg);
+      }
+      else
+      {
+        condensed_removal_xs_[group_offset + cg] /= denominators[cg];
+        condensed_diffusion_coeff_[group_offset + cg] /= denominators[cg];
+      }
+
+      for (unsigned int row_cg = 0; row_cg < num_coarse_groups_; ++row_cg)
+      {
+        const auto pair = group_pair_offset + row_cg * num_coarse_groups_ + cg;
+        if (std::fabs(denominators[cg]) <= 1.0e-30)
+        {
+          if (row_cg != cg)
+            condensed_scatter_xs_[pair] =
+              CondensedScatterXS(xs, unweighted_spectrum, coarse_cell, row_cg, cg);
+          if (xs.IsFissionable())
+            condensed_production_xs_[pair] =
+              CondensedProductionXS(xs, unweighted_spectrum, coarse_cell, row_cg, cg);
+        }
+        else
+        {
+          condensed_scatter_xs_[pair] /= denominators[cg];
+          condensed_production_xs_[pair] /= denominators[cg];
+        }
+      }
+    }
+  }
 }
 
 void
@@ -1219,13 +1343,13 @@ CMFDAcceleration::AssembleOperator()
 
   for (const auto& coarse_cell : coarse_mesh_.LocalCells())
   {
-    const auto& xs = *xs_map.at(coarse_cell.block_id);
+    const auto group_offset = coarse_cell.local_id * num_coarse_groups_;
+    const auto group_pair_offset = group_offset * num_coarse_groups_;
 
     for (unsigned int cg = 0; cg < num_coarse_groups_; ++cg)
     {
       const auto row = MapDOF(coarse_cell.global_id, cg);
-      double diag =
-        CondensedRemovalXS(xs, coarse_phi_new_fine_, coarse_cell, cg) * coarse_cell.volume;
+      double diag = condensed_removal_xs_[group_offset + cg] * coarse_cell.volume;
 
       for (std::size_t f = 0; f < coarse_cell.faces.size(); ++f)
       {
@@ -1240,7 +1364,7 @@ CMFDAcceleration::AssembleOperator()
             ProjectedDistanceToFace(face.neighbor_centroid, face.centroid, face.normal);
           const std::vector<double> unweighted_spectrum;
           const double coeff = InterfaceDiffusionCoefficient(
-            CondensedDiffusionCoefficient(xs, coarse_phi_new_fine_, coarse_cell, cg),
+            condensed_diffusion_coeff_[group_offset + cg],
             CondensedDiffusionCoefficient(neighbor_xs, unweighted_spectrum, coarse_cell, cg),
             owner_distance_to_face,
             neighbor_distance_to_face,
@@ -1332,7 +1456,8 @@ CMFDAcceleration::AssembleOperator()
       for (unsigned int cgp = 0; cgp < num_coarse_groups_; ++cgp)
         if (cgp != cg)
         {
-          const auto sigma_s = CondensedScatterXS(xs, coarse_phi_new_fine_, coarse_cell, cg, cgp);
+          const auto sigma_s =
+            condensed_scatter_xs_[group_pair_offset + cg * num_coarse_groups_ + cgp];
           const auto col = MapDOF(coarse_cell.global_id, cgp);
           OpenSnPETScCall(MatSetValue(A_, row, col, -sigma_s * coarse_cell.volume, ADD_VALUES));
         }
@@ -1502,11 +1627,12 @@ CMFDAcceleration::AssembleRHS(Vec rhs,
       continue;
 
     const auto coarse_offset = coarse_cell.local_id * num_coarse_groups_;
+    const auto group_pair_offset = coarse_offset * num_coarse_groups_;
     for (unsigned int cg = 0; cg < num_coarse_groups_; ++cg)
     {
       double rhs_value = 0.0;
       for (unsigned int cgp = 0; cgp < num_coarse_groups_; ++cgp)
-        rhs_value += CondensedProductionXS(xs, coarse_phi_new_fine_, coarse_cell, cg, cgp) *
+        rhs_value += condensed_production_xs_[group_pair_offset + cg * num_coarse_groups_ + cgp] *
                      coarse_source_phi[coarse_offset + cgp];
       rhs_value *= coarse_cell.volume / k_eff;
       const auto row = MapDOF(coarse_cell.global_id, cg);
@@ -1584,12 +1710,12 @@ CMFDAcceleration::ComputeTransportCurrentBalanceResidual(
   {
     const auto& xs = *xs_map.at(coarse_cell.block_id);
     const auto coarse_offset = coarse_cell.local_id * num_coarse_groups_;
+    const auto group_pair_offset = coarse_offset * num_coarse_groups_;
 
     for (unsigned int cg = 0; cg < num_coarse_groups_; ++cg)
     {
       const double phi = coarse_phi[coarse_offset + cg];
-      double lhs =
-        CondensedRemovalXS(xs, coarse_phi_new_fine_, coarse_cell, cg) * coarse_cell.volume * phi;
+      double lhs = condensed_removal_xs_[coarse_offset + cg] * coarse_cell.volume * phi;
 
       for (std::size_t f = 0; f < coarse_cell.faces.size(); ++f)
       {
@@ -1609,14 +1735,15 @@ CMFDAcceleration::ComputeTransportCurrentBalanceResidual(
       for (unsigned int cgp = 0; cgp < num_coarse_groups_; ++cgp)
         if (cgp != cg)
         {
-          const auto sigma_s = CondensedScatterXS(xs, coarse_phi_new_fine_, coarse_cell, cg, cgp);
+          const auto sigma_s =
+            condensed_scatter_xs_[group_pair_offset + cg * num_coarse_groups_ + cgp];
           lhs -= sigma_s * coarse_cell.volume * coarse_phi[coarse_offset + cgp];
         }
 
       double rhs = 0.0;
       if (xs.IsFissionable())
         for (unsigned int cgp = 0; cgp < num_coarse_groups_; ++cgp)
-          rhs += CondensedProductionXS(xs, coarse_phi_new_fine_, coarse_cell, cg, cgp) *
+          rhs += condensed_production_xs_[group_pair_offset + cg * num_coarse_groups_ + cgp] *
                  coarse_source_phi[coarse_offset + cgp];
       rhs *= coarse_cell.volume / k_eff;
 
@@ -1647,10 +1774,12 @@ CMFDAcceleration::ComputeCoarseFissionProduction(const std::vector<double>& coar
       continue;
 
     const auto coarse_offset = coarse_cell.local_id * num_coarse_groups_;
+    const auto group_pair_offset = coarse_offset * num_coarse_groups_;
     for (unsigned int cg = 0; cg < num_coarse_groups_; ++cg)
       for (unsigned int cgp = 0; cgp < num_coarse_groups_; ++cgp)
-        local_production += CondensedProductionXS(xs, coarse_phi_new_fine_, coarse_cell, cg, cgp) *
-                            coarse_phi[coarse_offset + cgp] * coarse_cell.volume;
+        local_production +=
+          condensed_production_xs_[group_pair_offset + cg * num_coarse_groups_ + cgp] *
+          coarse_phi[coarse_offset + cgp] * coarse_cell.volume;
   }
 
   double global_production = 0.0;
@@ -1733,7 +1862,7 @@ CMFDAcceleration::ApplyFluxCorrectionWithDamping(const std::vector<double>& tran
     for (size_t i = 0; i < candidate_coarse_phi.size(); ++i)
       candidate_coarse_phi[i] = coarse_phi_new_[i] + coarse_delta_phi[i];
 
-    auto candidate_phi_new = transport_phi_new;
+    candidate_phi_new_ = transport_phi_new;
     CMFDProlongateScalarFluxRatio(do_problem_,
                                   first_group_,
                                   num_groups_,
@@ -1741,16 +1870,17 @@ CMFDAcceleration::ApplyFluxCorrectionWithDamping(const std::vector<double>& tran
                                   coarse_mesh_,
                                   coarse_phi_new_,
                                   candidate_coarse_phi,
-                                  candidate_phi_new);
+                                  candidate_phi_new_);
     const double candidate_fission_production =
-      ComputeFissionProduction(do_problem_, candidate_phi_new);
+      ComputeFissionProduction(do_problem_, candidate_phi_new_);
     const double candidate_k_eff =
       candidate_fission_production / old_fission_production * solver_->GetEigenvalue();
-    diagnostics = AnalyzeFluxUpdate(candidate_phi_new, candidate_k_eff);
+    diagnostics = AnalyzeFluxUpdate(candidate_phi_new_, candidate_k_eff);
     if (not diagnostics.has_invalid_k and not diagnostics.has_nonfinite_flux and
         diagnostics.min_scalar_flux >= min_allowed_scalar_flux)
     {
-      phi_new_local_ = std::move(candidate_phi_new);
+      // transport_phi_new aliases phi_new_local_; it is not used after the swap.
+      std::swap(phi_new_local_, candidate_phi_new_);
       applied_damping = damping;
       ++attempts;
       return candidate_k_eff;

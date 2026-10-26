@@ -76,6 +76,10 @@ struct WGSContext : public LinearSystemContext
    */
   virtual void ApplyInverseTransportOperator(SourceFlags scope) = 0;
 
+  /// Sets the source moments from phi_old for `scope` and applies the inverse transport operator.
+  /// On GPUs the sweep reads the source moments on the device without a host round trip.
+  void ApplySourceAndInverseTransportOperator(SourceFlags scope);
+
   virtual void PostSolveCallback() {};
 
   /// Sources treated implicitly (in the operator) by the within-group solve.

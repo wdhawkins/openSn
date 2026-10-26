@@ -16,12 +16,12 @@ source, and one of three boundary configurations selected by ``bc_case``:
 - ``opposing_reflecting``: reflecting xmin/xmax and ymin/ymax, which creates
   cyclic boundary dependencies between angle sets.
 
-The inner solve is capped at two GMRES iterations, so the flux is not
-converged. The same capped iteration sequence is run on the CPU and on the GPU
-and the scalar-flux vectors are compared. With identical algebra the two agree
-to round-off. This is a CPU/GPU equivalence check of the GPU sweep, not an
-accuracy check; accuracy of the converged solution is covered by the other
-transport regression tests.
+The inner solve is capped at two iterations, so the flux is not converged. The
+same capped iteration sequence is run on the CPU and on the GPU and the
+scalar-flux vectors are compared. With identical algebra the two agree to
+round-off. This is a CPU/GPU equivalence check of the GPU sweep, not an accuracy
+check; accuracy of the converged solution is covered by the other transport
+regression tests.
 """
 
 import math
@@ -68,7 +68,7 @@ def get_option(name, default):
     return globals().get(name, default)
 
 
-def solve(boundary_conditions, sweep_type, use_gpus):
+def solve(boundary_conditions, sweep_type, inner_method, use_gpus):
     nodes = [i / 3.0 for i in range(4)]
     grid = OrthogonalMeshGenerator(node_sets=[nodes, nodes, nodes]).Execute()
     grid.SetUniformBlockID(0)
@@ -87,7 +87,7 @@ def solve(boundary_conditions, sweep_type, use_gpus):
                     n_azimuthal=8,
                     scattering_order=1,
                 ),
-                "inner_linear_method": "petsc_gmres",
+                "inner_linear_method": inner_method,
                 # Unreachable on purpose: the solve always stops at l_max_its.
                 "l_abs_tol": 1.0e-14,
                 "l_max_its": 2,
@@ -128,12 +128,15 @@ if __name__ == "__main__":
 
     bc_case = get_option("bc_case", "source")
     sweep_type = get_option("sweep_type", "AAH")
+    inner_method = get_option("inner_method", "petsc_gmres")
     if bc_case not in BOUNDARY_CASES:
         sys.exit(f"Unknown bc_case '{bc_case}'. Expected one of {sorted(BOUNDARY_CASES)}.")
+    if inner_method not in {"classic_richardson", "petsc_gmres"}:
+        sys.exit(f"Unsupported inner_method '{inner_method}'.")
 
     boundary_conditions = BOUNDARY_CASES[bc_case]
-    cpu_phi = solve(boundary_conditions, sweep_type, False)
-    gpu_phi = solve(boundary_conditions, sweep_type, True)
+    cpu_phi = solve(boundary_conditions, sweep_type, inner_method, False)
+    gpu_phi = solve(boundary_conditions, sweep_type, inner_method, True)
     max_abs, relative_l2 = compare(cpu_phi, gpu_phi)
 
     if rank == 0:

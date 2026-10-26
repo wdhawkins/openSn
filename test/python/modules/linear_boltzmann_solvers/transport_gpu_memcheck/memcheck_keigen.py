@@ -11,6 +11,12 @@ for the within-group solve. It uses a small unstructured pyramid mesh with
 reflecting boundaries on all six faces (opposing reflecting pairs in every
 direction), two groups, P1 scattering, and fission.
 
+Options select the paths of the GPU source operator that the default case does
+not reach: ``adjoint=True`` (transposed transfer and production matrices),
+``num_groupsets=2`` (across-groupset sources and per-groupset device uploads),
+and ``mixed_materials=True`` (non-fissile water in the upper half, z > 1).
+With two groupsets the across-groupset solve is capped at one pass.
+
 Neither the inner solves nor the eigenvalue are converged. The same capped
 iteration sequence is run on the CPU and on the GPU and the eigenvalue and
 scalar-flux vectors are compared. With identical algebra the two agree to
@@ -46,19 +52,26 @@ def get_option(name, default):
     return globals().get(name, default)
 
 
-def solve(sweep_type, use_gpus):
+def solve(sweep_type, use_gpus, adjoint, num_groupsets, mixed_materials):
     grid = FromFileMeshGenerator(filename="../../../../assets/mesh/fuel_pyramid.e").Execute()
     grid.SetOrthogonalBoundaries()
 
     xs = MultiGroupXS()
     xs.LoadFromOpenSn("../../../../assets/xs/xs_fuel_g2.xs")
+    xs_map = [{"block_ids": [0], "xs": xs}]
+    if mixed_materials:
+        grid.SetBlockIDFromFunction(lambda pt, cur_id: 1 if pt.z > 1.0 else cur_id)
+        water = MultiGroupXS()
+        water.LoadFromOpenSn("../../../../assets/xs/xs_water_g2.xs")
+        xs_map.append({"block_ids": [1], "xs": water})
 
+    group_ranges = [(0, 1)] if num_groupsets == 1 else [(0, 0), (1, 1)]
     problem = DiscreteOrdinatesProblem(
         mesh=grid,
         num_groups=2,
         groupsets=[
             {
-                "groups_from_to": (0, 1),
+                "groups_from_to": group_range,
                 "angular_quadrature": GLCProductQuadrature3DXYZ(
                     n_polar=2,
                     n_azimuthal=4,
@@ -70,8 +83,9 @@ def solve(sweep_type, use_gpus):
                 "l_abs_tol": 1.0e-14,
                 "l_max_its": 1,
             }
+            for group_range in group_ranges
         ],
-        xs_map=[{"block_ids": [0], "xs": xs}],
+        xs_map=xs_map,
         boundary_conditions=[
             {"name": "xmin", "type": "reflecting"},
             {"name": "xmax", "type": "reflecting"},
@@ -80,9 +94,13 @@ def solve(sweep_type, use_gpus):
             {"name": "zmin", "type": "reflecting"},
             {"name": "zmax", "type": "reflecting"},
         ],
+        # One across-groupset pass per power iteration when there are two groupsets.
+        options={"max_ags_iterations": 1},
         sweep_type=sweep_type,
         use_gpus=use_gpus,
     )
+    if adjoint:
+        problem.SetAdjoint(True)
     # Unreachable k_tol on purpose: the solve always stops at max_iters.
     k_solver = PowerIterationKEigenSolver(problem=problem, max_iters=2, k_tol=1.0e-14)
     k_solver.Initialize()
@@ -110,9 +128,15 @@ if __name__ == "__main__":
         sys.exit(f"Incorrect number of processors. Expected 2 processors but got {size}.")
 
     sweep_type = get_option("sweep_type", "AAH")
+    adjoint = get_option("adjoint", False)
+    num_groupsets = get_option("num_groupsets", 1)
+    mixed_materials = get_option("mixed_materials", False)
+    if num_groupsets not in (1, 2):
+        sys.exit(f"Unsupported num_groupsets {num_groupsets}. Expected 1 or 2.")
 
-    cpu_k, cpu_phi = solve(sweep_type, False)
-    gpu_k, gpu_phi = solve(sweep_type, True)
+    options = (adjoint, num_groupsets, mixed_materials)
+    cpu_k, cpu_phi = solve(sweep_type, False, *options)
+    gpu_k, gpu_phi = solve(sweep_type, True, *options)
     if not math.isfinite(cpu_k) or cpu_k <= 0.0:
         raise RuntimeError(f"CPU reference eigenvalue is invalid: {cpu_k}.")
     relative_l2 = compare(cpu_phi, gpu_phi)
