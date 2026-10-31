@@ -308,8 +308,11 @@ print()
 job_manager.PrintCaughtWarnings(warning_manager1, "Warnings during test configuration")
 print()
 
+test_tree = job_manager.SnapshotTestTree(argv.directory)
 with warnings.catch_warnings(record=True) as warning_manager2:
     retval = job_manager.RunTests(tests, argv)
+if not job_manager.CheckTestTreeUnchanged(test_tree, argv.directory):
+    retval = retval or 1
 
 job_manager.PrintCaughtWarnings(warning_manager2, "Warnings during test execution")
 WriteAggregatedRunLog(tests, argv.run_log, argv.directory)

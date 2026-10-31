@@ -1,1 +1,3 @@
 src:*/boost/range/irange.hpp
+# libstdc++ updates atomic counts by converting the signed increment to unsigned on purpose.
+src:*/ext/atomicity.h

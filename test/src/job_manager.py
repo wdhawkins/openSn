@@ -42,6 +42,9 @@ class TestConfiguration:
         self.requires_gpu = requires_gpu
         self.env = env
         self.skip_reason_override = None
+        self.run_directory = None  # private working directory, see test_slot.CreateRunDirectory
+        self.has_dependents = False
+        self.producer_directories = []
 
         check_num = 0
         for check_params in checks_params:
@@ -620,6 +623,10 @@ def RunTests(tests: list, argv):
         runnable_and_schedulable_tests.append(test)
     runnable_tests = runnable_and_schedulable_tests
 
+    dependency_names = {test.dependency for test in tests if test.dependency is not None}
+    for test in tests:
+        test.has_dependents = test.filename in dependency_names
+
     print("Executing tests")
     print("  weights  : " + ", ".join(weight_classes_allowed))
     print(f"  selected : {selected_test_count}")
@@ -685,6 +692,10 @@ def RunTests(tests: list, argv):
             cpu_load += cpu_slots
             if test.requires_gpu:
                 gpu_load += 1
+            test.producer_directories = [
+                producer.run_directory for producer in tests
+                if producer.filename == test.dependency and producer.run_directory is not None
+            ]
             new_slot = test_slot.TestSlot(test, argv)
             test_slots.append(new_slot)
             launched_test = True
@@ -710,6 +721,15 @@ def RunTests(tests: list, argv):
         if not slot.passed:
             num_tests_failed += 1
 
+    # Producers' directories were kept for their dependents; failed tests' directories remain.
+    kept_directories = []
+    for test in tests:
+        if test.run_directory is not None and os.path.isdir(test.run_directory):
+            if test.passed:
+                shutil.rmtree(test.run_directory)
+            else:
+                kept_directories.append(test.run_directory)
+
     end_time = time.perf_counter()
     elapsed_time = end_time - start_time
 
@@ -725,11 +745,51 @@ def RunTests(tests: list, argv):
     print(f"  tests failed       : {num_tests_failed}")
 
     PrintFailureSummary(test_slots)
+    if kept_directories:
+        print("Working directories of failed tests:")
+        for directory in sorted(kept_directories):
+            print(f"    {os.path.relpath(directory)}")
     PrintSlowestTests(test_slots, argv.slowest)
 
     if num_tests_failed > 0 or scheduler_blocked:
         return 1
     return 0
+
+
+def SnapshotTestTree(directory: str) -> dict:
+    """Returns the size and modification time of every file and directory under directory, except
+    runner outputs (out/, gold/), private working directories, and Python caches."""
+    snapshot = {}
+    for dir_path, sub_dirs, files in os.walk(directory):
+        sub_dirs[:] = [
+            name for name in sub_dirs
+            if name not in ("out", "gold", "__pycache__")
+            and not test_slot.RUN_DIRECTORY_RE.match(name)
+        ]
+        for name in sub_dirs + files:
+            path = os.path.join(dir_path, name)
+            info = os.lstat(path)
+            snapshot[os.path.relpath(path, directory)] = (info.st_size, info.st_mtime_ns)
+    return snapshot
+
+
+def CheckTestTreeUnchanged(before: dict, directory: str) -> bool:
+    """Reports files that tests created, modified, or removed outside their private working
+    directories, for example through an absolute path. Returns True if there are none."""
+    after = SnapshotTestTree(directory)
+    changes = sorted(
+        [f"created  {path}" for path in after.keys() - before.keys()]
+        + [f"removed  {path}" for path in before.keys() - after.keys()]
+        + [f"modified {path}" for path in before.keys() & after.keys()
+           if before[path] != after[path] and not os.path.isdir(os.path.join(directory, path))]
+    )
+    if changes:
+        print()
+        print("Tests changed files outside their working directories. Write generated files with")
+        print("paths relative to the working directory:")
+        for change in changes:
+            print(f"    {change}")
+    return not changes
 
 
 def FormatElapsedTime(seconds: float) -> str:

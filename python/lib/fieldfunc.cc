@@ -210,6 +210,9 @@ WrapFieldFunctionInterpolation(py::module& ffunc)
     R"(
     Export field function interpolation to CSV files.
 
+    Rank 0 writes the files. Collective: every rank must call it, and the files are complete on
+    every rank when it returns.
+
     Parameters
     ----------
     base_name: str

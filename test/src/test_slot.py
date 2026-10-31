@@ -7,8 +7,41 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+# Each test runs in a private working directory beside its input's directory, named
+# .<directory name>.run-<id>, so the files tests write never collide.
+RUN_DIRECTORY_RE = re.compile(r"^\..+\.run-[0-9a-f]+$")
+RUN_DIRECTORY_SKIP = {"out", "gold", "tests.json", "__pycache__"}
+
+
+def CreateRunDirectory(test, producer_directories) -> str:
+    """Creates the private working directory of a test and returns its path.
+
+    The directory has the same parent as the input's directory, so relative paths to shared assets
+    resolve as they do there, and holds symbolic links to the input directory's files. Files a test
+    writes by relative path therefore stay in its own directory. Files that dependency tests
+    (producers) wrote in their working directories are linked in as well.
+    """
+    source = test.file_dir.rstrip("/")
+    parent, name = os.path.split(source)
+    run_directory = os.path.join(parent, f".{name}.run-{uuid.uuid4().hex[:12]}")
+    os.mkdir(run_directory)
+    for entry in os.listdir(source):
+        if entry not in RUN_DIRECTORY_SKIP:
+            os.symlink(os.path.join(source, entry), os.path.join(run_directory, entry))
+    for producer_directory in producer_directories:
+        for entry in os.listdir(producer_directory):
+            path = os.path.join(producer_directory, entry)
+            if os.path.islink(path) or entry == "__pycache__":
+                continue
+            link = os.path.join(run_directory, entry)
+            if os.path.lexists(link):
+                os.remove(link)
+            os.symlink(path, link)
+    return run_directory
 
 
 def VisibleLength(text: str) -> int:
@@ -71,6 +104,8 @@ class TestSlot:
         if test.skip != "":
             return
 
+        test.run_directory = CreateRunDirectory(test, test.producer_directories)
+
         if self.argv.engine in ["module", "jupyter"]:
             cmd_exe = sys.executable
         else:
@@ -109,7 +144,7 @@ class TestSlot:
 
         self.start_time = time.perf_counter()
         self.process = subprocess.Popen(cmd,
-                                        cwd=test.file_dir,
+                                        cwd=test.run_directory,
                                         env=process_env,
                                         shell=True,
                                         stdout=self.stdout_file,
@@ -137,6 +172,9 @@ class TestSlot:
             self.PerformChecks()
             test.ran = True
             running = False
+            # Keep a failed test's directory for inspection, and a producer's until the run ends.
+            if test.passed and not test.has_dependents:
+                shutil.rmtree(test.run_directory)
 
         return running
 

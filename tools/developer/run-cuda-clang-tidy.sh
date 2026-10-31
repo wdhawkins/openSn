@@ -147,9 +147,19 @@ if ! command -v run-clang-tidy >/dev/null 2>&1; then
   exit 127
 fi
 
+# clang-tidy takes the compiler in each sanitized command as its clang driver, and the driver reads
+# configuration files from that compiler's directory, such as a clang++.cfg that names the GCC
+# installation whose C++ standard library clang uses. A bare clang++ skips them and can fall back
+# to an older system library, which clang may fail to parse or even crash on. Use the clang++
+# installed with the clang-tidy that run-clang-tidy runs.
+clang_driver="clang++"
+if clang_tidy=$(command -v clang-tidy) && [[ -x "$(dirname "$clang_tidy")/clang++" ]]; then
+  clang_driver="$(dirname "$clang_tidy")/clang++"
+fi
+
 mkdir -p "$sanitized_build"
 
-python3 - "$compile_commands" "$sanitized_compile_commands" "$cuda_files_list" "$repo" "$cuda_path" "$cuda_arch" "$cuda_version_major" "$cuda_version_minor" ${clang_args[@]+"${clang_args[@]}"} <<'PY'
+python3 - "$compile_commands" "$sanitized_compile_commands" "$cuda_files_list" "$repo" "$cuda_path" "$cuda_arch" "$cuda_version_major" "$cuda_version_minor" "$clang_driver" ${clang_args[@]+"${clang_args[@]}"} <<'PY'
 import json
 import os
 from pathlib import Path
@@ -164,7 +174,8 @@ cuda_path = sys.argv[5]
 cuda_arch = sys.argv[6]
 cuda_version_major = sys.argv[7]
 cuda_version_minor = sys.argv[8]
-extra_clang_args = sys.argv[9:]
+clang_driver = sys.argv[9]
+extra_clang_args = sys.argv[10:]
 compile_db_dir = Path(path).parent
 with open(path, encoding="utf-8") as f:
     commands = json.load(f)
@@ -393,7 +404,7 @@ for original_entry in commands:
     entry.pop("arguments", None)
     entry["command"] = shlex.join(
         [
-            "clang++",
+            clang_driver,
             "-x",
             "cuda",
             "-std=c++20",
