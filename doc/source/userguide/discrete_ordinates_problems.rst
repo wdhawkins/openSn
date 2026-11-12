@@ -528,7 +528,8 @@ to disable progress reporting.
 Internal threading used by the uncollided solver is capped by the environment
 variable ``OPENSN_NUM_THREADS``. If the variable is unset or invalid, OpenSn
 uses ``1`` thread. The current uncollided implementation applies this cap to
-reflected-image projection and to the bulk-sweep group solve.
+the ray tracing of the near-source region, to reflected-image projection, and to
+the bulk-sweep group solve.
 
 .. code-block:: python
 
