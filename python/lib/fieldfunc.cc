@@ -120,9 +120,11 @@ WrapFieldFunctionGridBased(py::module& ffunc)
     Evaluate multiple grid-based field functions at multiple points.
 
     Each point is located once for all fields, and the results for all points and fields are
-    combined in two MPI reductions, instead of one pair of reductions per point and field. Point
-    location still tests each point against the locally owned cells. All field functions must use
-    the same mesh, and all MPI ranks must call this method with the same points in the same order.
+    combined in two MPI reductions, instead of one pair of reductions per point and field. Each
+    rank bins its local cells by their bounding boxes and tests a point only against the cells of
+    its bin, so the cost grows with the number of points plus the number of local cells. All field
+    functions must use the same mesh, and all MPI ranks must call this method with the same points
+    in the same order.
     A point on a face shared by several cells gets the average of their values. Collective.
 
     Parameters

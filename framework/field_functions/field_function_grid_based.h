@@ -84,9 +84,11 @@ public:
   /**
    * Returns component values for multiple field functions at multiple points.
    *
-   * Point locations and MPI reductions are shared across the field functions. All field functions
-   * must use the same mesh. The outer result index selects the field function, the middle index
-   * selects the point, and the inner index selects the component. A point on a face of a
+   * Point locations and MPI reductions are shared across the field functions. Each rank bins its
+   * local cells by their bounding boxes and tests a point only against the cells of its bin, so
+   * the cost is proportional to the number of points plus the number of local cells. All field
+   * functions must use the same mesh. The outer result index selects the field function, the middle
+   * index selects the point, and the inner index selects the component. A point on a face of a
    * discontinuous field gets the average over all cells containing it. Collective.
    */
   static std::vector<std::vector<std::vector<double>>>

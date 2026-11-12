@@ -7,6 +7,8 @@
 #include "framework/mesh/logical_volume/rpp_logical_volume.h"
 #include "test/unit/common/mesh_builders.h"
 #include "gtest/gtest.h"
+#include <cmath>
+#include <filesystem>
 
 using namespace opensn;
 
@@ -102,5 +104,60 @@ TEST(FieldFunctionGridBased, BatchedPointValues)
     EXPECT_NEAR(values[1][p][0], 2.0 * points[p].z + 3.0, 1.0e-12);
     EXPECT_NEAR(values[0][p][0], linear->GetPointValue(points[p])[0], 1.0e-12);
     EXPECT_NEAR(values[1][p][0], shifted->GetPointValue(points[p])[0], 1.0e-12);
+  }
+}
+
+// The binned point location of GetPointValues must find the same cells as the brute-force search
+// of GetPointValue. On the vertices, edges, and faces of the cells, a point lies in several cells
+// and gets the average of their values. A discontinuous linear field is exact on every cell, so
+// both searches must also return the field itself.
+TEST(FieldFunctionGridBased, BatchedPointValues3D)
+{
+  const auto tet_file = std::filesystem::path(OPENSN_TEST_ROOT) / "assets" / "mesh" / "cube3.2.msh";
+  const std::vector<std::pair<std::shared_ptr<Mesh>, double>> meshes = {
+    {BuildMeshFromFile(tet_file), 0.032}, {BuildBoxMesh(1.0, 4, 0.0), 1.0}};
+  for (const auto& [grid, length] : meshes)
+  {
+    std::shared_ptr<SpatialDiscretization> sdm = PieceWiseLinearDiscontinuous::New(grid);
+    auto ff = std::make_shared<FieldFunctionGridBased>("linear", sdm, Unknown(UnknownType::SCALAR));
+    const auto field = [length](const Vector3& p)
+    { return 1.0 + (p.x + 2.0 * p.y + 3.0 * p.z) / length; };
+    const auto& unknowns = ff->GetUnknownManager();
+    std::vector<double> values(sdm->GetNumLocalDOFs(unknowns));
+    for (const auto& cell : grid->GetLocalCells())
+    {
+      const auto& nodes = sdm->GetCellNodeLocations(*cell);
+      for (size_t i = 0; i < nodes.size(); ++i)
+        values[sdm->MapDOFLocal(*cell, i, unknowns, 0, 0)] = field(nodes[i]);
+    }
+    ff->UpdateFieldVector(values);
+
+    // A lattice that includes the domain boundary and, on the box mesh, the vertices, edges, and
+    // faces of the cells, and generic points. Every rank uses the same points.
+    std::vector<Vector3> points;
+    const int n = 8;
+    for (int k = 0; k <= n; ++k)
+      for (int j = 0; j <= n; ++j)
+        for (int i = 0; i <= n; ++i)
+          points.emplace_back(length * i / n, length * j / n, length * k / n);
+    // Points of the R3 low-discrepancy sequence, spread over the domain.
+    const double g = 1.22074408460575947536;
+    for (int p = 1; p <= 200; ++p)
+    {
+      const double x = std::fmod(0.5 + p / g, 1.0);
+      const double y = std::fmod(0.5 + p / (g * g), 1.0);
+      const double z = std::fmod(0.5 + p / (g * g * g), 1.0);
+      points.emplace_back(length * x, length * y, length * z);
+    }
+
+    const auto batched = FieldFunctionGridBased::GetPointValues({ff}, points);
+    ASSERT_EQ(batched.size(), 1);
+    ASSERT_EQ(batched[0].size(), points.size());
+    for (size_t p = 0; p < points.size(); ++p)
+    {
+      const double expected = field(points[p]);
+      EXPECT_NEAR(batched[0][p][0], expected, 1.0e-12 * expected);
+      EXPECT_NEAR(batched[0][p][0], ff->GetPointValue(points[p])[0], 1.0e-14 * expected);
+    }
   }
 }
