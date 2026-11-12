@@ -21,6 +21,10 @@ of 1e-6 and the relative (pointwise) AGS check: the problem is linear, so its fl
 scaled flux of the unscaled solve, iteration for iteration, up to round-off that the Krylov
 iterations amplify to about 1e-8. A groupset solve that discarded a small initial guess would
 restart and change the flux at the level of the inner tolerance, about 1e-5.
+
+Finally, split B is solved with the source scaled by 1e-6 and the default AGS settings. The
+default check is relative, so the scaled flux matches the reference to about 2e-8, as at unit
+scale; an absolute L2 check at the default tolerance would stop with a 3% error in one group.
 """
 
 import os
@@ -89,6 +93,7 @@ if __name__ == "__main__":
     loose = {"ags_convergence_check": "pointwise", "ags_tolerance": 1.0e-6}
     b_unit, _ = solve(split_b, l_abs_tol=1.0e-6, options=loose)
     b_scaled, _ = solve(split_b, scale=1.0e-12, l_abs_tol=1.0e-6, options=loose)
+    b_default, _ = solve(split_b, scale=1.0e-6)
 
     if rank == 0:
         print(f"AGS_SPLIT_A_ONE_PASS_CONVERGED={int(a_converged)}")
@@ -99,3 +104,5 @@ if __name__ == "__main__":
               f"{max_relative_difference(b_converged_flux, reference):.6e}")
         print(f"AGS_SOURCE_SCALE_MAX_REL_DIFF="
               f"{max_relative_difference(b_scaled / 1.0e-12, b_unit):.6e}")
+        print(f"AGS_DEFAULT_CHECK_SCALED_MAX_REL_DIFF="
+              f"{max_relative_difference(b_default / 1.0e-6, reference):.6e}")

@@ -2942,7 +2942,7 @@
   },
   {
     "file": "ags_single_pass_groupsets.py",
-    "comment": "AGS iteration stops after one pass when no groupset feeds an earlier one, iterates when one does, and is invariant to the source scale",
+    "comment": "AGS iteration stops after one pass when no groupset feeds an earlier one, iterates when one does, is invariant to the source scale, and its default check is relative",
     "num_procs": 1,
     "checks": [
       {
@@ -2980,6 +2980,12 @@
         "key": "AGS_SOURCE_SCALE_MAX_REL_DIFF=",
         "goldvalue": 0.0,
         "abs_tol": 1e-07
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "AGS_DEFAULT_CHECK_SCALED_MAX_REL_DIFF=",
+        "goldvalue": 0.0,
+        "abs_tol": 1e-06
       }
     ]
   }
