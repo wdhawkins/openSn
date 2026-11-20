@@ -25,10 +25,14 @@ configuration that satisfies it:
 11. CMFD in RZ geometry (accepted).
 12. SCDSA with sdm="pwlc" in 1D spherical geometry (rejected: the correction diverges), and
 13. SCDSA with sdm="pwld" in 1D spherical geometry (accepted).
-14. Mixed-material aggregation requested with an identity CMFD mesh (rejected).
+14. A reactor-lattice CMFD mesh with missing lattice parameters (rejected).
+15. A reactor-lattice CMFD mesh with a negative pitch (rejected).
+16. A reactor-lattice CMFD mesh mixed with Cartesian edges (rejected).
+17. A valid 2-by-2 reactor-lattice CMFD mesh (accepted and creates four coarse cells).
+18. Mixed-material aggregation requested with an identity CMFD mesh (rejected).
 
 Checks:
-  KEIGEN_ACCELERATION_REQUIREMENTS_PASSED: number of cases (of 14) that behave as described.
+  KEIGEN_ACCELERATION_REQUIREMENTS_PASSED: number of cases (of 18) that behave as described.
 """
 
 import os
@@ -235,7 +239,44 @@ if __name__ == "__main__":
         outcome(pi(problem, SCDSAAcceleration(problem=problem, sdm="pwld"))) == "accepted"
     )
 
-    # Case 14
+    # Cases 14--17
+    problem = xy_problem(xy_grid, fissile, 1, [groupset((0, 0), xy_quad())])
+    passed += on_all_ranks(
+        outcome(pi(problem, CMFDAcceleration(problem=problem, coarse_mesh="reactor_lattice")),
+                "requires two lattice_origin values", "requires two finite positive lattice_pitch",
+                "requires two positive lattice_shape values") == "rejected"
+    )
+    problem = xy_problem(xy_grid, fissile, 1, [groupset((0, 0), xy_quad())])
+    passed += on_all_ranks(
+        outcome(
+            pi(problem, CMFDAcceleration(problem=problem, coarse_mesh="reactor_lattice",
+                                         lattice_origin=[0.0, 0.0],
+                                         lattice_pitch=[5.0, -5.0], lattice_shape=[2, 2])),
+            "requires two finite positive lattice_pitch values") == "rejected"
+    )
+    problem = xy_problem(xy_grid, fissile, 1, [groupset((0, 0), xy_quad())])
+    passed += on_all_ranks(
+        outcome(
+            pi(problem, CMFDAcceleration(problem=problem, coarse_mesh="reactor_lattice",
+                                         lattice_origin=[0.0, 0.0], lattice_pitch=[5.0, 5.0],
+                                         lattice_shape=[2, 2], x_edges=[0.0, 10.0])),
+            "does not accept logical_volumes or Cartesian overlay edges") == "rejected"
+    )
+    problem = xy_problem(xy_grid, fissile, 1, [groupset((0, 0), xy_quad())])
+    lattice_cmfd = CMFDAcceleration(problem=problem, coarse_mesh="reactor_lattice",
+                                    lattice_origin=[0.0, 0.0], lattice_pitch=[5.0, 5.0],
+                                    lattice_shape=[2, 2], inactive_iterations=1)
+    lattice_solver = PowerIterationKEigenSolver(
+        problem=problem, acceleration=lattice_cmfd, k_tol=1.0e-8, max_iters=1
+    )
+    lattice_outcome = outcome(lattice_solver)
+    if lattice_outcome == "accepted":
+        lattice_solver.Execute()
+    passed += on_all_ranks(
+        lattice_outcome == "accepted" and lattice_cmfd.GetNumCoarseCells() == 4
+    )
+
+    # Case 18
     problem = xy_problem(xy_grid, fissile, 1, [groupset((0, 0), xy_quad())])
     passed += on_all_ranks(
         outcome(

@@ -17,6 +17,7 @@ namespace opensn
 {
 
 class MultiGroupXS;
+class LogicalVolume;
 
 class CMFDAcceleration : public DiscreteOrdinatesKEigenAcceleration
 {
@@ -189,6 +190,14 @@ private:
                                         std::string& skip_reason);
 
   const std::string coarse_mesh_type_;
+  const std::vector<std::shared_ptr<LogicalVolume>> logical_volumes_;
+  const std::vector<double> overlay_x_edges_;
+  const std::vector<double> overlay_y_edges_;
+  const std::vector<double> overlay_z_edges_;
+  const std::vector<double> lattice_origin_;
+  const std::vector<double> lattice_pitch_;
+  const std::vector<int> lattice_shape_;
+  const std::vector<double> lattice_axial_edges_;
   const std::string current_closure_;
   const int aggregation_size_;
   const bool allow_mixed_material_aggregation_;

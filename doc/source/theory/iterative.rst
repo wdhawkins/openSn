@@ -647,7 +647,13 @@ coarse face :math:`f` is formed by merging all fine faces
 between the same pair of coarse cells, or between a coarse cell and the
 same boundary id. The coarse-face area, centroid, normal, neighbor id,
 and neighbor material data are computed from the underlying fine faces.
-The aggregated coarse grid inherits the transport-mesh topology.
+The default aggregated coarse grid inherits the transport-mesh topology.
+Logical-volume, Cartesian and reactor-lattice overlays instead assign each
+fine cell to a user-defined region by its centroid. A region is split into its
+face-connected parts, may contain several materials and may span MPI ranks.
+Its interfaces are still built from the underlying fine faces, so the coarse
+net currents are sums of transport face currents even where the region
+boundary does not follow a mesh plane.
 
 This section describes the method at the level used by OpenSn rather
 than as pseudocode for the implementation. The important implementation

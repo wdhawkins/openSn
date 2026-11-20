@@ -93,7 +93,9 @@ These are the options most users should tune.
   preserve material-block boundaries by default. ``"identity"`` creates one
   CMFD cell per transport cell and is mainly useful for debugging and method
   comparisons.
-
+  The ``"logical_volume_overlay"``, ``"cartesian_overlay"``, and
+  ``"reactor_lattice"`` methods build coarse cells from geometric regions and
+  are described below.
   Both aggregation modes are logical CMFD coarse-space constructions. They do
   not repartition the transport mesh, create a new mesh, or change
   the ownership of high-order transport cells. Transport sweeps, material
@@ -117,12 +119,106 @@ These are the options most users should tune.
   * ``aggregation_size`` is a target maximum, so boundary and disconnected
     aggregates may contain fewer fine cells;
   * setting ``allow_mixed_material_aggregation=True`` permits cross-block
-    aggregation; such coarse cells are homogenized as described below.
+    aggregation. Such coarse cells are homogenized as described below, in the
+    same way as overlay coarse cells.
 
   The global mode gathers enough distributed cell and face metadata to build
   the logical coarse graph consistently on all ranks. This is usually worthwhile
   when rank-local aggregation creates too many small coarse cells, but it can
   increase setup memory and communication compared with ``"local_aggregation"``.
+
+  .. rubric:: Overlay coarse meshes
+
+  ``"logical_volume_overlay"`` forms regions from an ordered list of logical
+  volumes, while ``"cartesian_overlay"`` generates rectangular logical volumes
+  from coordinate edges. ``"reactor_lattice"`` is a convenience interface for
+  a uniform rectangular x-y pin lattice with optional axial planes.
+
+  Overlay construction classifies transport cells by centroid. Every cell must
+  belong to exactly one logical volume. Holes and overlaps are rejected. A
+  region may contain multiple mesh blocks and is split only when its fine cells
+  are not face connected. Thus, a pin containing fuel, gap, clad, and moderator
+  can be represented by one connected CMFD cell.
+
+  Overlay coarse cells are homogenized in the same way as mixed-material
+  aggregates. The spatial homogenization is described below.
+
+  An explicit logical-volume overlay can be defined as follows:
+
+  .. code-block:: python
+
+     from pyopensn.logvol import RPPLogicalVolume
+
+     cmfd = CMFDAcceleration(
+         problem=phys,
+         coarse_mesh="logical_volume_overlay",
+         logical_volumes=[
+             RPPLogicalVolume(xmin=0.0, xmax=1.26, infy=True, infz=True),
+             RPPLogicalVolume(xmin=1.26, xmax=2.52, infy=True, infz=True),
+         ],
+     )
+
+  Existing rectangular logical volumes include both endpoints, so choose
+  boundaries that do not pass through a transport-cell centroid. The Cartesian
+  form handles shared edges with deterministic half-open intervals:
+
+  .. code-block:: python
+
+     cmfd = CMFDAcceleration(
+         problem=phys,
+         coarse_mesh="cartesian_overlay",
+         x_edges=[0.0, 1.26, 2.52],
+         y_edges=[0.0, 1.26, 2.52],
+         # An omitted or empty z_edges leaves z unbounded.
+     )
+
+  Cartesian edge arrays must be finite and strictly increasing. At least one of
+  ``x_edges``, ``y_edges``, or ``z_edges`` is required. Coarse region IDs and
+  topology depend on the logical regions and fine-mesh connectivity, not on
+  block IDs or the MPI decomposition.
+
+  A uniform reactor lattice can be specified without enumerating its edges:
+
+  .. code-block:: python
+
+     cmfd = CMFDAcceleration(
+         problem=phys,
+         coarse_mesh="reactor_lattice",
+         lattice_origin=[-10.71, -10.71],  # lower-left lattice boundary
+         lattice_pitch=[1.26, 1.26],
+         lattice_shape=[17, 17],
+         # Optional axial planes. Omit them for an x-y-only overlay.
+         lattice_axial_edges=[0.0, 20.0, 40.0],
+     )
+
+  ``lattice_origin`` is the lower-left lattice boundary, not a pin center.
+  ``lattice_pitch`` and ``lattice_shape`` each contain exactly two values. The
+  resulting lattice covers
+  :math:`[x_0,x_0+n_xp_x]\times[y_0,y_0+n_yp_y]`. Transport-cell centroids
+  outside that rectangle are rejected. Empty ``lattice_axial_edges`` leave z
+  unbounded. The reactor form currently describes a complete, axis-aligned,
+  uniform rectangular lattice. Use ``"cartesian_overlay"`` for nonuniform
+  pitches or symmetry-cut edge positions, and ``"logical_volume_overlay"`` for
+  holes or nonrectangular regions.
+
+  An overlay coarse cell may span MPI ranks. It is owned by the rank that owns
+  its fine cell with the smallest global id, so the coarse mesh does not depend
+  on the order in which ranks build it. Ranks that own other member fine cells
+  keep membership records, as with ``"global_aggregation"``.
+
+  For ``"cartesian_overlay"`` and ``"reactor_lattice"``, CMFD logs one summary
+  line at initialization. It gives the number of coarse cells and the number of
+  fine faces between different coarse cells that do not lie on an overlay
+  plane, with their area fraction. A nonzero count means that the transport
+  mesh does not conform to the overlay. The coarse net currents are still exact
+  sums of fine-face currents, but the coarse cells have ragged boundaries and
+  the diffusion coupling uses their centroids. Place the planes on mesh planes,
+  for example the pin-cell boundaries of a lattice mesh, to avoid this. CMFD
+  also warns when an overlay interval that contains fine cells is narrower than
+  one tenth of the median occupied interval width along its axis. Such thin
+  coarse cells give poorly scaled coarse-operator rows. OpenSn does not move the
+  planes. Merge a thin interval into a neighbor by removing the plane between
+  them.
 
   .. rubric:: Spatial homogenization
 

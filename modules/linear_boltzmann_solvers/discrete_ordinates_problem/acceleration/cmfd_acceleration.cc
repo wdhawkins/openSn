@@ -7,6 +7,7 @@
 #include "framework/logging/log.h"
 #include "framework/materials/multi_group_xs/multi_group_xs.h"
 #include "framework/math/petsc_utils/petsc_utils.h"
+#include "framework/mesh/logical_volume/logical_volume.h"
 #include "framework/mesh/mesh/mesh.h"
 #include "framework/mpi/mpi_utils.h"
 #include "framework/runtime.h"
@@ -67,6 +68,15 @@ bool
 FitsMPICount(const std::size_t count)
 {
   return count <= static_cast<std::size_t>(std::numeric_limits<int>::max());
+}
+
+std::vector<double>
+BuildUniformEdges(const double origin, const double pitch, const int count)
+{
+  std::vector<double> edges(static_cast<std::size_t>(count) + 1);
+  for (int i = 0; i <= count; ++i)
+    edges[static_cast<std::size_t>(i)] = origin + static_cast<double>(i) * pitch;
+  return edges;
 }
 
 /**
@@ -201,7 +211,42 @@ CMFDAcceleration::GetInputParameters()
     "aggregates. The \"global_aggregation\" method builds connected aggregates that may span MPI "
     "ranks. Both keep each aggregate within one mesh block unless "
     "allow_mixed_material_aggregation is true. The \"identity\" method creates one CMFD cell per "
-    "transport cell and is intended mainly for debugging and method comparisons.");
+    "transport cell and is intended mainly for debugging and method comparisons. The "
+    "\"logical_volume_overlay\", \"cartesian_overlay\", and \"reactor_lattice\" methods build "
+    "coarse cells from geometric regions that do not depend on the MPI decomposition. Their "
+    "coarse cells may contain several materials.");
+  params.AddOptionalParameterArray(
+    "logical_volumes",
+    std::vector<std::shared_ptr<LogicalVolume>>{},
+    "Non-overlapping logical volumes that partition the transport mesh when coarse_mesh is "
+    "logical_volume_overlay. Each cell centroid must belong to exactly one volume. Disconnected "
+    "portions of one volume become separate coarse cells.");
+  params.AddOptionalParameterArray(
+    "x_edges",
+    std::vector<double>{},
+    "Strictly increasing Cartesian overlay edges in x. An empty array leaves x unbounded.");
+  params.AddOptionalParameterArray(
+    "y_edges",
+    std::vector<double>{},
+    "Strictly increasing Cartesian overlay edges in y. An empty array leaves y unbounded.");
+  params.AddOptionalParameterArray(
+    "z_edges",
+    std::vector<double>{},
+    "Strictly increasing Cartesian overlay edges in z. An empty array leaves z unbounded.");
+  params.AddOptionalParameterArray("lattice_origin",
+                                   std::vector<double>{},
+                                   "Lower-left x-y origin for a reactor_lattice coarse mesh.");
+  params.AddOptionalParameterArray("lattice_pitch",
+                                   std::vector<double>{},
+                                   "Positive x-y pin pitches for a reactor_lattice coarse mesh.");
+  params.AddOptionalParameterArray("lattice_shape",
+                                   std::vector<int>{},
+                                   "Positive x-y pin counts for a reactor_lattice coarse mesh.");
+  params.AddOptionalParameterArray(
+    "lattice_axial_edges",
+    std::vector<double>{},
+    "Optional strictly increasing axial-plane edges for a reactor_lattice coarse mesh. An empty "
+    "array leaves z unbounded.");
   params.AddOptionalParameter(
     "current_closure",
     "partial",
@@ -287,9 +332,13 @@ CMFDAcceleration::GetInputParameters()
                               "values make auto use direct solves for larger coarse systems. "
                               "Choose values based on available host memory and acceptable "
                               "factorization cost.");
-  params.ConstrainParameterRange(
-    "coarse_mesh",
-    AllowableRangeList::New({"identity", "local_aggregation", "global_aggregation"}));
+  params.ConstrainParameterRange("coarse_mesh",
+                                 AllowableRangeList::New({"identity",
+                                                          "local_aggregation",
+                                                          "global_aggregation",
+                                                          "logical_volume_overlay",
+                                                          "cartesian_overlay",
+                                                          "reactor_lattice"}));
   params.ConstrainParameterRange("current_closure", AllowableRangeList::New({"net", "partial"}));
   params.ConstrainParameterRange(
     "coarse_solver_policy",
@@ -356,6 +405,14 @@ CMFDAcceleration::Create(const ParameterBlock& params)
 CMFDAcceleration::CMFDAcceleration(const InputParameters& params)
   : DiscreteOrdinatesKEigenAcceleration(params),
     coarse_mesh_type_(params.GetParamValue<std::string>("coarse_mesh")),
+    logical_volumes_(params.GetParamVectorValue<std::shared_ptr<LogicalVolume>>("logical_volumes")),
+    overlay_x_edges_(params.GetParamVectorValue<double>("x_edges")),
+    overlay_y_edges_(params.GetParamVectorValue<double>("y_edges")),
+    overlay_z_edges_(params.GetParamVectorValue<double>("z_edges")),
+    lattice_origin_(params.GetParamVectorValue<double>("lattice_origin")),
+    lattice_pitch_(params.GetParamVectorValue<double>("lattice_pitch")),
+    lattice_shape_(params.GetParamVectorValue<int>("lattice_shape")),
+    lattice_axial_edges_(params.GetParamVectorValue<double>("lattice_axial_edges")),
     current_closure_(params.GetParamValue<std::string>("current_closure")),
     aggregation_size_(params.GetParamValue<int>("aggregation_size")),
     allow_mixed_material_aggregation_(
@@ -442,6 +499,93 @@ CMFDAcceleration::CheckRequirements(std::vector<std::string>& errors) const
   if (do_problem_.GetGeometryType() == GeometryType::ONED_SPHERICAL)
     errors.emplace_back(GetName() + " is not supported in 1D spherical geometry.");
 
+  const bool has_cartesian_edges =
+    not overlay_x_edges_.empty() or not overlay_y_edges_.empty() or not overlay_z_edges_.empty();
+  const bool has_lattice_parameters = not lattice_origin_.empty() or not lattice_pitch_.empty() or
+                                      not lattice_shape_.empty() or
+                                      not lattice_axial_edges_.empty();
+  const auto CheckEdges = [&](const std::vector<double>& edges, const std::string& name)
+  {
+    if (edges.empty())
+      return;
+    if (edges.size() < 2)
+    {
+      errors.emplace_back(GetName() + " requires at least two " + name + " values.");
+      return;
+    }
+    for (std::size_t i = 0; i < edges.size(); ++i)
+    {
+      if (not std::isfinite(edges[i]))
+      {
+        errors.emplace_back(GetName() + " requires finite " + name + " values.");
+        return;
+      }
+      if (i > 0 and edges[i] <= edges[i - 1])
+      {
+        errors.emplace_back(GetName() + " requires strictly increasing " + name + ".");
+        return;
+      }
+    }
+  };
+  if (coarse_mesh_type_ == "logical_volume_overlay")
+  {
+    if (logical_volumes_.empty())
+      errors.emplace_back(GetName() +
+                          " requires logical_volumes for a logical_volume_overlay coarse mesh.");
+    if (has_cartesian_edges)
+      errors.emplace_back(GetName() + " does not accept x_edges, y_edges, or z_edges with a "
+                                      "logical_volume_overlay coarse mesh.");
+    if (has_lattice_parameters)
+      errors.emplace_back(GetName() + " does not accept reactor-lattice parameters with a "
+                                      "logical_volume_overlay coarse mesh.");
+  }
+  else if (coarse_mesh_type_ == "cartesian_overlay")
+  {
+    if (not logical_volumes_.empty())
+      errors.emplace_back(GetName() +
+                          " does not accept logical_volumes with a cartesian_overlay coarse mesh.");
+    if (not has_cartesian_edges)
+      errors.emplace_back(GetName() +
+                          " requires at least one nonempty edge array for a cartesian_overlay "
+                          "coarse mesh.");
+    if (has_lattice_parameters)
+      errors.emplace_back(GetName() + " does not accept reactor-lattice parameters with a "
+                                      "cartesian_overlay coarse mesh.");
+    CheckEdges(overlay_x_edges_, "x_edges");
+    CheckEdges(overlay_y_edges_, "y_edges");
+    CheckEdges(overlay_z_edges_, "z_edges");
+  }
+  else if (coarse_mesh_type_ == "reactor_lattice")
+  {
+    if (not logical_volumes_.empty() or has_cartesian_edges)
+      errors.emplace_back(GetName() + " does not accept logical_volumes or Cartesian overlay "
+                                      "edges with a reactor_lattice coarse mesh.");
+    if (lattice_origin_.size() != 2)
+      errors.emplace_back(GetName() + " requires two lattice_origin values (x and y).");
+    if (lattice_pitch_.size() != 2 or
+        std::any_of(lattice_pitch_.begin(),
+                    lattice_pitch_.end(),
+                    [](const double value) { return not std::isfinite(value) or value <= 0.0; }))
+      errors.emplace_back(GetName() + " requires two finite positive lattice_pitch values.");
+    if (lattice_shape_.size() != 2 or std::any_of(lattice_shape_.begin(),
+                                                  lattice_shape_.end(),
+                                                  [](const int value) { return value <= 0; }))
+      errors.emplace_back(GetName() + " requires two positive lattice_shape values.");
+    if (std::any_of(lattice_origin_.begin(),
+                    lattice_origin_.end(),
+                    [](const double value) { return not std::isfinite(value); }))
+      errors.emplace_back(GetName() + " requires finite lattice_origin values.");
+    if (lattice_origin_.size() == 2 and lattice_pitch_.size() == 2 and lattice_shape_.size() == 2)
+      for (std::size_t d = 0; d < 2; ++d)
+        if (not std::isfinite(lattice_origin_[d] +
+                              lattice_pitch_[d] * static_cast<double>(lattice_shape_[d])))
+          errors.emplace_back(GetName() + " reactor-lattice extent must be finite.");
+    CheckEdges(lattice_axial_edges_, "lattice_axial_edges");
+  }
+  else if (not logical_volumes_.empty() or has_cartesian_edges or has_lattice_parameters)
+    errors.emplace_back(GetName() +
+                        " accepts logical-volume, Cartesian, or reactor-lattice geometry "
+                        "parameters only with the corresponding coarse mesh.");
   if (allow_mixed_material_aggregation_ and coarse_mesh_type_ != "local_aggregation" and
       coarse_mesh_type_ != "global_aggregation")
     errors.emplace_back(GetName() + " accepts allow_mixed_material_aggregation=true only with "
@@ -486,6 +630,36 @@ CMFDAcceleration::Initialize()
   else if (coarse_mesh_type_ == "global_aggregation")
     coarse_mesh_ = CMFDCoarseMesh::BuildGlobalAggregation(
       *do_problem_.GetGrid(), aggregation_size_, allow_mixed_material_aggregation_);
+  else if (coarse_mesh_type_ == "logical_volume_overlay")
+    coarse_mesh_ =
+      CMFDCoarseMesh::BuildLogicalVolumeOverlay(*do_problem_.GetGrid(), logical_volumes_);
+  else if (coarse_mesh_type_ == "cartesian_overlay")
+    coarse_mesh_ = CMFDCoarseMesh::BuildCartesianOverlay(
+      *do_problem_.GetGrid(), overlay_x_edges_, overlay_y_edges_, overlay_z_edges_);
+  else if (coarse_mesh_type_ == "reactor_lattice")
+    coarse_mesh_ = CMFDCoarseMesh::BuildCartesianOverlay(
+      *do_problem_.GetGrid(),
+      BuildUniformEdges(lattice_origin_.at(0), lattice_pitch_.at(0), lattice_shape_.at(0)),
+      BuildUniformEdges(lattice_origin_.at(1), lattice_pitch_.at(1), lattice_shape_.at(1)),
+      lattice_axial_edges_);
+
+  if (const auto& diagnostics = coarse_mesh_.OverlayDiagnostics())
+  {
+    const double area_fraction = diagnostics->interface_area > 0.0
+                                   ? diagnostics->nonconforming_area / diagnostics->interface_area
+                                   : 0.0;
+    log.Log() << "CMFD overlay: " << coarse_mesh_.NumGlobalCells() << " coarse cells. "
+              << diagnostics->num_nonconforming_faces << " of " << diagnostics->num_interface_faces
+              << " coarse-interface fine faces do not lie on an overlay plane (area fraction "
+              << area_fraction << ").";
+    if (diagnostics->num_thin_intervals > 0)
+      log.Log0Warning() << "CMFD overlay has " << diagnostics->num_thin_intervals
+                        << " occupied intervals narrower than "
+                        << CMFDCoarseMesh::overlay_sliver_fraction
+                        << " of the median occupied width of their axis (smallest ratio "
+                        << diagnostics->min_interval_width_ratio
+                        << "). Thin coarse cells give poorly scaled coarse-operator rows.";
+  }
 
   if (update_wgs_max_its_ > 1 and update_wgs_abs_tol_ > balance_residual_tolerance_)
     log.Log0Warning() << "CMFD update_wgs_abs_tol (" << update_wgs_abs_tol_

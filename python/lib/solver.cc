@@ -3007,6 +3007,9 @@ WrapDiscreteOrdinatesKEigenAcceleration(py::module& slv)
             - 'identity' : one CMFD coarse cell per transport cell
             - 'local_aggregation' : connected fine cells aggregated locally
             - 'global_aggregation' : connected fine cells aggregated across MPI ranks
+            - 'logical_volume_overlay' : regions supplied as logical volumes
+            - 'cartesian_overlay' : rectangular regions generated from coordinate edges
+            - 'reactor_lattice' : uniform x-y pin regions with optional axial planes
 
         ``"local_aggregation"`` is the conservative default. ``"global_aggregation"`` can
         reduce the coarse problem size on larger distributed meshes. Global aggregation is a
@@ -3016,7 +3019,37 @@ WrapDiscreteOrdinatesKEigenAcceleration(py::module& slv)
         Aggregates are connected by face adjacency, remain within one mesh block unless
         ``allow_mixed_material_aggregation=True``, and may be smaller than ``aggregation_size``
         near boundaries or disconnected regions. ``"identity"`` is primarily for debugging and
-        method comparisons.
+        method comparisons. Overlay coarse cells may contain several mesh blocks and may span
+        MPI ranks. Their coefficients are homogenized in the same way as mixed-material
+        aggregates. The Cartesian and reactor-lattice overlays log the number of fine faces
+        between coarse cells that do not lie on an overlay plane, and warn about occupied
+        intervals narrower than one tenth of the median width along their axis.
+    logical_volumes: List[pyopensn.logvol.LogicalVolume], optional
+        Required with ``coarse_mesh="logical_volume_overlay"``. Each cell centroid must lie in
+        exactly one of the supplied volumes. Overlaps and holes are rejected. Face-disconnected
+        portions of one volume become separate coarse cells.
+    x_edges: List[float], optional
+        Strictly increasing x coordinates for ``coarse_mesh="cartesian_overlay"``. An empty list
+        leaves this direction unbounded.
+    y_edges: List[float], optional
+        Strictly increasing y coordinates for ``coarse_mesh="cartesian_overlay"``. An empty list
+        leaves this direction unbounded.
+    z_edges: List[float], optional
+        Strictly increasing z coordinates for ``coarse_mesh="cartesian_overlay"``. An empty list
+        leaves this direction unbounded. At least one Cartesian edge list must be supplied.
+    lattice_origin: List[float], optional
+        Required with ``coarse_mesh="reactor_lattice"``. The x-y coordinates of the lower-left
+        lattice boundary, given as ``[x0, y0]``.
+    lattice_pitch: List[float], optional
+        Required with ``coarse_mesh="reactor_lattice"``. Positive x-y pin pitches, given as
+        ``[px, py]``.
+    lattice_shape: List[int], optional
+        Required with ``coarse_mesh="reactor_lattice"``. Positive x-y pin counts, given as
+        ``[nx, ny]``. The lattice covers ``[x0, x0 + nx*px]`` by
+        ``[y0, y0 + ny*py]``.
+    lattice_axial_edges: List[float], optional
+        Strictly increasing axial-plane coordinates for ``coarse_mesh="reactor_lattice"``. An
+        empty list leaves z unbounded, producing one CMFD cell per connected x-y pin region.
     current_closure: str, default="partial"
         Common option. CMFD face-current closure. Valid choices are:
             - 'partial' : partial-current CMFD (pCMFD); each one-sided partial current carries
