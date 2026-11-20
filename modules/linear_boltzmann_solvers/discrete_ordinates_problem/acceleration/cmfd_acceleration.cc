@@ -18,6 +18,7 @@
 #include "modules/linear_boltzmann_solvers/lbs_problem/iterative_methods/iteration_logging.h"
 #include "modules/linear_boltzmann_solvers/lbs_problem/vecops/lbs_vecops.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iomanip>
 #include <iterator>
@@ -41,6 +42,9 @@ constexpr unsigned int persistent_skip_warning_count = 5;
 // from roundoff, so homogenization falls back to volume weights for that coarse group.
 constexpr double homogenization_cancellation_tolerance =
   64.0 * std::numeric_limits<double>::epsilon();
+// A coarse linear solve is accepted if its true residual is at most this factor times the
+// requested tolerance, max(l_rel_tol * |b|, l_abs_tol).
+constexpr double true_residual_factor = 100.0;
 
 // Collective check: throws on every rank if any rank reports a positive count for a failure.
 void
@@ -277,11 +281,11 @@ CMFDAcceleration::GetInputParameters()
     "specific path. CMFD corrections from unconverged coarse linear solves are always "
     "skipped.");
   params.AddOptionalParameter("coarse_direct_solve_threshold",
-                              20000,
+                              150000,
                               "[developer/debug] Maximum global CMFD unknown count for using the "
                               "direct PETSc LU path when coarse_solver_policy is auto. Larger "
-                              "values make auto use direct solves for larger coarse systems; "
-                              "choose values based on available host memory and acceptable "
+                              "values make auto use direct solves for larger coarse systems. "
+                              "Choose values based on available host memory and acceptable "
                               "factorization cost.");
   params.ConstrainParameterRange(
     "coarse_mesh",
@@ -682,8 +686,27 @@ CMFDAcceleration::PostPowerIteration()
   const double face_current_cache_time = NowSeconds() - t0;
 
   t0 = NowSeconds();
-  AssembleOperator();
+  const auto sign_counts = AssembleOperator();
+  OpenSnPETScCall(KSPSetUp(ksp_));
   const double assemble_time = NowSeconds() - t0;
+  if (verbose_ and (outer_iteration_ < 5 or outer_iteration_ % 25 == 0))
+  {
+    // Signed transport iterates can give the coarse operator entries of the wrong sign for an
+    // M-matrix, which is what makes coarse solves unreliable. These counts help diagnose that.
+    const std::array<std::size_t, 3> local_counts = {
+      sign_counts.nonpositive_diagonals,
+      sign_counts.positive_off_diagonals,
+      static_cast<std::size_t>(std::count_if(
+        coarse_phi_new_.begin(), coarse_phi_new_.end(), [](double phi) { return phi < 0.0; }))};
+    std::array<std::size_t, 3> global_counts = {0, 0, 0};
+    for (std::size_t i = 0; i < local_counts.size(); ++i)
+      mpi_comm.all_reduce(local_counts[i], global_counts[i], mpi::op::sum<std::size_t>());
+    log.Log() << no_wrap << program_timer.GetTimeString()
+              << " CMFD operator signs: nonpositive_diagonals = " << global_counts[0]
+              << ", positive_off_diagonals = " << global_counts[1]
+              << ", negative_coarse_fluxes = " << global_counts[2]
+              << ", rows = " << GlobalUnknownCount();
+  }
 
   t0 = NowSeconds();
   const auto transport_balance_residual =
@@ -721,6 +744,10 @@ CMFDAcceleration::PostPowerIteration()
     coarse_ksp_iterations += last_ksp_iterations_;
     coarse_linear_solves_converged = coarse_linear_solves_converged and last_ksp_converged_;
     coarse_pi_iterations = m + 1;
+    // The correction is skipped once any coarse linear solve fails, so further coarse power
+    // iterations would be wasted. The converged reason is the same on every rank.
+    if (not last_ksp_converged_)
+      break;
     const double coarse_production_new = ComputeCoarseFissionProduction(coarse_phi);
     OpenSnLogicalErrorIf(coarse_production_new == 0.0,
                          "CMFDAcceleration cannot update k with zero coarse production.");
@@ -1566,12 +1593,16 @@ CMFDAcceleration::BuildFaceCurrentCache()
   }
 }
 
-void
+CMFDAcceleration::OperatorSignCounts
 CMFDAcceleration::AssembleOperator()
 {
   OpenSnPETScCall(MatZeroEntries(A_));
 
+  OperatorSignCounts sign_counts;
   std::vector<double> scattering;
+  // Face couplings to one neighbor can arrive from several coarse faces, so the row's
+  // off-diagonal entries are summed here before their signs are counted.
+  std::vector<std::pair<int64_t, double>> row_face_entries;
   for (const auto& coarse_cell : coarse_mesh_.LocalCells())
   {
     const auto& xs = homogenized_xs_.at(coarse_cell.local_id);
@@ -1581,6 +1612,7 @@ CMFDAcceleration::AssembleOperator()
     {
       const auto row = MapDOF(coarse_cell.global_id, cg);
       double diag = xs.removal[cg] * coarse_cell.volume;
+      row_face_entries.clear();
 
       for (std::size_t f = 0; f < coarse_cell.faces.size(); ++f)
       {
@@ -1659,6 +1691,14 @@ CMFDAcceleration::AssembleOperator()
           diag += face_diag;
           const auto col = MapDOF(face.neighbor_id, cg);
           OpenSnPETScCall(MatSetValue(A_, row, col, face_offdiag, ADD_VALUES));
+          const auto entry =
+            std::find_if(row_face_entries.begin(),
+                         row_face_entries.end(),
+                         [col](const std::pair<int64_t, double>& e) { return e.first == col; });
+          if (entry == row_face_entries.end())
+            row_face_entries.emplace_back(col, face_offdiag);
+          else
+            entry->second += face_offdiag;
         }
         else
         {
@@ -1686,16 +1726,23 @@ CMFDAcceleration::AssembleOperator()
           const auto sigma_s = scattering[cg * num_coarse_groups_ + cgp];
           const auto col = MapDOF(coarse_cell.global_id, cgp);
           OpenSnPETScCall(MatSetValue(A_, row, col, -sigma_s * coarse_cell.volume, ADD_VALUES));
+          if (-sigma_s * coarse_cell.volume > 0.0)
+            ++sign_counts.positive_off_diagonals;
         }
 
       OpenSnPETScCall(MatSetValue(A_, row, row, diag, ADD_VALUES));
+      if (not(diag > 0.0))
+        ++sign_counts.nonpositive_diagonals;
+      for (const auto& entry : row_face_entries)
+        if (entry.second > 0.0)
+          ++sign_counts.positive_off_diagonals;
     }
   }
 
   OpenSnPETScCall(MatAssemblyBegin(A_, MAT_FINAL_ASSEMBLY));
   OpenSnPETScCall(MatAssemblyEnd(A_, MAT_FINAL_ASSEMBLY));
   OpenSnPETScCall(KSPSetOperators(ksp_, A_, A_));
-  OpenSnPETScCall(KSPSetUp(ksp_));
+  return sign_counts;
 }
 
 double
@@ -1819,7 +1866,24 @@ CMFDAcceleration::SolveCoarseSystem(const double k_eff,
   last_ksp_iterations_ = static_cast<int>(ksp_iterations);
   KSPConvergedReason ksp_reason = KSP_CONVERGED_ITERATING;
   OpenSnPETScCall(KSPGetConvergedReason(ksp_, &ksp_reason));
-  last_ksp_converged_ = ksp_reason > 0;
+
+  // PETSc reports success for every direct solve and tests the preconditioned residual of
+  // iterative ones, so a near-singular coarse operator can pass with a useless solution. The
+  // solve is accepted only if the true residual is within true_residual_factor of the requested
+  // tolerance. The factor allows for the gap between preconditioned and true residual norms.
+  Vec residual = nullptr;
+  OpenSnPETScCall(VecDuplicate(rhs_, &residual));
+  OpenSnPETScCall(MatMult(A_, x, residual));
+  OpenSnPETScCall(VecAYPX(residual, -1.0, rhs_));
+  PetscReal residual_norm = 0.0;
+  PetscReal rhs_norm = 0.0;
+  OpenSnPETScCall(VecNorm(residual, NORM_2, &residual_norm));
+  OpenSnPETScCall(VecNorm(rhs_, NORM_2, &rhs_norm));
+  OpenSnPETScCall(VecDestroy(&residual));
+  const double true_residual_tolerance =
+    true_residual_factor * std::max(l_rel_tol_ * static_cast<double>(rhs_norm), l_abs_tol_);
+  last_ksp_converged_ = ksp_reason > 0 and std::isfinite(static_cast<double>(residual_norm)) and
+                        static_cast<double>(residual_norm) <= true_residual_tolerance;
 
   std::vector<int64_t> indices;
   indices.reserve(coarse_phi_new_.size());

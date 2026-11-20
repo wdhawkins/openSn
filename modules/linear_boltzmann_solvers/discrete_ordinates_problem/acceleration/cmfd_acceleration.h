@@ -105,6 +105,13 @@ private:
     double global_faces_per_coarse_cell_sum = 0.0;
   };
 
+  /// Local counts of coarse operator entries whose sign is not that of an M-matrix.
+  struct OperatorSignCounts
+  {
+    std::size_t nonpositive_diagonals = 0;
+    std::size_t positive_off_diagonals = 0;
+  };
+
   struct FluxUpdateDiagnostics
   {
     double min_scalar_flux = std::numeric_limits<double>::max();
@@ -146,7 +153,8 @@ private:
   void ComputeCoarseScattering(const CoarseCellXS& coarse_xs, std::vector<double>& matrix) const;
   /// Condense the production matrix; return false, with a zero matrix, if nothing is fissionable.
   bool ComputeCoarseProduction(const CoarseCellXS& coarse_xs, std::vector<double>& matrix) const;
-  void AssembleOperator();
+  /// Assemble the coarse operator without setting up the coarse linear solver.
+  OperatorSignCounts AssembleOperator();
   void AssembleRHS(Vec rhs, double k_eff, const std::vector<double>& coarse_source_phi) const;
   std::vector<double> SolveCoarseSystem(double k_eff,
                                         const std::vector<double>& coarse_source_phi) const;

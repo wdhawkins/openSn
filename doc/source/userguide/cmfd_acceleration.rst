@@ -384,10 +384,16 @@ defaults.
   solve for coarse systems below ``coarse_direct_solve_threshold`` global
   unknowns and an iterative GMRES solve preconditioned with hypre BoomerAMG
   otherwise. The default threshold
-  is ``20000`` global unknowns. Force ``"direct"`` only for small or moderate
+  is ``150000`` global unknowns. Force ``"direct"`` only for small or moderate
   coarse systems that fit comfortably in host memory. Use ``"iterative"`` when
-  direct factorization is too expensive. If an iterative coarse KSP does not
-  converge, CMFD skips the correction for that power iteration; increase
+  direct factorization is too expensive. A coarse solve counts as converged
+  only if PETSc reports convergence and the true residual norm
+  :math:`\|b - A x\|` is at most 100 times
+  :math:`\max(\texttt{l\_rel\_tol}\,\|b\|, \texttt{l\_abs\_tol})`. The
+  check also applies to direct solves, which PETSc always reports as converged,
+  so a nearly singular coarse operator cannot produce an accepted correction.
+  If a coarse solve does not converge, CMFD stops the coarse power iteration
+  and skips the correction for that power iteration. Then increase
   ``max_iters``, use ``"petsc_options"`` with a stronger PETSc configuration,
   reduce coarse-system stiffness with finer aggregation, or switch to
   ``"direct"`` when memory permits. If several consecutive corrections are
@@ -438,7 +444,11 @@ diagnostic lines for early iterations and periodic later iterations. These are
 intended for regression tests and performance studies. The timing category
 reports restriction, homogenization, the neighbor coarse-flux and
 diffusion-coefficient exchange, operator assembly, coarse solve,
-prolongation/update, and transport time separately.
+prolongation/update, and transport time separately. A ``CMFD operator signs``
+line reports how many coarse operator rows have a nonpositive diagonal, how
+many off-diagonal entries are positive, and how many coarse scalar fluxes are
+negative. A coarse operator with these entries is not an M-matrix, and its
+coarse solves can fail or give unusable corrections.
 
 Correction Safeties And Warnings
 ================================
@@ -452,7 +462,8 @@ is temporarily unusable.
 The most common skip reasons are:
 
 ``coarse_linear_solve_not_converged``
-  One or more PETSc coarse linear solves did not converge within ``max_iters``.
+  One or more PETSc coarse linear solves did not converge within ``max_iters``,
+  or a solve left a true residual too large to trust.
   The correction is skipped because an unconverged low-order solve can move the
   high-order problem in the wrong direction. If the coarse system is modest,
   switch to ``coarse_solver_policy="direct"``. If direct is too expensive,

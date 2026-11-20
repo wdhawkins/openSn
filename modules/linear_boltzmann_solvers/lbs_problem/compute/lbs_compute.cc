@@ -7,6 +7,7 @@
 #include "framework/math/spatial_weight_function.h"
 #include "framework/runtime.h"
 #include <cassert>
+#include <unordered_map>
 
 namespace opensn
 {
@@ -52,8 +53,10 @@ ComputeFissionProduction(const LBSProblem& lbs_problem, const std::vector<double
   const auto first_grp = 0;
   const auto last_grp = lbs_problem.GetNumGroups() - 1;
 
-  // Delayed production of a cell summed over the destination group, per unit flux in group g'
-  std::vector<double> delayed_production(last_grp + 1, 0.0);
+  // Production per unit flux in source group g', summed over destination groups g. It depends
+  // only on the XS, so it is formed once per XS in this call rather than at every node. It is
+  // not kept across calls, so XS scaling and changed problem options apply to the next call.
+  std::unordered_map<const MultiGroupXS*, std::vector<double>> production_by_xs;
 
   // Loop over local cells
   double local_production = 0.0;
@@ -64,23 +67,28 @@ ComputeFissionProduction(const LBSProblem& lbs_problem, const std::vector<double
 
     // Obtain xs
     const auto& xs = transport_view.GetXS();
-    const auto& F = xs.GetProductionMatrix(adjoint);
-
     if (not xs.IsFissionable())
       continue;
 
-    // When delayed-neutron data is included, the production matrix is prompt-only and delayed
-    // production is added separately. If the production matrix changes to include delayed
-    // production, adjust this sum to prevent double counting. In adjoint mode F is transposed, and
-    // so is the delayed production.
-    if (include_delayed_production)
-      for (unsigned int gp = first_grp; gp <= last_grp; ++gp)
-      {
-        delayed_production[gp] = 0.0;
-        for (unsigned int g = first_grp; g <= last_grp; ++g)
-          delayed_production[gp] += adjoint ? ComputeDelayedFissionProduction(xs, gp, g)
-                                            : ComputeDelayedFissionProduction(xs, g, gp);
-      }
+    const auto [entry, inserted] = production_by_xs.try_emplace(&xs, last_grp + 1, 0.0);
+    auto& production = entry->second;
+    if (inserted)
+    {
+      const auto& F = xs.GetProductionMatrix(adjoint);
+      for (unsigned int g = first_grp; g <= last_grp; ++g)
+        for (unsigned int gp = first_grp; gp <= last_grp; ++gp)
+          production[gp] += F[g][gp];
+
+      // When delayed-neutron data is included, the production matrix is prompt-only and delayed
+      // production is added separately. If the production matrix changes to include delayed
+      // production, adjust this sum to prevent double counting. In adjoint mode F is transposed,
+      // and so is the delayed production.
+      if (include_delayed_production)
+        for (unsigned int gp = first_grp; gp <= last_grp; ++gp)
+          for (unsigned int g = first_grp; g <= last_grp; ++g)
+            production[gp] += adjoint ? ComputeDelayedFissionProduction(xs, gp, g)
+                                      : ComputeDelayedFissionProduction(xs, g, gp);
+    }
 
     // Loop over nodes
     const int num_nodes = transport_view.GetNumNodes();
@@ -89,17 +97,8 @@ ComputeFissionProduction(const LBSProblem& lbs_problem, const std::vector<double
       const auto uk_map = transport_view.MapDOF(i, 0, 0);
       const double IntV_ShapeI = cell_matrices.intV_shapeI(i);
 
-      // Loop over groups
-      for (unsigned int g = first_grp; g <= last_grp; ++g)
-      {
-        const auto& prod = F[g];
-        for (unsigned int gp = 0; gp <= last_grp; ++gp)
-          local_production += prod[gp] * phi[uk_map + gp] * IntV_ShapeI;
-      }
-
-      if (include_delayed_production)
-        for (unsigned int gp = first_grp; gp <= last_grp; ++gp)
-          local_production += delayed_production[gp] * phi[uk_map + gp] * IntV_ShapeI;
+      for (unsigned int gp = first_grp; gp <= last_grp; ++gp)
+        local_production += production[gp] * phi[uk_map + gp] * IntV_ShapeI;
     } // for node
   } // for cell
 
