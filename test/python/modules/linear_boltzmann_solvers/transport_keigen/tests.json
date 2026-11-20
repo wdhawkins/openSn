@@ -1715,5 +1715,141 @@
       {"type": "KeyValuePair", "key": "CMFD_IRREG_CONVERGED", "goldvalue": 1, "abs_tol": 0},
       {"type": "KeyValuePair", "key": "CMFD_IRREG_K_ERR", "goldvalue": 0, "abs_tol": 2e-08}
     ]
+  },
+  {
+    "file": "keigenvalue_transport_3d_cmfd_materials.py",
+    "comment": "Heterogeneous reflecting cube with mixed-material CMFD aggregates must reproduce the exact solution phi = (1, 100), zero higher moments, and k = 1",
+    "outfileprefix": "keigenvalue_transport_3d_cmfd_materials",
+    "num_procs": 1,
+    "checks": [
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_CONVERGED", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_APPLIED_CORRECTIONS_POSITIVE", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_K_ERROR", "goldvalue": 0, "abs_tol": 1e-09},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_FIELD_ERROR", "goldvalue": 0, "abs_tol": 1e-06}
+    ]
+  },
+  {
+    "file": "keigenvalue_transport_3d_cmfd_materials.py",
+    "comment": "Heterogeneous reflecting cube with mixed-material CMFD aggregates must reproduce the exact solution phi = (1, 100), zero higher moments, and k = 1 (2 ranks)",
+    "outfileprefix": "keigenvalue_transport_3d_cmfd_materials_mpi2",
+    "num_procs": 2,
+    "checks": [
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_CONVERGED", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_APPLIED_CORRECTIONS_POSITIVE", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_K_ERROR", "goldvalue": 0, "abs_tol": 1e-09},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_FIELD_ERROR", "goldvalue": 0, "abs_tol": 1e-06}
+    ]
+  },
+  {
+    "file": "keigenvalue_transport_3d_cmfd_materials.py",
+    "comment": "Heterogeneous reflecting cube with mixed-material CMFD aggregates must reproduce the exact solution phi = (1, 100), zero higher moments, and k = 1 (4 ranks)",
+    "outfileprefix": "keigenvalue_transport_3d_cmfd_materials_mpi4",
+    "num_procs": 4,
+    "checks": [
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_CONVERGED", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_APPLIED_CORRECTIONS_POSITIVE", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_K_ERROR", "goldvalue": 0, "abs_tol": 1e-09},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_FIELD_ERROR", "goldvalue": 0, "abs_tol": 1e-06}
+    ]
+  },
+  {
+    "file": "keigenvalue_transport_3d_cmfd_materials.py",
+    "comment": "Heterogeneous reflecting cube with mixed-material CMFD aggregates must reproduce the exact solution phi = (1, 100), zero higher moments, and k = 1 (two fine groups per coarse group)",
+    "outfileprefix": "keigenvalue_transport_3d_cmfd_materials_energy",
+    "num_procs": 2,
+    "args": ["energy_bin=2"],
+    "checks": [
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_CONVERGED", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_APPLIED_CORRECTIONS_POSITIVE", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_K_ERROR", "goldvalue": 0, "abs_tol": 1e-09},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_FIELD_ERROR", "goldvalue": 0, "abs_tol": 1e-06}
+    ]
+  },
+  {
+    "file": "keigenvalue_transport_3d_cmfd_materials.py",
+    "comment": "Heterogeneous reflecting cube with mixed-material CMFD aggregates must reproduce the exact solution phi = (1, 100), zero higher moments, and k = 1 (net closure with relaxation 0.5)",
+    "outfileprefix": "keigenvalue_transport_3d_cmfd_materials_net",
+    "num_procs": 4,
+    "args": ["closure=\"net\"", "relaxation=0.5"],
+    "checks": [
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_CONVERGED", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_APPLIED_CORRECTIONS_POSITIVE", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_K_ERROR", "goldvalue": 0, "abs_tol": 1e-09},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_FIELD_ERROR", "goldvalue": 0, "abs_tol": 1e-06}
+    ]
+  },
+  {
+    "file": "keigenvalue_transport_2d_cmfd_conservation.py",
+    "comment": "Every column sum of the condensed CMFD matrix must equal the cell absorption (exact neutron balance for any trial vector, partial and net closures)",
+    "outfileprefix": "keigenvalue_transport_2d_cmfd_conservation",
+    "num_procs": 1,
+    "checks": [
+      {"type": "KeyValuePair", "key": "CMFD_CONSERVATION_COLUMN_SUM_ERROR", "goldvalue": 0, "abs_tol": 5e-06}
+    ]
+  },
+  {
+    "file": "keigenvalue_transport_2d_cmfd_conservation.py",
+    "comment": "Every column sum of the condensed CMFD matrix must equal the cell absorption with the interface on an MPI boundary (partial and net closures)",
+    "outfileprefix": "keigenvalue_transport_2d_cmfd_conservation_mpi2",
+    "num_procs": 2,
+    "checks": [
+      {"type": "KeyValuePair", "key": "CMFD_CONSERVATION_COLUMN_SUM_ERROR", "goldvalue": 0, "abs_tol": 5e-06}
+    ]
+  },
+  {
+    "file": "keigenvalue_transport_1d_2g_cmfd_uniform_spectrum.py",
+    "comment": "Reflecting uniform two-group medium with the exact solution k = 1 and phi_2 / phi_1 = 100, starting from a flat spectrum",
+    "outfileprefix": "keigenvalue_transport_1d_2g_cmfd_uniform_spectrum",
+    "num_procs": 1,
+    "checks": [
+      {"type": "KeyValuePair", "key": "CMFD_UNIFORM_SPECTRUM_CONVERGED", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_UNIFORM_SPECTRUM_POSITIVE", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_UNIFORM_SPECTRUM_K_ERROR", "goldvalue": 0, "abs_tol": 1e-08},
+      {"type": "KeyValuePair", "key": "CMFD_UNIFORM_SPECTRUM_RATIO_ERROR", "goldvalue": 0, "abs_tol": 1e-07},
+      {"type": "KeyValuePair", "key": "CMFD_UNIFORM_SPECTRUM_SPATIAL_ERROR", "goldvalue": 0, "abs_tol": 1e-07}
+    ]
+  },
+  {
+    "file": "keigenvalue_transport_1d_2g_cmfd_uniform_spectrum.py",
+    "comment": "Reflecting uniform two-group medium with the exact solution k = 1 and phi_2 / phi_1 = 100, starting from a flat spectrum (4 ranks)",
+    "outfileprefix": "keigenvalue_transport_1d_2g_cmfd_uniform_spectrum_mpi4",
+    "num_procs": 4,
+    "checks": [
+      {"type": "KeyValuePair", "key": "CMFD_UNIFORM_SPECTRUM_CONVERGED", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_UNIFORM_SPECTRUM_POSITIVE", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_UNIFORM_SPECTRUM_K_ERROR", "goldvalue": 0, "abs_tol": 1e-08},
+      {"type": "KeyValuePair", "key": "CMFD_UNIFORM_SPECTRUM_RATIO_ERROR", "goldvalue": 0, "abs_tol": 1e-07},
+      {"type": "KeyValuePair", "key": "CMFD_UNIFORM_SPECTRUM_SPATIAL_ERROR", "goldvalue": 0, "abs_tol": 1e-07}
+    ]
+  },
+  {
+    "file": "keigenvalue_transport_1d_2g_cmfd_signed_slab.py",
+    "comment": "Fuel and absorber slab with a negative exact cell-average flux must reproduce an independently assembled DG-S4 eigenpair and pass a frozen-source transport check",
+    "outfileprefix": "keigenvalue_transport_1d_2g_cmfd_signed_slab",
+    "num_procs": 1,
+    "checks": [
+      {"type": "KeyValuePair", "key": "CMFD_SIGNED_SLAB_CONVERGED", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_SIGNED_SLAB_NEGATIVE_LAST_CELL", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_SIGNED_SLAB_K_ERROR", "goldvalue": 0, "abs_tol": 1e-09},
+      {"type": "KeyValuePair", "key": "CMFD_SIGNED_SLAB_CELL_MEAN_ERROR", "goldvalue": 0, "abs_tol": 1e-07},
+      {"type": "KeyValuePair", "key": "CMFD_SIGNED_SLAB_LEAKAGE_ERROR", "goldvalue": 0, "abs_tol": 1e-08},
+      {"type": "KeyValuePair", "key": "CMFD_SIGNED_SLAB_FROZEN_SOURCE_DEFECT", "goldvalue": 0, "abs_tol": 1e-08},
+      {"type": "KeyValuePair", "key": "CMFD_SIGNED_SLAB_FROZEN_SOURCE_K_ERROR", "goldvalue": 0, "abs_tol": 1e-10}
+    ]
+  },
+  {
+    "file": "keigenvalue_transport_1d_2g_cmfd_signed_slab.py",
+    "comment": "Fuel and absorber slab with a negative exact cell-average flux must reproduce an independently assembled DG-S4 eigenpair and pass a frozen-source transport check (2 ranks)",
+    "outfileprefix": "keigenvalue_transport_1d_2g_cmfd_signed_slab_mpi2",
+    "num_procs": 2,
+    "checks": [
+      {"type": "KeyValuePair", "key": "CMFD_SIGNED_SLAB_CONVERGED", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_SIGNED_SLAB_NEGATIVE_LAST_CELL", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_SIGNED_SLAB_K_ERROR", "goldvalue": 0, "abs_tol": 1e-09},
+      {"type": "KeyValuePair", "key": "CMFD_SIGNED_SLAB_CELL_MEAN_ERROR", "goldvalue": 0, "abs_tol": 1e-07},
+      {"type": "KeyValuePair", "key": "CMFD_SIGNED_SLAB_LEAKAGE_ERROR", "goldvalue": 0, "abs_tol": 1e-08},
+      {"type": "KeyValuePair", "key": "CMFD_SIGNED_SLAB_FROZEN_SOURCE_DEFECT", "goldvalue": 0, "abs_tol": 1e-08},
+      {"type": "KeyValuePair", "key": "CMFD_SIGNED_SLAB_FROZEN_SOURCE_K_ERROR", "goldvalue": 0, "abs_tol": 1e-10}
+    ]
   }
 ]
