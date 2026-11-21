@@ -53,7 +53,10 @@ if __name__ == "__main__":
     n_angles = 32
     scat_order = 0
     pi_solver_max_iters = get_option("pi_solver_max_iters", 10000)
-    cmfd_solver_max_iters = get_option("cmfd_solver_max_iters", 2000)
+    # With the partial-current closure, two-cell aggregates and relaxation 0.5, the flux shape
+    # converges by only about 0.999 per update after the eigenvalue has settled. The
+    # fission-source test of the power iteration therefore needs about 3500 updates.
+    cmfd_solver_max_iters = get_option("cmfd_solver_max_iters", 5000)
     k_tolerance = 1.0e-10
     k_agreement_tolerance = 1.0e-7
 

@@ -11,6 +11,8 @@
 #include "framework/parameters/parameter_block.h"
 #include "framework/runtime.h"
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <utility>
@@ -111,4 +113,66 @@ TEST(FissionProductionTest, AnalyticAffineFluxWithDelayedAdjointAndScaledXS)
         EXPECT_NEAR(ComputeFissionProduction(*problem, phi), expected, 5.0e-13);
       }
     }
+}
+
+TEST(FissionProductionTest, NormalizedCellFissionSourcesAndRMSChange)
+{
+  auto [problem, right_xs] = MakeProductionProblem(false, false);
+  const auto& grid = *problem->GetGrid();
+
+  // Unit flux in both groups. Each of the 16 cells has area 1/16. The production per unit flux of
+  // the right material is 1.2 times that of the left, so the normalized source of a cell is
+  // 1 / 17.6 on the left and 1.2 / 17.6 on the right.
+  auto phi = problem->GetPhiNewLocal();
+  std::fill(phi.begin(), phi.end(), 1.0);
+  const auto previous = ComputeNormalizedCellFissionSources(*problem, phi);
+  ASSERT_EQ(previous.size(), grid.GetLocalCellCount());
+  double local_sum = 0.0;
+  for (const auto& cell : grid.GetLocalCells())
+  {
+    const double expected = (cell->block_id == 0 ? 1.0 : 1.2) / 17.6;
+    EXPECT_NEAR(previous[cell->local_id], expected, 1.0e-15);
+    local_sum += previous[cell->local_id];
+  }
+  double global_sum = 0.0;
+  mpi_comm.all_reduce(local_sum, global_sum, mpi::op::sum<double>());
+  EXPECT_NEAR(global_sum, 1.0, 1.0e-14);
+
+  // Doubling the flux on the right gives sources 1 / 27.2 and 2.4 / 27.2. The relative changes are
+  // 17.6 / 27.2 - 1 on the 8 left cells and 2 * 17.6 / 27.2 - 1 on the 8 right cells. Scaling the
+  // whole flux does not change the normalized sources.
+  for (const auto& cell : grid.GetLocalCells())
+    if (cell->block_id == 1)
+    {
+      const auto& transport_view = problem->GetCellTransportViews()[cell->local_id];
+      for (int i = 0; i < transport_view.GetNumNodes(); ++i)
+        for (unsigned int g = 0; g < 2; ++g)
+          phi[transport_view.MapDOF(i, 0, g)] = 2.0;
+    }
+  for (double& value : phi)
+    value *= 3.0;
+  const auto current = ComputeNormalizedCellFissionSources(*problem, phi);
+  const double left_change = 17.6 / 27.2 - 1.0;
+  const double right_change = 2.0 * 17.6 / 27.2 - 1.0;
+  const double expected_rms =
+    std::sqrt(0.5 * (left_change * left_change + right_change * right_change));
+  EXPECT_NEAR(ComputeFissionSourceRMSChange(previous, current), expected_rms, 1.0e-14);
+  EXPECT_EQ(ComputeFissionSourceRMSChange(current, current), 0.0);
+}
+
+TEST(FissionProductionTest, RMSChangeCountsNonpositivePreviousSources)
+{
+  // Only the first entry of each rank has a positive previous source. Its relative change is 0.5,
+  // and all three entries count, so the RMS is sqrt(0.25 / 3) on any number of ranks.
+  const std::vector<double> previous = {1.0, 0.0, -1.0};
+  const std::vector<double> current = {1.5, 7.0, 3.0};
+  EXPECT_NEAR(ComputeFissionSourceRMSChange(previous, current), std::sqrt(0.25 / 3.0), 1.0e-15);
+
+  // A rank without fissionable cells contributes no cells.
+  const std::vector<double> empty;
+  const bool first_rank_only = mpi_comm.rank() == 0;
+  const auto& local_previous = first_rank_only ? previous : empty;
+  const auto& local_current = first_rank_only ? current : empty;
+  EXPECT_NEAR(
+    ComputeFissionSourceRMSChange(local_previous, local_current), std::sqrt(0.25 / 3.0), 1.0e-15);
 }

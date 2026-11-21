@@ -6,7 +6,10 @@
 #include "framework/materials/multi_group_xs/multi_group_xs.h"
 #include "framework/math/spatial_weight_function.h"
 #include "framework/runtime.h"
+#include "framework/utils/error.h"
 #include <cassert>
+#include <cmath>
+#include <cstdint>
 #include <unordered_map>
 
 namespace opensn
@@ -38,10 +41,18 @@ ComputeDelayedFissionProduction(const MultiGroupXS& xs,
   return delayed_production;
 }
 
-double
-ComputeFissionProduction(const LBSProblem& lbs_problem, const std::vector<double>& phi)
+namespace
 {
 
+/**
+ * Global fission production. When cell_sources is given, it receives the unscaled local production
+ * of each fissionable local cell, in local cell order.
+ */
+double
+ComputeFissionProductionImpl(const LBSProblem& lbs_problem,
+                             const std::vector<double>& phi,
+                             std::vector<double>* cell_sources)
+{
   const auto& grid = lbs_problem.GetGrid();
   const auto& cell_transport_views = lbs_problem.GetCellTransportViews();
   const auto& unit_cell_matrices = lbs_problem.GetUnitCellMatrices();
@@ -91,6 +102,7 @@ ComputeFissionProduction(const LBSProblem& lbs_problem, const std::vector<double
     }
 
     // Loop over nodes
+    double cell_production = 0.0;
     const int num_nodes = transport_view.GetNumNodes();
     for (int i = 0; i < num_nodes; ++i)
     {
@@ -98,8 +110,14 @@ ComputeFissionProduction(const LBSProblem& lbs_problem, const std::vector<double
       const double IntV_ShapeI = cell_matrices.intV_shapeI(i);
 
       for (unsigned int gp = first_grp; gp <= last_grp; ++gp)
-        local_production += production[gp] * phi[uk_map + gp] * IntV_ShapeI;
+      {
+        const double value = production[gp] * phi[uk_map + gp] * IntV_ShapeI;
+        local_production += value;
+        cell_production += value;
+      }
     } // for node
+    if (cell_sources)
+      cell_sources->push_back(cell_production);
   } // for cell
 
   // Report a physical rate: curvilinear unit integrals omit the angular extent (2*pi in RZ).
@@ -110,6 +128,55 @@ ComputeFissionProduction(const LBSProblem& lbs_problem, const std::vector<double
   mpi_comm.all_reduce(local_production, global_production, mpi::op::sum<double>());
 
   return global_production;
+}
+
+} // namespace
+
+double
+ComputeFissionProduction(const LBSProblem& lbs_problem, const std::vector<double>& phi)
+{
+  return ComputeFissionProductionImpl(lbs_problem, phi, nullptr);
+}
+
+std::vector<double>
+ComputeNormalizedCellFissionSources(const LBSProblem& lbs_problem, const std::vector<double>& phi)
+{
+  OpenSnLogicalErrorIf(phi.size() != lbs_problem.GetPhiNewLocal().size(),
+                       "Fission-source flux vector size does not match the problem.");
+  std::vector<double> sources;
+  const double production = ComputeFissionProductionImpl(lbs_problem, phi, &sources);
+  OpenSnLogicalErrorIf(not std::isfinite(production) or production <= 0.0,
+                       "Normalized cell fission sources require a positive, finite global fission "
+                       "production.");
+  // The global production includes the curvilinear angular extent, and the cell sources do not.
+  const double scale =
+    IntegralMeasureScale(lbs_problem.GetGrid()->GetCoordinateSystem()) / production;
+  for (auto& value : sources)
+    value *= scale;
+  return sources;
+}
+
+double
+ComputeFissionSourceRMSChange(const std::vector<double>& previous,
+                              const std::vector<double>& current)
+{
+  OpenSnLogicalErrorIf(previous.size() != current.size(),
+                       "Fission-source vectors of successive iterations differ in size.");
+  double local_squared = 0.0;
+  for (std::size_t i = 0; i < previous.size(); ++i)
+    if (previous[i] > 0.0)
+    {
+      const double relative_change = (current[i] - previous[i]) / previous[i];
+      local_squared += relative_change * relative_change;
+    }
+  double global_squared = 0.0;
+  mpi_comm.all_reduce(local_squared, global_squared, mpi::op::sum<double>());
+  const auto local_count = static_cast<std::uint64_t>(previous.size());
+  std::uint64_t global_count = 0;
+  mpi_comm.all_reduce(local_count, global_count, mpi::op::sum<std::uint64_t>());
+  if (global_count == 0)
+    return 0.0;
+  return std::sqrt(global_squared / static_cast<double>(global_count));
 }
 
 double
