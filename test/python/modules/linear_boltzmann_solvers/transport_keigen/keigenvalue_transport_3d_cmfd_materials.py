@@ -17,8 +17,10 @@ relative k change of 1e-12 and the coarse solves are converged to 1e-13, so the
 field error is below 1e-6 and the k error below 1e-9 with a wide margin. The
 partition puts mixed aggregates on every rank at 1, 2, and 4 ranks.
 
-Optional arguments: closure ("partial" or "net"), relaxation, and energy_bin (the
-CMFD group aggregation size).
+Optional arguments: closure ("partial" or "net"), relaxation, energy_bin (the
+CMFD group aggregation size), all_moments (prolong_all_moments), and lagged
+(correct_lagged_angular_flux). The solution has zero higher moments and a constant
+angular flux, so scaling either by the correction ratios keeps the same fixed point.
 """
 import os
 import sys
@@ -105,6 +107,8 @@ acceleration = CMFDAcceleration(
     current_closure=globals().get("closure", "partial"),
     update_wgs_max_its=1,
     relaxation=globals().get("relaxation", 1.0),
+    prolong_all_moments=globals().get("all_moments", False),
+    correct_lagged_angular_flux=globals().get("lagged", False),
     balance_residual_tolerance=1e-12, coarse_solver_policy="direct",
     l_abs_tol=1e-14, l_rel_tol=1e-13, pi_max_its=100, pi_k_tol=1e-13, pi_phi_tol=1e-12)
 solver = PowerIterationKEigenSolver(

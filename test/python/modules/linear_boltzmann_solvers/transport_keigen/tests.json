@@ -398,6 +398,82 @@
     "outfileprefix": "keigenvalue_transport_2d_cmfd_overlay_reactor_lattice"
   },
   {
+    "file": "keigenvalue_transport_2d_cmfd_lagged_flux.py",
+    "comment": "2D 3x3 C5G7 pin lattice with reflecting boundaries and one sweep per CMFD update: the lagged angular flux correction agrees with unaccelerated PI and saves sweeps, which it cannot do if the corrected lagged flux does not reach the next sweep",
+    "num_procs": 1,
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "Python PI k-eigenvalue:",
+        "goldvalue": 1.3347881123,
+        "abs_tol": 1e-08
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Python lagged CMFD-PI k-difference:",
+        "goldvalue": 0.0,
+        "abs_tol": 2e-08
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Python CMFD converged:",
+        "goldvalue": 1,
+        "abs_tol": 0
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Python lagged CMFD converged:",
+        "goldvalue": 1,
+        "abs_tol": 0
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Python lagged/plain sweep ratio:",
+        "goldvalue": 0.8611,
+        "abs_tol": 0.06
+      }
+    ],
+    "outfileprefix": "keigenvalue_transport_2d_cmfd_lagged_flux"
+  },
+  {
+    "file": "keigenvalue_transport_2d_cmfd_lagged_flux.py",
+    "comment": "2D 3x3 C5G7 pin lattice on 4 ranks with reflecting boundaries and one sweep per CMFD update: the lagged angular flux correction agrees with unaccelerated PI and saves sweeps, which it cannot do if the corrected lagged flux does not reach the next sweep",
+    "num_procs": 4,
+    "checks": [
+      {
+        "type": "KeyValuePair",
+        "key": "Python PI k-eigenvalue:",
+        "goldvalue": 1.3347881123,
+        "abs_tol": 1e-08
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Python lagged CMFD-PI k-difference:",
+        "goldvalue": 0.0,
+        "abs_tol": 2e-08
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Python CMFD converged:",
+        "goldvalue": 1,
+        "abs_tol": 0
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Python lagged CMFD converged:",
+        "goldvalue": 1,
+        "abs_tol": 0
+      },
+      {
+        "type": "KeyValuePair",
+        "key": "Python lagged/plain sweep ratio:",
+        "goldvalue": 0.8611,
+        "abs_tol": 0.06
+      }
+    ],
+    "outfileprefix": "keigenvalue_transport_2d_cmfd_lagged_flux_mpi"
+  },
+  {
     "file": "keigenvalue_transport_2d_cmfd_overlay.py",
     "comment": "2D 3x3 UO2 pin lattice on 4 ranks, CMFD on a logical-volume pin overlay agrees with unaccelerated PI",
     "num_procs": 4,
@@ -2180,6 +2256,32 @@
     "outfileprefix": "keigenvalue_transport_3d_cmfd_materials_net",
     "num_procs": 4,
     "args": ["closure=\"net\"", "relaxation=0.5"],
+    "checks": [
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_CONVERGED", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_APPLIED_CORRECTIONS_POSITIVE", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_K_ERROR", "goldvalue": 0, "abs_tol": 1e-09},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_FIELD_ERROR", "goldvalue": 0, "abs_tol": 1e-06}
+    ]
+  },
+  {
+    "file": "keigenvalue_transport_3d_cmfd_materials.py",
+    "comment": "Heterogeneous reflecting cube with mixed-material CMFD aggregates must reproduce the exact solution phi = (1, 100), zero higher moments, and k = 1 (lagged angular flux correction, 2 ranks)",
+    "outfileprefix": "keigenvalue_transport_3d_cmfd_materials_lagged",
+    "num_procs": 2,
+    "args": ["lagged=True"],
+    "checks": [
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_CONVERGED", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_APPLIED_CORRECTIONS_POSITIVE", "goldvalue": 1, "abs_tol": 0},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_K_ERROR", "goldvalue": 0, "abs_tol": 1e-09},
+      {"type": "KeyValuePair", "key": "CMFD_CUBE_FIELD_ERROR", "goldvalue": 0, "abs_tol": 1e-06}
+    ]
+  },
+  {
+    "file": "keigenvalue_transport_3d_cmfd_materials.py",
+    "comment": "Heterogeneous reflecting cube with mixed-material CMFD aggregates must reproduce the exact solution phi = (1, 100), zero higher moments, and k = 1 (lagged angular flux correction and all-moment prolongation, 4 ranks)",
+    "outfileprefix": "keigenvalue_transport_3d_cmfd_materials_full_state",
+    "num_procs": 4,
+    "args": ["lagged=True", "all_moments=True"],
     "checks": [
       {"type": "KeyValuePair", "key": "CMFD_CUBE_CONVERGED", "goldvalue": 1, "abs_tol": 0},
       {"type": "KeyValuePair", "key": "CMFD_CUBE_APPLIED_CORRECTIONS_POSITIVE", "goldvalue": 1, "abs_tol": 0},

@@ -34,7 +34,7 @@ std::vector<double> CMFDRestrictScalarFlux(const DiscreteOrdinatesProblem& do_pr
 /**
  * Count the coarse values whose prolongation ratio would not preserve the sign of the fine flux.
  *
- * CMFDProlongateScalarFluxRatio scales the fine flux of each coarse cell and coarse group by
+ * CMFDApplyFineCellRatios scales the fine flux of each coarse cell and coarse group by
  * `coarse_phi_new / coarse_phi_old`, or by one where the old value is negligible. A ratio that is
  * not finite and positive would change the sign of, or destroy, the fine flux it scales.
  *
@@ -47,15 +47,33 @@ std::size_t CMFDCountSignChangingRatios(const std::vector<double>& coarse_phi_ol
                                         const std::vector<double>& coarse_phi_new);
 
 /**
- * Scale fine scalar-flux moments by coarse-cell, coarse-group ratios.
+ * Compute the CMFD correction ratio coarse_phi_new / coarse_phi_old of every local fine cell.
+ *
+ * The ratio of a fine cell is that of its coarse cell and coarse group, or one where the old
+ * coarse value is negligible. Coarse cells owned by other ranks send their ratios, so the
+ * operation is collective.
+ *
+ * \return Ratios indexed by `fine cell local id * num_coarse_groups + coarse group`.
  */
-void CMFDProlongateScalarFluxRatio(const DiscreteOrdinatesProblem& do_problem,
-                                   unsigned int first_group,
-                                   unsigned int num_groups,
-                                   unsigned int group_aggregation_size,
-                                   const CMFDCoarseMesh& coarse_mesh,
-                                   const std::vector<double>& coarse_phi_old,
-                                   const std::vector<double>& coarse_phi_new,
-                                   std::vector<double>& phi);
+std::vector<double> CMFDComputeFineCellRatios(const DiscreteOrdinatesProblem& do_problem,
+                                              unsigned int num_groups,
+                                              unsigned int group_aggregation_size,
+                                              const CMFDCoarseMesh& coarse_mesh,
+                                              const std::vector<double>& coarse_phi_old,
+                                              const std::vector<double>& coarse_phi_new);
+
+/**
+ * Scale the fine flux moments by the fine-cell ratios of CMFDComputeFineCellRatios.
+ *
+ * Only the scalar moment is scaled unless `all_moments` is true. Scaling every moment by the same
+ * ratio scales the angular flux of the cell, so the moments keep their ratios to one another.
+ */
+void CMFDApplyFineCellRatios(const DiscreteOrdinatesProblem& do_problem,
+                             unsigned int first_group,
+                             unsigned int num_groups,
+                             unsigned int group_aggregation_size,
+                             const std::vector<double>& fine_cell_ratios,
+                             bool all_moments,
+                             std::vector<double>& phi);
 
 } // namespace opensn

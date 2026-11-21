@@ -3139,6 +3139,15 @@ WrapDiscreteOrdinatesKEigenAcceleration(py::module& slv)
         by ``1 - rho``, with the convergence rate ``rho`` estimated from successive changes. The
         coarse power iteration stops when both ``pi_k_tol`` and ``pi_phi_tol`` are met (at least
         two iterations) or after ``pi_max_its`` iterations.
+    prolong_all_moments: bool, default=False
+        Developer/debug. Scale every flux moment, not only the scalar flux, by the CMFD
+        correction ratio of its coarse cell and coarse group. This scales the angular flux of
+        each fine cell and keeps the ratios of its moments.
+    correct_lagged_angular_flux: bool, default=False
+        Developer/debug. Scale the lagged angular fluxes that the next sweep reads by the CMFD
+        correction ratio of the coarse cell and coarse group of the cell that reads them. These
+        are the incoming fluxes of reflecting boundaries and the fluxes of broken sweep cycles.
+        Without the correction they keep the uncorrected transport iterate.
     correction_max_attempts: int, default=10
         Developer/debug. Maximum CMFD correction damping attempts before skipping the
         correction for the current transport update. Each failed attempt halves the

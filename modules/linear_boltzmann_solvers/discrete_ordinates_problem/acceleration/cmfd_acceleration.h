@@ -154,6 +154,8 @@ private:
   void ComputeCoarseScattering(const CoarseCellXS& coarse_xs, std::vector<double>& matrix) const;
   /// Condense the production matrix; return false, with a zero matrix, if nothing is fissionable.
   bool ComputeCoarseProduction(const CoarseCellXS& coarse_xs, std::vector<double>& matrix) const;
+  /// Scale the lagged angular fluxes by the fine-cell ratios of CMFDComputeFineCellRatios.
+  void ScaleLaggedAngularFlux(const std::vector<double>& fine_cell_ratios);
   /// Assemble the coarse operator without setting up the coarse linear solver.
   OperatorSignCounts AssembleOperator();
   void AssembleRHS(Vec rhs, double k_eff, const std::vector<double>& coarse_source_phi) const;
@@ -203,6 +205,8 @@ private:
   const bool allow_mixed_material_aggregation_;
   const unsigned int group_aggregation_size_;
   const double relaxation_;
+  const bool prolong_all_moments_;
+  const bool correct_lagged_angular_flux_;
   const unsigned int correction_max_attempts_;
   const double correction_min_damping_;
   const unsigned int inactive_iterations_;

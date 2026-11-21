@@ -280,6 +280,19 @@ CMFDAcceleration::GetInputParameters()
     "limiter may damp or skip an individual correction if the requested correction is not "
     "admissible.");
   params.AddOptionalParameter(
+    "prolong_all_moments",
+    false,
+    "[developer/debug] Scale every flux moment, not only the scalar flux, by the CMFD correction "
+    "ratio of its coarse cell and coarse group. This scales the angular flux of each fine cell "
+    "and keeps the ratios of its moments.");
+  params.AddOptionalParameter(
+    "correct_lagged_angular_flux",
+    false,
+    "[developer/debug] Scale the lagged angular fluxes that the next sweep reads by the CMFD "
+    "correction ratio of the coarse cell and coarse group of the cell that reads them. These are "
+    "the incoming fluxes of reflecting boundaries and the fluxes of broken sweep cycles. Without "
+    "the correction they keep the uncorrected transport iterate.");
+  params.AddOptionalParameter(
     "correction_max_attempts",
     10,
     "[developer/debug] Maximum CMFD correction damping attempts before skipping the "
@@ -420,6 +433,8 @@ CMFDAcceleration::CMFDAcceleration(const InputParameters& params)
     group_aggregation_size_(
       static_cast<unsigned int>(params.GetParamValue<int>("group_aggregation_size"))),
     relaxation_(params.GetParamValue<double>("relaxation")),
+    prolong_all_moments_(params.GetParamValue<bool>("prolong_all_moments")),
+    correct_lagged_angular_flux_(params.GetParamValue<bool>("correct_lagged_angular_flux")),
     correction_max_attempts_(params.GetParamValue<unsigned int>("correction_max_attempts")),
     correction_min_damping_(params.GetParamValue<double>("correction_min_damping")),
     inactive_iterations_(params.GetParamValue<unsigned int>("inactive_iterations")),
@@ -2277,6 +2292,45 @@ CMFDAcceleration::AnalyzeFluxUpdate(const std::vector<double>& phi, const double
   return diagnostics;
 }
 
+void
+CMFDAcceleration::ScaleLaggedAngularFlux(const std::vector<double>& fine_cell_ratios)
+{
+  const auto& grid = *do_problem_.GetGrid();
+  OpenSnLogicalErrorIf(fine_cell_ratios.size() != grid.GetLocalCellCount() * num_coarse_groups_,
+                       "CMFD lagged-flux ratio vector size mismatch.");
+  const auto last_group = first_group_ + num_groups_;
+  for (const auto& groupset : do_problem_.GetGroupsets())
+  {
+    if (groupset.last_group < first_group_ or groupset.first_group >= last_group or
+        not groupset.angle_agg)
+      continue;
+    // The ratio of the cell that reads a lagged value scales it in every direction. Groups
+    // outside the accelerated range keep their values.
+    const auto ratio = [&](std::uint32_t cell_local_id,
+                           unsigned int /*face*/,
+                           unsigned int /*face_node*/,
+                           unsigned int group_idx)
+    {
+      const auto group = groupset.first_group + group_idx;
+      if (group < first_group_ or group >= last_group)
+        return 1.0;
+      const auto coarse_group = (group - first_group_) / group_aggregation_size_;
+      return fine_cell_ratios[static_cast<std::size_t>(cell_local_id) * num_coarse_groups_ +
+                              coarse_group];
+    };
+    const auto scales = groupset.angle_agg->MapNodalValuesToDelayedAngularDOFs(ratio);
+    auto psi = groupset.angle_agg->GetNewDelayedAngularDOFsAsSTLVector();
+    OpenSnLogicalErrorIf(scales.size() != psi.size(),
+                         "CMFD lagged-flux scales differ in size from the delayed storage.");
+    for (std::size_t i = 0; i < psi.size(); ++i)
+      psi[i] *= scales[i];
+    groupset.angle_agg->SetNewDelayedAngularDOFsFromSTLVector(psi);
+    // The next within-group solve starts from the old values, and the copy of phi_new to phi_old
+    // after the update does not carry delayed fluxes. Copy them here.
+    groupset.angle_agg->SetDelayedPsiNew2Old();
+  }
+}
+
 double
 CMFDAcceleration::ApplyFluxCorrectionWithDamping(const std::vector<double>& transport_phi_new,
                                                  const std::vector<double>& coarse_phi,
@@ -2331,14 +2385,19 @@ CMFDAcceleration::ApplyFluxCorrectionWithDamping(const std::vector<double>& tran
     }
 
     auto candidate_phi_new = transport_phi_new;
-    CMFDProlongateScalarFluxRatio(do_problem_,
-                                  first_group_,
-                                  num_groups_,
-                                  group_aggregation_size_,
-                                  coarse_mesh_,
-                                  coarse_phi_new_,
-                                  candidate_coarse_phi,
-                                  candidate_phi_new);
+    const auto fine_cell_ratios = CMFDComputeFineCellRatios(do_problem_,
+                                                            num_groups_,
+                                                            group_aggregation_size_,
+                                                            coarse_mesh_,
+                                                            coarse_phi_new_,
+                                                            candidate_coarse_phi);
+    CMFDApplyFineCellRatios(do_problem_,
+                            first_group_,
+                            num_groups_,
+                            group_aggregation_size_,
+                            fine_cell_ratios,
+                            prolong_all_moments_,
+                            candidate_phi_new);
     const double candidate_fission_production =
       ComputeFissionProduction(do_problem_, candidate_phi_new);
     const double candidate_k_eff =
@@ -2347,6 +2406,8 @@ CMFDAcceleration::ApplyFluxCorrectionWithDamping(const std::vector<double>& tran
     if (not diagnostics.has_invalid_k and not diagnostics.has_nonfinite_flux)
     {
       phi_new_local_ = std::move(candidate_phi_new);
+      if (correct_lagged_angular_flux_)
+        ScaleLaggedAngularFlux(fine_cell_ratios);
       applied_damping = damping;
       ++attempts;
       return candidate_k_eff;

@@ -435,6 +435,21 @@ defaults.
   Increase this only when debugging startup behavior where
   very early CMFD corrections are repeatedly rejected.
 
+``prolong_all_moments`` and ``correct_lagged_angular_flux``
+  Developer options that extend the CMFD correction beyond the scalar flux. By
+  default the correction scales only the scalar flux of each fine cell by the
+  ratio of the corrected to the uncorrected coarse flux. ``prolong_all_moments``
+  scales every flux moment by the same ratio, which scales the angular flux of
+  the cell. ``correct_lagged_angular_flux`` scales the lagged angular fluxes
+  that the next sweep reads, the incoming fluxes of reflecting boundaries and
+  the fluxes of broken sweep cycles, by the ratio of the cell that reads them.
+  Without it, those fluxes keep the uncorrected transport iterate. Problems
+  with reflecting boundaries on opposite sides, such as a lattice cell, have
+  many lagged fluxes. The correction matters most with one sweep per update
+  (``update_wgs_max_its=1``). With more sweeps per update, the sweeps refresh
+  the lagged fluxes before the next correction, and the option changes little.
+  Both options are off by default.
+
 ``correction_max_attempts``, ``correction_min_damping``
   Internal correction-limiter controls. They set how many times a rejected
   correction is halved before it is skipped. A correction is rejected when it
